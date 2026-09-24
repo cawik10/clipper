@@ -86,9 +86,7 @@ export async function downloadVideo(
     "--cookies", path.join(process.cwd(), "youtube-cookies.txt"),
     "--extractor-args", "youtube:player_client=android,web",
     "-o", outputTemplate,
-    "--format", hasFFmpeg
-      ? "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
-      : "best[height<=720]/best",
+    "--format", hasFFmpeg ? "bestvideo[height<=1080]+bestaudio/best" : "best",
     "--merge-output-format", "mp4",
     "--no-playlist",
     "--restrict-filenames",
