@@ -83,11 +83,11 @@ export async function downloadVideo(
 
   const args = [
     url,
-    "--cookies", path.join(process.cwd(), "youtube-cookies.txt"),
-    "--extractor-args", "youtube:player_client=android,web",
+    // Kita matikan sementara cookies dengan memberikan tanda komentar
+    // "--cookies", path.join(process.cwd(), "youtube-cookies.txt"),
+    "--extractor-args", "youtube:player_client=android", 
     "-o", outputTemplate,
-    "--format", hasFFmpeg ? "bestvideo[height<=1080]+bestaudio/best" : "best",
-    "--merge-output-format", "mp4",
+    "--format", "b", 
     "--no-playlist",
     "--restrict-filenames",
     "--write-info-json",
