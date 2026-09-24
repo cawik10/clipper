@@ -84,6 +84,7 @@ export async function downloadVideo(
   const args = [
     url,
     "--cookies", path.join(process.cwd(), "youtube-cookies.txt"),
+    "--extractor-args", "youtube:player_client=android,web",
     "-o", outputTemplate,
     "--format", hasFFmpeg
       ? "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
