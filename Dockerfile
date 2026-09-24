@@ -23,7 +23,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
-RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npm run build
+RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" TELEGRAM_BOT_TOKEN="dummy_token_for_build" npm run build
 
 # Production stage
 FROM base AS runner
