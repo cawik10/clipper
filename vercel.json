@@ -1,0 +1,37 @@
+{
+  "functions": {
+    "src/app/api/telegram/webhook/route.ts": {
+      "memory": 3008,
+      "maxDuration": 300
+    },
+    "src/app/api/youtube/callback/route.ts": {
+      "memory": 1024,
+      "maxDuration": 30
+    },
+    "src/app/api/health/route.ts": {
+      "memory": 256,
+      "maxDuration": 10
+    },
+    "src/app/api/webhook/setup/route.ts": {
+      "memory": 256,
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/webhook",
+      "destination": "/api/telegram/webhook"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ]
+}
