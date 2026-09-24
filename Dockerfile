@@ -9,7 +9,7 @@ RUN apk add --no-cache \
     ca-certificates
 
 # Install yt-dlp
-RUN pip3 install yt-dlp --break-system-packages || pip3 install yt-dlp
+RUN pip3 install -U yt-dlp --break-system-packages || pip3 install -U yt-dlp
 
 # Dependencies stage
 FROM base AS deps
