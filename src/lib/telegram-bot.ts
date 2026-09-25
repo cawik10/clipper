@@ -335,15 +335,15 @@ async function processJobWithUpdates(
         if (!clip.filePath || !fs.existsSync(clip.filePath)) continue;
 
         const caption = [
-          `🎬 *Klip ${i + 1}/${successClips.length}*`,
+          `🎬 <b>Klip ${i + 1}/${successClips.length}</b>`,
           ``,
-          `📝 *${clip.title}*`,
+          `📝 <b>${clip.title}</b>`,
           ``,
           `⏱ Durasi: ${clip.duration}s`,
           `🔥 Viral Score: ${clip.viralScore}/10`,
           `💡 ${clip.reason}`,
           clip.youtubeUrl ? `\n🔗 YouTube: ${clip.youtubeUrl}` : "",
-          clip.youtubeUrl ? `_(Tersimpan sebagai Draft di YouTube Studio)_` : ``,
+          clip.youtubeUrl ? `<i>(Tersimpan sebagai Draft di YouTube Studio)</i>` : ``,
         ]
           .join("\n")
           .trim();
@@ -351,7 +351,7 @@ async function processJobWithUpdates(
         try {
           await ctx.api.sendVideo(chatId, new InputFile(clip.filePath), {
             caption,
-            parse_mode: "Markdown",
+            parse_mode: "HTML", // <- Ubah Markdown menjadi HTML di sini
             supports_streaming: true,
           });
         } catch (err) {
