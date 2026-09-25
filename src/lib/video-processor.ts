@@ -323,6 +323,7 @@ export async function cutVideoClip(
     "-i", `"${sourceFile}"`,
     "-t", duration.toString(),
     makeVertical ? filterComplex : filterComplex,
+    "-threads", "2", // Tambahkan pembatas CPU/RAM ini
     "-c:v", "libx264",
     "-preset", "fast",
     "-crf", "23",
