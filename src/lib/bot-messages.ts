@@ -39,15 +39,15 @@ Kirim link video untuk mulai! 🎬`,
 6. *Upload* - Langsung upload ke YouTube Studio
 
 *Format Output 9:16:*
-• 🌀 Mode aktif bisa diubah via ASPECT_RATIO_MODE
+• 🌀 Mode aktif bisa diubah via \`ASPECT_RATIO_MODE\`
 • blur = background blur (tidak bolong, rekomendasi)
 • crop = center crop (full layar)
 • pad = black bars (mode lama)
 
 *Thumbnail Config:*
-• THUMBNAIL_ENABLED=true (aktif default)
-• THUMBNAIL_MODE=middle | best | start | custom
-• THUMBNAIL_QUALITY=5 (1-31, makin kecil makin bagus)
+• \`THUMBNAIL_ENABLED=true\` (aktif default)
+• \`THUMBNAIL_MODE=middle\` | \`best\` | \`start\` | \`custom\`
+• \`THUMBNAIL_QUALITY=5\` (1-31, makin kecil makin bagus)
 
 *Ketentuan:*
 • Durasi klip: 20-40 detik (optimal untuk Shorts)
