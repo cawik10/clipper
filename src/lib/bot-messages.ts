@@ -18,6 +18,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 /status - Cek status pekerjaan
 /settings - Pengaturan bot
 /history - Riwayat klip
+/thumbnail - Info konfigurasi thumbnail
 
 Kirim link video untuk mulai! 🎬`,
 
@@ -34,13 +35,19 @@ Kirim link video untuk mulai! 🎬`,
 2. *Transkripsi* - Audio ditranskripsi ke teks
 3. *Analisis AI* - Momen viral diidentifikasi
 4. *Pemotongan* - Video dipotong (20-40 detik)
-5. *Upload* - Langsung upload ke YouTube Studio
+5. *Thumbnail* - Thumbnail auto-generate dari klip
+6. *Upload* - Langsung upload ke YouTube Studio
 
 *Format Output 9:16:*
 • 🌀 Mode aktif bisa diubah via ASPECT_RATIO_MODE
 • blur = background blur (tidak bolong, rekomendasi)
 • crop = center crop (full layar)
 • pad = black bars (mode lama)
+
+*Thumbnail Config:*
+• THUMBNAIL_ENABLED=true (aktif default)
+• THUMBNAIL_MODE=middle | best | start | custom
+• THUMBNAIL_QUALITY=5 (1-31, makin kecil makin bagus)
 
 *Ketentuan:*
 • Durasi klip: 20-40 detik (optimal untuk Shorts)
@@ -50,9 +57,11 @@ Kirim link video untuk mulai! 🎬`,
 *Perintah Berguna:*
 /connect - Login YouTube Studio
 /settings - Ubah pengaturan
+/thumbnail - Info thumbnail config
 /cancel - Batalkan proses
 
-*Tips:* Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
+*Tips:*
+Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
 
   connecting: `🔗 *Menghubungkan YouTube Studio...*
 
@@ -66,6 +75,7 @@ Setelah login, klip akan otomatis tersimpan sebagai Draft di YouTube Studio.`,
 
   processing: (url: string, platform: string) =>
     `⚙️ *Memproses Video...*
+
 🔗 URL: \`${url.slice(0, 50)}${url.length > 50 ? "..." : ""}\`
 📱 Platform: ${getPlatformEmoji(platform)} ${platform.toUpperCase()}
 
@@ -73,6 +83,7 @@ Status: Menunggu dalam antrian...`,
 
   downloading: (progress: number) =>
     `⬇️ *Mengunduh Video...*
+
 Progress: ${createProgressBar(progress)} ${progress.toFixed(0)}%`,
 
   analyzing: `🧠 *Menganalisis Video dengan AI...*
@@ -82,15 +93,18 @@ Ini mungkin membutuhkan waktu 1-2 menit.`,
 
   clipping: (current: number, total: number) =>
     `✂️ *Memotong Video...*
+
 Memproses klip ${current}/${total}
 ${createProgressBar((current / total) * 100)}`,
 
   uploading: (current: number, total: number) =>
     `📤 *Mengupload ke YouTube Studio...*
+
 Mengupload klip ${current}/${total} sebagai Draft...`,
 
   clipFound: (clips: number) =>
     `🎯 *${clips} Momen Viral Ditemukan!*
+
 AI berhasil mengidentifikasi ${clips} klip terbaik.
 Sedang memotong dan memproses video...`,
 
@@ -159,18 +173,23 @@ Video terlalu pendek untuk menghasilkan klip yang optimal.`,
       duration: number;
       youtubeUrl?: string;
       viralScore: number;
+      hasThumbnail?: boolean;
     }[]
   ) => {
     let msg = `🎉 *Proses Selesai!*\n\n`;
     msg += `Berhasil membuat ${clips.length} klip YouTube Shorts:\n\n`;
+
     clips.forEach((clip, i) => {
       msg += `*Klip ${i + 1}:* ${clip.title.slice(0, 50)}\n`;
-      msg += `⏱ Durasi: ${clip.duration}s | 🔥 Viral Score: ${clip.viralScore}/10\n`;
+      msg += `⏱ Durasi: ${clip.duration}s | 🔥 Viral Score: ${clip.viralScore}/10`;
+      if (clip.hasThumbnail) msg += ` | 🖼 Thumbnail ✅`;
+      msg += `\n`;
       if (clip.youtubeUrl) {
         msg += `🔗 ${clip.youtubeUrl}\n`;
       }
       msg += "\n";
     });
+
     msg += `📺 Cek YouTube Studio untuk melihat Draft!`;
     return msg;
   },
@@ -188,7 +207,10 @@ export function getPlatformEmoji(platform: string): string {
   return emojis[platform.toLowerCase()] || "🌐";
 }
 
-export function createProgressBar(percent: number, length: number = 10): string {
+export function createProgressBar(
+  percent: number,
+  length: number = 10
+): string {
   const filled = Math.round((percent / 100) * length);
   const empty = length - filled;
   return `[${"█".repeat(filled)}${"░".repeat(empty)}]`;

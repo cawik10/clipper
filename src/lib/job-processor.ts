@@ -1,11 +1,15 @@
 import { db } from "@/db";
-import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
+import {
+  clipJobs,
+  youtubeTokens,
+  userSettings,
+  ClipResult,
+} from "@/db/schema";
 import { eq } from "drizzle-orm";
 import {
   downloadVideo,
   transcribeAudio,
   processClips,
-  cleanupJobDir,
 } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
 import {
@@ -55,7 +59,6 @@ export async function processJob(
       .update(clipJobs)
       .set({ status: "downloading", updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
-
     await update("downloading", "⬇️ Mengunduh video...");
 
     let downloadResult: { filePath: string; title: string; duration: number };
@@ -93,7 +96,6 @@ export async function processJob(
       .update(clipJobs)
       .set({ status: "analyzing", updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
-
     await update("analyzing", "🎙️ Mentranskripsi audio...");
 
     let transcript: { start: number; end: number; text: string }[] = [];
@@ -111,7 +113,7 @@ export async function processJob(
 
     let analysisClips: Omit<
       ClipResult,
-      "filePath" | "youtubeVideoId" | "youtubeUrl"
+      "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl"
     >[];
     try {
       analysisClips = await analyzeVideoForClips(
@@ -140,7 +142,7 @@ export async function processJob(
 
     await update("analyzing", `🎯 ${analysisClips.length} momen viral ditemukan!`);
 
-    // === STEP 4: CLIP ===
+    // === STEP 4: CLIP + THUMBNAIL ===
     await db
       .update(clipJobs)
       .set({ status: "clipping", updatedAt: new Date() })
@@ -152,9 +154,21 @@ export async function processJob(
       jobId,
       true, // makeVertical — mode dikontrol via ASPECT_RATIO_MODE env var
       async (clipIndex, total) => {
-        await update("clipping", `✂️ Memotong klip ${clipIndex + 1}/${total}...`);
+        await update(
+          "clipping",
+          `✂️ Memotong klip ${clipIndex + 1}/${total}...`
+        );
       }
     );
+
+    // Update progress after thumbnail generation
+    const thumbnailCount = processedClips.filter((c) => c.thumbnailPath).length;
+    if (thumbnailCount > 0) {
+      await update(
+        "clipping",
+        `🖼 ${thumbnailCount} thumbnail berhasil di-generate!`
+      );
+    }
 
     const successfulClips = processedClips.filter((c) => c.filePath);
 
@@ -180,7 +194,6 @@ export async function processJob(
 
     if (tokenRows.length > 0) {
       const tokenRow = tokenRows[0];
-
       let { accessToken, refreshToken } = tokenRow;
 
       if (isTokenExpired(tokenRow.expiresAt)) {
@@ -200,7 +213,10 @@ export async function processJob(
         }
       }
 
-      await update("uploading", "📤 Mengupload ke YouTube Studio sebagai Draft...");
+      await update(
+        "uploading",
+        "📤 Mengupload ke YouTube Studio sebagai Draft..."
+      );
 
       const uploadResults = await uploadClipsToYouTube(
         successfulClips,

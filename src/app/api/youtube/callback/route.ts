@@ -1,26 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { youtubeTokens, userSettings } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { exchangeCodeForTokens } from "@/lib/youtube-oauth";
+import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const code = req.nextUrl.searchParams.get("code");
-  const state = req.nextUrl.searchParams.get("state"); // telegramUserId
-  const error = req.nextUrl.searchParams.get("error");
+  const { searchParams } = req.nextUrl;
+  const code = searchParams.get("code");
+  const state = searchParams.get("state"); // This is the telegramUserId
+  const error = searchParams.get("error");
 
   if (error) {
     return new NextResponse(
-      `<html><body><h2>❌ OAuth Error: ${error}</h2><p>Kembali ke Telegram dan coba lagi.</p></body></html>`,
+      `<html><body><h2>❌ Auth Error: ${error}</h2><p>Silakan coba lagi di Telegram.</p></body></html>`,
       { headers: { "Content-Type": "text/html" } }
     );
   }
 
   if (!code || !state) {
     return new NextResponse(
-      `<html><body><h2>❌ Missing Parameters</h2><p>Code atau state tidak ditemukan.</p></body></html>`,
+      `<html><body><h2>❌ Invalid callback</h2><p>Parameter code atau state tidak ditemukan.</p></body></html>`,
       { headers: { "Content-Type": "text/html" } }
     );
   }
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
     const tokens = await exchangeCodeForTokens(code);
 
     if (!tokens.access_token || !tokens.refresh_token) {
-      throw new Error("Invalid tokens received from Google");
+      throw new Error("Tokens tidak lengkap dari Google");
     }
 
     const expiresAt = tokens.expiry_date
@@ -69,16 +70,16 @@ export async function GET(req: NextRequest) {
       .set({ youtubeConnected: true, updatedAt: new Date() })
       .where(eq(userSettings.telegramUserId, state));
 
-    // Send confirmation message via Telegram bot
+    // Notify user via Telegram
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    if (botToken && state) {
+    if (botToken) {
       try {
         await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             chat_id: state,
-            text: "✅ *YouTube Berhasil Terhubung!*\n\nAkun YouTube Anda sudah terhubung.\nKirim link video untuk mulai membuat Shorts! 🎬",
+            text: "✅ *YouTube berhasil terhubung!*\n\nKini klip video kamu akan otomatis diupload ke YouTube Studio sebagai Draft.\n\nKirim link video untuk mulai! 🎬",
             parse_mode: "Markdown",
           }),
         });
@@ -93,13 +94,13 @@ export async function GET(req: NextRequest) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YouTube Terhubung - AutoClip Bot</title>
+  <title>YouTube Terhubung!</title>
   <style>
-    body { font-family: -apple-system, sans-serif; background: #0f0f0f; color: #fff; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    body { font-family: Arial, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0f0f0f; color: white; }
     .card { background: #1a1a2e; border: 1px solid #16213e; border-radius: 16px; padding: 40px; text-align: center; max-width: 400px; }
     .icon { font-size: 64px; margin-bottom: 16px; }
     h1 { color: #4ade80; margin: 0 0 12px; }
-    p { color: #9ca3af; margin: 0; }
+    p { color: #94a3b8; margin: 0; line-height: 1.6; }
   </style>
 </head>
 <body>
@@ -115,8 +116,8 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error("OAuth callback error:", err);
     return new NextResponse(
-      `<html><body><h2>❌ Error: ${err instanceof Error ? err.message : String(err)}</h2></body></html>`,
-      { headers: { "Content-Type": "text/html" }, status: 500 }
+      `<html><body><h2>❌ Error</h2><p>${err instanceof Error ? err.message : String(err)}</p></body></html>`,
+      { headers: { "Content-Type": "text/html" } }
     );
   }
 }

@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { clipJobs } from "@/db/schema";
 import { sql } from "drizzle-orm";
-import { getAspectRatioMode, getModeLabel } from "@/lib/video-config";
+import {
+  getAspectRatioMode,
+  getModeLabel,
+  getThumbnailConfig,
+  getThumbnailModeLabel,
+} from "@/lib/video-config";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +23,7 @@ export async function GET() {
     const groqKey = process.env.GROQ_API_KEY;
 
     const aspectRatioMode = getAspectRatioMode();
+    const thumbConfig = getThumbnailConfig();
 
     return NextResponse.json({
       status: "ok",
@@ -48,7 +54,25 @@ export async function GET() {
           env_var: "ASPECT_RATIO_MODE",
           available_modes: ["blur", "crop", "pad", "stretch", "none"],
           description:
-            "Set ASPECT_RATIO_MODE env var to change 9:16 conversion mode. 'blur' = background blur (recommended, no black bars).",
+            "Set ASPECT_RATIO_MODE env var to change 9:16 conversion mode. 'blur' = background blur (recommended).",
+        },
+        thumbnail: {
+          enabled: thumbConfig.enabled,
+          mode: thumbConfig.mode,
+          mode_label: getThumbnailModeLabel(thumbConfig.mode),
+          quality: thumbConfig.quality,
+          width: thumbConfig.width,
+          height: thumbConfig.height,
+          env_vars: {
+            THUMBNAIL_ENABLED: "true | false (default: true)",
+            THUMBNAIL_MODE: "middle | best | start | custom (default: middle)",
+            THUMBNAIL_QUALITY: "1-31, makin kecil makin bagus (default: 5)",
+            THUMBNAIL_WIDTH: "lebar output (default: 1280)",
+            THUMBNAIL_HEIGHT: "tinggi output (default: 720, 0=auto)",
+            THUMBNAIL_OFFSET_SECONDS: "offset detik untuk mode custom (default: 5)",
+          },
+          description:
+            "Auto-generate thumbnail dari setiap klip menggunakan FFmpeg. Mudah dikonfigurasi via env vars di Railway.",
         },
       },
     });

@@ -1,5 +1,8 @@
 import fs from "fs";
-import { getYouTubeClient, getOAuth2ClientWithCredentials } from "@/lib/youtube-oauth";
+import {
+  getYouTubeClient,
+  getOAuth2ClientWithCredentials,
+} from "@/lib/youtube-oauth";
 import { ClipResult } from "@/db/schema";
 
 export interface UploadOptions {
@@ -85,7 +88,7 @@ export async function uploadToYouTube(
       },
     },
     {
-      onUploadProgress: (evt) => {
+      onUploadProgress: (evt: { bytesRead: number }) => {
         const pct = Math.round((evt.bytesRead / fileSize) * 100);
         process.stdout.write(`\rUpload progress: ${pct}%`);
       },
@@ -93,11 +96,10 @@ export async function uploadToYouTube(
   );
 
   process.stdout.write("\n");
-
   const videoId = response.data.id!;
   const videoUrl = `https://www.youtube.com/shorts/${videoId}`;
-  console.log(`Upload complete: ${videoUrl}`);
 
+  console.log(`Upload complete: ${videoUrl}`);
   return { videoId, videoUrl, title };
 }
 
@@ -111,13 +113,14 @@ export async function uploadClipsToYouTube(
     clipIndex: number,
     result: UploadResult | null,
     error?: string
-  ) => void
+  ) => Promise<void>
 ): Promise<(UploadResult | null)[]> {
   const results: (UploadResult | null)[] = [];
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
-    if (!clip.filePath || !fs.existsSync(clip.filePath)) {
+
+    if (!clip.filePath) {
       results.push(null);
       continue;
     }
@@ -136,7 +139,7 @@ export async function uploadClipsToYouTube(
       );
 
       results.push(result);
-      if (onProgress) onProgress(i, result);
+      if (onProgress) await onProgress(i, result);
 
       // Small delay between uploads
       if (i < clips.length - 1) {
@@ -146,7 +149,7 @@ export async function uploadClipsToYouTube(
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`Failed to upload clip ${i}:`, err);
       results.push(null);
-      if (onProgress) onProgress(i, null, errorMsg);
+      if (onProgress) await onProgress(i, null, errorMsg);
     }
   }
 

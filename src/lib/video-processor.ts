@@ -5,7 +5,15 @@ import path from "path";
 import os from "os";
 import { ClipResult } from "@/db/schema";
 import type { TranscriptSegment } from "@/lib/ai-analyzer";
-import { getAspectRatioMode, buildFFmpegFilterArgs, getModeLabel, type AspectRatioMode } from "@/lib/video-config";
+import {
+  getAspectRatioMode,
+  buildFFmpegFilterArgs,
+  getModeLabel,
+  type AspectRatioMode,
+} from "@/lib/video-config";
+import {
+  generateThumbnailsForClips,
+} from "@/lib/thumbnail-generator";
 
 export type { TranscriptSegment };
 
@@ -131,7 +139,9 @@ export async function downloadVideo(
       const videoFile = files.find(
         (f) =>
           f.startsWith("source") &&
-          (f.endsWith(".mp4") || f.endsWith(".mkv") || f.endsWith(".webm"))
+          (f.endsWith(".mp4") ||
+            f.endsWith(".mkv") ||
+            f.endsWith(".webm"))
       );
 
       if (!videoFile) {
@@ -209,7 +219,9 @@ export async function transcribeAudio(
 
       const audioStream = fs.createReadStream(audioPath);
       const transcription = await openai.audio.transcriptions.create({
-        file: audioStream as Parameters<typeof openai.audio.transcriptions.create>[0]["file"],
+        file: audioStream as Parameters<
+          typeof openai.audio.transcriptions.create
+        >[0]["file"],
         model: "whisper-1",
         response_format: "verbose_json",
         timestamp_granularities: ["segment"],
@@ -295,16 +307,6 @@ async function transcribeWithGroq(
 
 /**
  * Cut video clip using FFmpeg dengan mode aspect ratio yang bisa dikonfigurasi.
- *
- * Mode dikontrol via env var ASPECT_RATIO_MODE:
- *   - blur    → background blur (default, tidak bolong)
- *   - crop    → center crop
- *   - pad     → black bars
- *   - stretch → stretch paksa
- *   - none    → keep original
- *
- * makeVertical=true  → gunakan mode dari env (default: blur)
- * makeVertical=false → keep original (mode=none)
  */
 export async function cutVideoClip(
   sourceFile: string,
@@ -321,70 +323,101 @@ export async function cutVideoClip(
   const duration = endTime - startTime;
   const mode: AspectRatioMode = makeVertical ? getAspectRatioMode() : "none";
 
-  console.log(`[video-processor] Mode 9:16: ${getModeLabel(mode)} (makeVertical=${makeVertical})`);
+  console.log(
+    `[video-processor] Mode 9:16: ${getModeLabel(mode)} (makeVertical=${makeVertical})`
+  );
 
   const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
 
   let cmd: string;
-
   if (useFilterComplex) {
-    // Filter complex (dipakai untuk blur mode dengan multi-stream)
     cmd = [
       "ffmpeg",
       "-y",
-      "-ss", startTime.toString(),
-      "-i", `"${sourceFile}"`,
-      "-t", duration.toString(),
-      "-filter_complex", `"${filterValue}"`,
-      "-map", `"[out]"`,
-      "-map", "0:a?",
-      "-threads", "2",
-      "-c:v", "libx264",
-      "-preset", "fast",
-      "-crf", "23",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-movflags", "+faststart",
+      "-ss",
+      startTime.toString(),
+      "-i",
+      `"${sourceFile}"`,
+      "-t",
+      duration.toString(),
+      "-filter_complex",
+      `"${filterValue}"`,
+      "-map",
+      `"[out]"`,
+      "-map",
+      "0:a?",
+      "-threads",
+      "2",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      "23",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
       `"${outputPath}"`,
     ].join(" ");
   } else {
-    // Simple -vf filter
     cmd = [
       "ffmpeg",
       "-y",
-      "-ss", startTime.toString(),
-      "-i", `"${sourceFile}"`,
-      "-t", duration.toString(),
-      "-vf", `"${filterValue}"`,
-      "-threads", "2",
-      "-c:v", "libx264",
-      "-preset", "fast",
-      "-crf", "23",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-movflags", "+faststart",
+      "-ss",
+      startTime.toString(),
+      "-i",
+      `"${sourceFile}"`,
+      "-t",
+      duration.toString(),
+      "-vf",
+      `"${filterValue}"`,
+      "-threads",
+      "2",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      "23",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
       `"${outputPath}"`,
     ].join(" ");
   }
 
   try {
-    await execAsync(cmd, { timeout: 300000 }); // 5 minute timeout
+    await execAsync(cmd, { timeout: 300000 });
     return outputPath;
   } catch (err) {
     console.error("FFmpeg cut failed:", err);
     // Fallback ke pad mode jika blur gagal
     if (mode === "blur") {
-      console.warn("[video-processor] Blur mode gagal, fallback ke crop mode...");
-      return await cutVideoClip(sourceFile, startTime, endTime, outputPath + "_retry.mp4", makeVertical);
+      console.warn(
+        "[video-processor] Blur mode gagal, fallback ke crop mode..."
+      );
+      return await cutVideoClip(
+        sourceFile,
+        startTime,
+        endTime,
+        outputPath + "_retry.mp4",
+        makeVertical
+      );
     }
     throw new Error(`Video cutting failed: ${err}`);
   }
 }
 
-// Process all clips for a job
+// Process all clips for a job (termasuk auto-generate thumbnail)
 export async function processClips(
   sourceFile: string,
-  clips: Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[],
+  clips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[],
   jobId: string,
   makeVertical: boolean = true,
   onProgress?: (clipIndex: number, total: number) => void
@@ -393,13 +426,16 @@ export async function processClips(
   const results: ClipResult[] = [];
   const mode = makeVertical ? getAspectRatioMode() : "none";
 
-  console.log(`[processClips] Processing ${clips.length} clips with mode: ${getModeLabel(mode)}`);
+  console.log(
+    `[processClips] Processing ${clips.length} clips with mode: ${getModeLabel(mode)}`
+  );
 
+  // Step 1: Potong semua klip
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
     if (onProgress) onProgress(i, clips.length);
 
-    const outputPath = path.join(jobDir, `clip_${i + 1}.mp4`);
+    const outputPath = path.join(jobDir, `clip_${i}.mp4`);
 
     try {
       await cutVideoClip(
@@ -410,22 +446,51 @@ export async function processClips(
         makeVertical
       );
 
-      const actualDuration = await getVideoDuration(outputPath);
       results.push({
         ...clip,
-        duration: Math.round(actualDuration || clip.duration),
         filePath: outputPath,
       });
     } catch (err) {
-      console.error(`Failed to process clip ${i + 1}:`, err);
-      results.push({ ...clip, filePath: undefined });
+      console.error(`Failed to process clip ${i}:`, err);
+      results.push({ ...clip });
     }
+  }
+
+  // Step 2: Generate thumbnail untuk semua klip yang berhasil
+  try {
+    const clipsWithFiles = results
+      .filter((c) => c.filePath && fs.existsSync(c.filePath))
+      .map((c) => ({
+        index: c.index,
+        filePath: c.filePath,
+        duration: c.duration,
+        startTime: c.startTime,
+        endTime: c.endTime,
+      }));
+
+    if (clipsWithFiles.length > 0) {
+      const thumbnailMap = await generateThumbnailsForClips(
+        clipsWithFiles,
+        jobDir
+      );
+
+      // Inject thumbnailPath ke setiap result
+      for (const result of results) {
+        const thumbPath = thumbnailMap.get(result.index);
+        if (thumbPath) {
+          result.thumbnailPath = thumbPath;
+        }
+      }
+    }
+  } catch (err) {
+    // Thumbnail error tidak menghentikan proses utama
+    console.error("[processClips] Thumbnail generation error (non-fatal):", err);
   }
 
   return results;
 }
 
-// Get video duration via ffprobe
+// Get video duration
 export async function getVideoDuration(filePath: string): Promise<number> {
   try {
     const { stdout } = await execAsync(

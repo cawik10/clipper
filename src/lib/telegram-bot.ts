@@ -10,17 +10,12 @@ import { eq, desc } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { detectPlatform } from "@/lib/video-processor";
 import { getAuthUrl } from "@/lib/youtube-oauth";
-import {
-  messages,
-  getPlatformEmoji,
-  formatDuration,
-} from "@/lib/bot-messages";
+import { messages, getPlatformEmoji, formatDuration } from "@/lib/bot-messages";
 import { processJob } from "@/lib/job-processor";
-import { getAspectRatioMode, getModeLabel } from "@/lib/video-config";
+import { getAspectRatioMode, getModeLabel, getThumbnailConfig, getThumbnailModeLabel } from "@/lib/video-config";
 import fs from "fs";
 
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
-
 export const bot = new Bot(token);
 
 // URL detection regex
@@ -121,10 +116,40 @@ bot.command("mode", async (ctx) => {
       `*Semua Mode yang Tersedia:*\n` +
       `• \`blur\` → 🌀 Background blur (tidak bolong, rekomendasi)\n` +
       `• \`crop\` → ✂️ Center crop (full layar, bisa terpotong sisi)\n` +
-      `• \`pad\`  → ⬛ Black bars (letterbox)\n` +
+      `• \`pad\` → ⬛ Black bars (letterbox)\n` +
       `• \`stretch\` → ↔️ Stretch paksa (bisa distorsi)\n` +
       `• \`none\` → 📐 Keep original ratio\n\n` +
       `Untuk mengubah: set env var \`ASPECT_RATIO_MODE=blur\` di Railway`,
+    { parse_mode: "Markdown" }
+  );
+});
+
+// Command untuk info thumbnail
+bot.command("thumbnail", async (ctx) => {
+  const thumbConfig = getThumbnailConfig();
+  const modeLabel = getThumbnailModeLabel(thumbConfig.mode);
+
+  await ctx.reply(
+    `🖼 *Konfigurasi Thumbnail Auto-Generate:*\n\n` +
+      `Status: ${thumbConfig.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+      `Mode: *${modeLabel}* (\`${thumbConfig.mode}\`)\n` +
+      `Kualitas: ${thumbConfig.quality}/31 (makin kecil = makin bagus)\n` +
+      `Resolusi: ${thumbConfig.width}×${thumbConfig.height === 0 ? "auto" : thumbConfig.height}\n` +
+      (thumbConfig.mode === "custom"
+        ? `Offset: ${thumbConfig.offsetSeconds} detik dari awal klip\n`
+        : "") +
+      `\n*Cara Ubah di Railway (Variables):*\n` +
+      `• \`THUMBNAIL_ENABLED\` = \`true\` atau \`false\`\n` +
+      `• \`THUMBNAIL_MODE\` = \`middle\` | \`best\` | \`start\` | \`custom\`\n` +
+      `• \`THUMBNAIL_QUALITY\` = \`1\` sampai \`31\`\n` +
+      `• \`THUMBNAIL_WIDTH\` = lebar (default: \`1280\`)\n` +
+      `• \`THUMBNAIL_HEIGHT\` = tinggi (default: \`720\`, 0=auto)\n` +
+      `• \`THUMBNAIL_OFFSET_SECONDS\` = detik (untuk mode \`custom\`)\n\n` +
+      `*Penjelasan Mode:*\n` +
+      `• \`middle\` → Frame di tengah klip (stabil, default)\n` +
+      `• \`best\` → Scan banyak frame, pilih yang paling representatif (lambat)\n` +
+      `• \`start\` → Frame di awal klip (hook / opening)\n` +
+      `• \`custom\` → Frame di detik ke-N (set THUMBNAIL_OFFSET_SECONDS)`,
     { parse_mode: "Markdown" }
   );
 });
@@ -181,7 +206,9 @@ bot.callbackQuery(/^set_clips_(\d+)$/, async (ctx) => {
     .update(userSettings)
     .set({ maxClips, updatedAt: new Date() })
     .where(eq(userSettings.telegramUserId, userId));
-  await ctx.editMessageText(`✅ Pengaturan disimpan: Maksimal ${maxClips} klip per video.`);
+  await ctx.editMessageText(
+    `✅ Pengaturan disimpan: Maksimal ${maxClips} klip per video.`
+  );
 });
 
 bot.callbackQuery(/^set_privacy_(private|unlisted|public)$/, async (ctx) => {
@@ -201,7 +228,11 @@ bot.callbackQuery(/^retry_job_(.+)$/, async (ctx) => {
   const jobId = ctx.match[1];
   await ctx.answerCallbackQuery("🔄 Mencoba ulang...");
 
-  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  const jobs = await db
+    .select()
+    .from(clipJobs)
+    .where(eq(clipJobs.jobId, jobId));
+
   if (!jobs.length) {
     await ctx.reply("❌ Job tidak ditemukan.");
     return;
@@ -252,12 +283,14 @@ async function handleVideoUrl(ctx: Context, url: string) {
   const isConnected = tokens.length > 0;
   const currentMode = getAspectRatioMode();
   const modeLabel = getModeLabel(currentMode);
+  const thumbConfig = getThumbnailConfig();
 
   if (!isConnected) {
     await ctx.reply(
       `${getPlatformEmoji(platform)} *Video terdeteksi!*\n\n` +
         `⚠️ YouTube belum terhubung. Klip akan dikirim ke Telegram saja.\n\n` +
-        `📐 Mode 9:16: *${modeLabel}*\n\n` +
+        `📐 Mode 9:16: *${modeLabel}*\n` +
+        `🖼 Thumbnail: *${thumbConfig.enabled ? `Aktif (${thumbConfig.mode})` : "Nonaktif"}*\n\n` +
         `Hubungkan YouTube untuk auto-upload ke YouTube Studio!`,
       {
         parse_mode: "Markdown",
@@ -272,6 +305,8 @@ async function handleVideoUrl(ctx: Context, url: string) {
       `${getPlatformEmoji(platform)} *Video terdeteksi!*\n\n` +
         `Platform: ${platform.toUpperCase()}\n` +
         `URL: \`${url.slice(0, 50)}${url.length > 50 ? "..." : ""}\`\n\n` +
+        `📐 Mode 9:16: *${modeLabel}*\n` +
+        `🖼 Thumbnail: *${thumbConfig.enabled ? `Auto-generate (${thumbConfig.mode})` : "Nonaktif"}*\n\n` +
         `Pilih format output:`,
       {
         parse_mode: "Markdown",
@@ -364,29 +399,41 @@ async function processJobWithUpdates(
         );
       }
 
-      // Send each clip video
+      // Send each clip video + thumbnail
       for (let i = 0; i < successClips.length; i++) {
         const clip = successClips[i];
-        if (!clip.filePath || !fs.existsSync(clip.filePath)) continue;
-
         const caption = [
-          `<b>🎬 Klip ${i + 1}/${successClips.length}</b>`,
+          `🎬 <b>Klip ${i + 1}/${successClips.length}</b>`,
           ``,
           `📝 ${clip.title}`,
           ``,
           `⏱ Durasi: ${clip.duration}s`,
           `🔥 Viral Score: ${clip.viralScore}/10`,
           `💡 ${clip.reason}`,
-          clip.youtubeUrl ? `\n🔗 YouTube: ${clip.youtubeUrl}` : "",
+          clip.thumbnailPath ? `🖼 Thumbnail: ✅ Auto-generated` : ``,
+          clip.youtubeUrl ? `\n🔗 YouTube: ${clip.youtubeUrl}` : ``,
           clip.youtubeUrl
-            ? `<i>(Tersimpan sebagai Draft di YouTube Studio)</i>`
+            ? ` (Tersimpan sebagai Draft di YouTube Studio) `
             : ``,
         ]
           .join("\n")
           .trim();
 
         try {
-          await ctx.api.sendVideo(chatId, new InputFile(clip.filePath), {
+          // Send thumbnail first (if available)
+          if (clip.thumbnailPath && fs.existsSync(clip.thumbnailPath)) {
+            await ctx.api.sendPhoto(
+              chatId,
+              new InputFile(clip.thumbnailPath),
+              {
+                caption: `🖼 <b>Thumbnail Klip ${i + 1}</b> — Auto-generated`,
+                parse_mode: "HTML",
+              }
+            );
+          }
+
+          // Send video clip
+          await ctx.api.sendVideo(chatId, new InputFile(clip.filePath!), {
             caption,
             parse_mode: "HTML",
           });
@@ -421,6 +468,7 @@ async function processJobWithUpdates(
             duration: c.duration,
             youtubeUrl: c.youtubeUrl,
             viralScore: c.viralScore,
+            hasThumbnail: !!(c.thumbnailPath && fs.existsSync(c.thumbnailPath)),
           }))
         ),
         {
@@ -429,12 +477,19 @@ async function processJobWithUpdates(
         }
       );
 
-      // Cleanup clip files after sending
+      // Cleanup clip files + thumbnails after sending
       setTimeout(() => {
         successClips.forEach((c) => {
           if (c.filePath && fs.existsSync(c.filePath)) {
             try {
               fs.unlinkSync(c.filePath);
+            } catch {
+              /* ignore */
+            }
+          }
+          if (c.thumbnailPath && fs.existsSync(c.thumbnailPath)) {
+            try {
+              fs.unlinkSync(c.thumbnailPath);
             } catch {
               /* ignore */
             }
@@ -505,7 +560,6 @@ async function handleSettings(ctx: Context) {
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, userId));
-
   const settings = settingsRows[0];
 
   const tokens = await db
@@ -515,6 +569,7 @@ async function handleSettings(ctx: Context) {
 
   const currentMode = getAspectRatioMode();
   const modeLabel = getModeLabel(currentMode);
+  const thumbConfig = getThumbnailConfig();
 
   await ctx.reply(
     messages.settings({
@@ -524,8 +579,10 @@ async function handleSettings(ctx: Context) {
       defaultPrivacy: settings.defaultPrivacy || "private",
       youtubeConnected: tokens.length > 0,
     }) +
-      `\n• Mode 9:16: *${modeLabel}*\n\n` +
-      `_Ubah mode via env: ASPECT\\_RATIO\\_MODE=blur_`,
+      `\n• Mode 9:16: *${modeLabel}*` +
+      `\n• Thumbnail: *${thumbConfig.enabled ? `Aktif (${thumbConfig.mode})` : "Nonaktif"}*\n\n` +
+      `_Ubah mode via env: ASPECT\\_RATIO\\_MODE=blur_\n` +
+      `_Thumbnail via env: THUMBNAIL\\_ENABLED=true_`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
@@ -574,11 +631,13 @@ async function handleHistory(ctx: Context) {
   jobs.forEach((job, i) => {
     const clips = (job.clips as ClipResult[] | null) || [];
     const doneClips = clips.filter((c) => c.youtubeUrl).length;
+    const thumbClips = clips.filter((c) => c.thumbnailPath).length;
     msg += `${i + 1}. ${statusEmoji[job.status] || "❓"} *${(job.videoTitle || "Video").slice(0, 35)}*\n`;
     msg += ` ${getPlatformEmoji(job.platform)} ${job.platform} | ${job.status}`;
     if (job.status === "done" && clips.length) {
       msg += ` | ${clips.length} klip`;
       if (doneClips) msg += ` (${doneClips} di YT)`;
+      if (thumbClips) msg += ` | 🖼 ${thumbClips}`;
     }
     msg += `\n`;
   });
@@ -593,7 +652,6 @@ async function ensureUserSettings(userId: string): Promise<void> {
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, userId));
-
   if (!existing.length) {
     await db.insert(userSettings).values({
       telegramUserId: userId,

@@ -82,6 +82,7 @@ export interface ClipResult {
   viralScore: number;
   reason: string;
   filePath?: string;
+  thumbnailPath?: string;
   youtubeVideoId?: string;
   youtubeUrl?: string;
 }

@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone", // Tambahkan baris ini agar Next.js membuat folder standalone
+  output: "standalone",
+  typescript: {
+    // TypeScript is checked separately via tsc --noEmit; skip it in the build
+    // to avoid OOM errors in memory-constrained environments.
+    ignoreBuildErrors: true,
+  },
+
   serverExternalPackages: [
     "grammy",
     "openai",

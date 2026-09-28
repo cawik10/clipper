@@ -28,12 +28,15 @@ export async function analyzeVideoForClips(
   maxClips: number = 3,
   minDuration: number = 20,
   maxDuration: number = 40
-): Promise<Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[]> {
+): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
   const openai = getOpenAIClient();
 
   // Build transcript text with timestamps
   const transcriptText = input.transcript
-    .map((seg) => `[${formatTime(seg.start)}-${formatTime(seg.end)}] ${seg.text}`)
+    .map(
+      (seg) =>
+        `[${formatTime(seg.start)}-${formatTime(seg.end)}] ${seg.text}`
+    )
     .join("\n");
 
   const prompt = `Kamu adalah ahli konten viral YouTube Shorts. Analisis transkrip video berikut dan temukan ${maxClips} momen terbaik yang berpotensi viral di YouTube Shorts.
@@ -75,7 +78,7 @@ Berikan output dalam format JSON array berikut (tanpa markdown, hanya JSON murni
     "description": "<deskripsi singkat>",
     "tags": ["tag1", "tag2", "tag3"],
     "viralScore": <1-10>,
-    "reason": "<alasan kenapa momen ini viral>"
+    "reason": "<alasan dipilih>"
   }
 ]`;
 
@@ -114,7 +117,13 @@ Berikan output dalam format JSON array berikut (tanpa markdown, hanya JSON murni
   // Gemini fallback
   if (process.env.GEMINI_API_KEY) {
     try {
-      return await analyzeWithGemini(prompt, input, maxClips, minDuration, maxDuration);
+      return await analyzeWithGemini(
+        prompt,
+        input,
+        maxClips,
+        minDuration,
+        maxDuration
+      );
     } catch (err) {
       console.error("Gemini analysis failed:", err);
     }
@@ -130,7 +139,7 @@ async function analyzeWithGemini(
   maxClips: number,
   minDuration: number,
   maxDuration: number
-): Promise<Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[]> {
+): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
@@ -154,10 +163,10 @@ function fallbackAnalysis(
   maxClips: number,
   minDuration: number,
   maxDuration: number
-): Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[] {
+): Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[] {
   const { duration, transcript, title } = input;
   const targetDuration = Math.min(Math.max(30, minDuration), maxDuration);
-  const clips: Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[] = [];
+  const clips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[] = [];
 
   if (transcript.length === 0) {
     // No transcript - divide video into equal parts
@@ -169,26 +178,24 @@ function fallbackAnalysis(
 
     for (let i = 0; i < segments; i++) {
       const start = skipIntro + spacing * (i + 1) - targetDuration / 2;
-      const end = Math.min(start + targetDuration, duration - skipOutro);
+      const end = start + targetDuration;
       clips.push({
         index: i,
         startTime: Math.round(Math.max(0, start)),
-        endTime: Math.round(end),
-        duration: Math.round(end - Math.max(0, start)),
-        title: `${title.slice(0, 40)} - Part ${i + 1} #Shorts`,
-        description: `Highlight dari video ${title.slice(0, 50)}`,
-        tags: ["shorts", "viral", "trending", "fyp"],
-        viralScore: 6,
-        reason: "Dipilih otomatis (fallback) karena tidak ada transkrip",
+        endTime: Math.round(Math.min(duration, end)),
+        duration: targetDuration,
+        title: `${title.slice(0, 30)} - Bagian ${i + 1} #Shorts`,
+        description: `Momen terbaik dari video: ${title.slice(0, 50)}`,
+        tags: ["shorts", "viral", "trending"],
+        viralScore: 7,
+        reason: "Dipilih berdasarkan pembagian waktu equal",
       });
     }
     return clips;
   }
 
-  // Score transcript segments
+  // Use transcript to find good segments
   const scores = scoreTranscriptSegments(transcript);
-
-  // Select top segments
   const selected = selectTopSegments(
     scores,
     transcript,
@@ -225,26 +232,24 @@ function scoreTranscriptSegments(
   transcript: TranscriptSegment[]
 ): { start: number; end: number; score: number }[] {
   const viralKeywords = [
-    "rahasia", "ternyata", "mengejutkan", "viral", "tips", "cara", "trik",
-    "luar biasa", "incredible", "amazing", "wow", "surprising", "secret",
-    "never", "always", "best", "worst", "most", "least", "first", "last",
-    "truth", "lie", "fact", "myth", "hack", "top", "number", "percent",
-    "jangan", "harus", "wajib", "penting", "terbesar", "terbaik",
-    "pertama", "satu-satunya", "tidak pernah", "selalu",
+    "rahasia", "ternyata", "mengejutkan", "viral", "tips", "cara",
+    "trik", "luar biasa", "incredible", "amazing", "wow", "surprising",
+    "secret", "never", "always", "best", "worst", "most", "least",
+    "first", "last", "truth", "lie", "fact", "myth", "hack", "top",
+    "number", "percent", "jangan", "harus", "wajib", "penting",
+    "terbesar", "terbaik", "pertama", "satu-satunya", "tidak pernah",
+    "selalu",
   ];
 
   return transcript.map((seg) => {
     let score = 5;
     const text = seg.text.toLowerCase();
-
     viralKeywords.forEach((kw) => {
       if (text.includes(kw)) score += 1;
     });
-
     if (text.includes("?")) score += 1;
     if (text.includes("!")) score += 0.5;
     if (/\d+%|\d+ juta|\d+ ribu|\d+ billion/.test(text)) score += 1;
-
     return { start: seg.start, end: seg.end, score: Math.min(score, 10) };
   });
 }
@@ -279,19 +284,24 @@ function selectTopSegments(
       end = start + maxDuration;
     }
 
-    const hasOverlap = selected.some((s) => !(end <= s.start || start >= s.end));
+    const hasOverlap = selected.some(
+      (s) => !(end <= s.start || start >= s.end)
+    );
     if (hasOverlap) continue;
 
+    // Align to transcript boundaries
     const transcriptStart = transcript.find((t) => t.start >= start - 2);
-    const transcriptEnd = [...transcript].reverse().find((t) => t.end <= end + 2);
+    const transcriptEnd = [...transcript]
+      .reverse()
+      .find((t) => t.end <= end + 2);
 
-    const finalStart = transcriptStart ? transcriptStart.start : start;
-    const finalEnd = transcriptEnd ? transcriptEnd.end : end;
-    const finalDuration = finalEnd - finalStart;
+    let finalStart = transcriptStart ? transcriptStart.start : start;
+    let finalEnd = transcriptEnd ? transcriptEnd.end : end;
 
-    if (finalDuration < minDuration - 2) {
-      selected.push({ start, end, score: seg.score });
-    } else if (finalDuration > maxDuration + 5) {
+    if (finalEnd - finalStart < minDuration) {
+      finalEnd = finalStart + minDuration;
+    }
+    if (finalEnd - finalStart > maxDuration + 5) {
       selected.push({ start, end, score: seg.score });
     } else {
       selected.push({ start: finalStart, end: finalEnd, score: seg.score });
@@ -306,7 +316,7 @@ function validateAndFixClips(
   videoDuration: number,
   minDuration: number,
   maxDuration: number
-): Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[] {
+): Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[] {
   return clips
     .filter((c) => c.startTime !== undefined && c.endTime !== undefined)
     .map((clip, i) => {
@@ -314,9 +324,7 @@ function validateAndFixClips(
       let end = Math.min(videoDuration, Number(clip.endTime) || start + 30);
       const duration = end - start;
 
-      if (duration < minDuration) {
-        end = Math.min(videoDuration, start + minDuration);
-      }
+      if (duration < minDuration) end = start + minDuration;
       if (duration > maxDuration) {
         end = start + maxDuration;
       }
@@ -336,7 +344,11 @@ function validateAndFixClips(
     .slice(0, 5);
 }
 
-function generateTitle(text: string, videoTitle: string, index: number): string {
+function generateTitle(
+  text: string,
+  videoTitle: string,
+  index: number
+): string {
   const words = text.split(" ").slice(0, 8).join(" ");
   const titleOptions = [
     `${words}... #Shorts`,
