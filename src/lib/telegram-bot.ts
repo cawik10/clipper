@@ -581,8 +581,8 @@ async function handleSettings(ctx: Context) {
     }) +
       `\n• Mode 9:16: *${modeLabel}*` +
       `\n• Thumbnail: *${thumbConfig.enabled ? `Aktif (${thumbConfig.mode})` : "Nonaktif"}*\n\n` +
-      `_Ubah mode via env: ASPECT\\_RATIO\\_MODE=blur_\n` +
-      `_Thumbnail via env: THUMBNAIL\\_ENABLED=true_`,
+      `_Ubah mode via env:_ \`ASPECT_RATIO_MODE=blur\`\n` +
+      `_Thumbnail via env:_ \`THUMBNAIL_ENABLED=true\``,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
