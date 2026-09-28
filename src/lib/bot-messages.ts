@@ -1,170 +1,132 @@
 // Bot message templates in Indonesian
 
 export const messages = {
-  welcome: `🤖 *AutoClip Bot* - Video Clipper Otomatis
+  welcome: `🤖 *AutoClip Bot* — AI Video Clipper
 
-Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube Shorts secara otomatis!
+Halo\\! Saya memotong video panjang menjadi klip pendek viral secara otomatis, lalu upload ke *YouTube* dan *TikTok*\\!
 
 *Cara Penggunaan:*
-1. Kirim link video (YouTube, Facebook, TikTok, Instagram)
-2. Bot akan menganalisis dan memilih momen terbaik
-3. Video akan dipotong otomatis (20-40 detik)
-4. Upload langsung ke YouTube sebagai Draft
+1\\. Kirim link video \\(YouTube, Facebook, TikTok, Instagram\\)
+2\\. Bot analisis & pilih momen terbaik dengan AI
+3\\. Video dipotong otomatis \\(20\\-40 detik, 9:16\\)
+4\\. Upload langsung ke YouTube Draft & TikTok Inbox
 
 *Perintah:*
-/start - Menu utama
-/help - Panduan lengkap
-/connect - Hubungkan akun YouTube
-/status - Cek status pekerjaan
-/settings - Pengaturan bot
-/history - Riwayat klip
+/start \\- Menu utama
+/help \\- Panduan lengkap
+/connect \\- Hubungkan YouTube
+/connect\\_tiktok \\- Hubungkan TikTok
+/settings \\- Pengaturan bot
+/status \\- Status pekerjaan terbaru
+/history \\- Riwayat klip
+/disconnect \\- Putus YouTube
+/disconnect\\_tiktok \\- Putus TikTok
 
-Kirim link video untuk mulai! 🎬`,
+Kirim link video untuk mulai\\! 🎬`,
 
   help: `📚 *Panduan AutoClip Bot*
 
 *Platform yang Didukung:*
-• 📺 YouTube (termasuk video panjang)
+• 📺 YouTube \\(termasuk video panjang\\)
 • 📘 Facebook
 • 🎵 TikTok
 • 📸 Instagram Reels/Video
 
 *Proses Otomatis:*
-1. *Download* - Video diunduh dari platform
-2. *Transkripsi* - Audio ditranskripsi ke teks
-3. *Analisis AI* - Momen viral diidentifikasi
-4. *Pemotongan* - Video dipotong (20-40 detik)
-5. *Upload* - Langsung upload ke YouTube Studio
+1\\. *Download* — Video diunduh dari platform
+2\\. *Transkripsi* — Audio ditranskripsi ke teks
+3\\. *Analisis AI* — Momen viral diidentifikasi
+4\\. *Pemotongan* — Video dipotong \\(20\\-40 detik\\)
+5\\. *Upload* — Langsung ke YouTube Studio & TikTok
 
 *Ketentuan:*
-• Durasi klip: 20-40 detik (optimal untuk Shorts)
-• Format output: Vertikal 9:16 (1080x1920)
+• Durasi klip: 20\\-40 detik \\(optimal untuk Shorts\\)
+• Format output: Vertikal 9:16 \\(1080x1920\\)
 • Maksimal 3 klip per video
 
 *Perintah Berguna:*
-/connect - Login YouTube Studio
-/settings - Ubah pengaturan
-/cancel - Batalkan proses
+/connect \\- Login YouTube Studio
+/connect\\_tiktok \\- Login TikTok
+/settings \\- Ubah pengaturan
+/cancel \\- Batalkan proses
 
 *Tips:*
-Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
+Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik\\!`,
 
-  connecting: `🔗 *Menghubungkan YouTube Studio...*
+  connecting: `🔗 *Menghubungkan YouTube Studio\\.\\.\\.*
 
-Klik tombol di bawah untuk login ke akun Google/YouTube Anda.
+Klik tombol di bawah untuk login ke akun Google/YouTube Anda\\.
+
 Izin yang diperlukan:
-• Upload video (sebagai Draft)
+• Upload video \\(sebagai Draft\\)
 • Kelola video YouTube
 
-Setelah login, klip akan otomatis tersimpan sebagai Draft di YouTube Studio.`,
+Setelah login, klip akan otomatis tersimpan sebagai Draft di YouTube Studio\\.`,
 
-  processing: (url: string, platform: string) => 
-    `⚙️ *Memproses Video...*
-    
-🔗 URL: \`${url.slice(0, 50)}${url.length > 50 ? '...' : ''}\`
-📱 Platform: ${getPlatformEmoji(platform)} ${platform.toUpperCase()}
+  connectingTikTok: `🎵 *Menghubungkan TikTok\\.\\.\\.*
 
-Status: Menunggu dalam antrian...`,
+Klik tombol di bawah untuk login ke akun TikTok Anda\\.
 
-  downloading: (progress: number) =>
-    `⬇️ *Mengunduh Video...*
-    
-Progress: ${createProgressBar(progress)} ${progress.toFixed(0)}%`,
+Izin yang diperlukan:
+• Upload video ke TikTok Inbox
+• Info akun dasar
 
-  analyzing: `🧠 *Menganalisis Video dengan AI...*
-    
-Sedang mencari momen terbaik yang berpotensi viral...
-Ini mungkin membutuhkan waktu 1-2 menit.`,
+Setelah login, klip akan otomatis dikirim ke TikTok Inbox Anda\\.
+📌 Buka TikTok → notifikasi → tap *Post* untuk publish\\.`,
 
-  clipping: (current: number, total: number) =>
-    `✂️ *Memotong Video...*
-    
-Memproses klip ${current}/${total}
-${createProgressBar((current / total) * 100)}`,
-
-  uploading: (current: number, total: number) =>
-    `📤 *Mengupload ke YouTube Studio...*
-    
-Mengupload klip ${current}/${total} sebagai Draft...`,
-
-  clipFound: (clips: number) =>
-    `🎯 *${clips} Momen Viral Ditemukan!*
-    
-AI berhasil mengidentifikasi ${clips} klip terbaik.
-Sedang memotong dan memproses video...`,
-
-  noClips: `❌ *Tidak Ada Klip yang Ditemukan*
-    
-Maaf, AI tidak dapat menemukan momen yang cocok.
-Coba dengan video yang memiliki lebih banyak dialog atau momen yang jelas.`,
+  processing: (url: string, platform: string) =>
+    `⚙️ *Memproses Video\\.\\.\\.*\n\n🔗 URL: \`${url.slice(0, 50)}${url.length > 50 ? "..." : ""}\`\n📱 Platform: ${getPlatformEmoji(platform)} ${platform.toUpperCase()}\n\nStatus: Menunggu dalam antrian\\.\\.\\.`,
 
   error: (msg: string) =>
-    `❌ *Terjadi Kesalahan*
-    
-${msg}
-    
-Coba lagi atau hubungi /help untuk bantuan.`,
+    `❌ *Terjadi Kesalahan*\n\n${msg}\n\nCoba lagi atau hubungi /help untuk bantuan\\.`,
 
-  notConnected: `⚠️ *YouTube Belum Terhubung*
-    
-Anda perlu menghubungkan akun YouTube terlebih dahulu.
-Gunakan /connect untuk login ke YouTube Studio.
-
-Klip tetap akan dibuat dan dikirim ke Telegram!`,
-
-  settings: (settings: {
+  settings: (s: {
     maxClips: number;
     minDuration: number;
     maxDuration: number;
     defaultPrivacy: string;
     youtubeConnected: boolean;
-  }) => `⚙️ *Pengaturan Bot*
+    tiktokConnected: boolean;
+    tiktokPrivacy: string;
+    tiktokAutoUpload: boolean;
+  }) =>
+    `⚙️ *Pengaturan Bot*\n\n` +
+    `• Maksimal Klip: ${s.maxClips}\n` +
+    `• Durasi Min: ${s.minDuration} detik\n` +
+    `• Durasi Max: ${s.maxDuration} detik\n\n` +
+    `*YouTube:*\n` +
+    `• Status: ${s.youtubeConnected ? "✅ Terhubung" : "❌ Belum terhubung"}\n` +
+    `• Privacy: ${s.defaultPrivacy}\n\n` +
+    `*TikTok:*\n` +
+    `• Status: ${s.tiktokConnected ? "✅ Terhubung" : "❌ Belum terhubung"}\n` +
+    `• Privacy: ${s.tiktokPrivacy}\n` +
+    `• Auto Upload: ${s.tiktokAutoUpload ? "✅ Aktif" : "❌ Nonaktif"}\n\n` +
+    `Gunakan tombol di bawah untuk mengubah pengaturan:`,
 
-• Maksimal Klip: ${settings.maxClips}
-• Durasi Min: ${settings.minDuration} detik
-• Durasi Max: ${settings.maxDuration} detik
-• Privacy Default: ${settings.defaultPrivacy}
-• YouTube: ${settings.youtubeConnected ? '✅ Terhubung' : '❌ Belum terhubung'}
+  connected: `✅ *YouTube Berhasil Terhubung\\!*\n\nAkun YouTube Anda sudah terhubung dengan bot\\. Klip video akan otomatis diupload sebagai Draft di YouTube Studio\\.\n\nKirim link video untuk mulai membuat Shorts\\! 🎬`,
 
-Gunakan tombol di bawah untuk mengubah pengaturan:`,
+  connectedTikTok: `✅ *TikTok Berhasil Terhubung\\!*\n\nAkun TikTok Anda sudah terhubung dengan bot\\. Klip video akan otomatis dikirim ke TikTok Inbox Anda\\.\n\n📌 Buka TikTok → notifikasi → tap *Post* untuk publish\\.\n\nKirim link video untuk mulai\\! 🎬`,
 
-  connected: `✅ *YouTube Berhasil Terhubung!*
-    
-Akun YouTube Anda sudah terhubung dengan bot.
-Klip video akan otomatis diupload sebagai Draft di YouTube Studio.
+  invalidUrl: `❌ *URL Tidak Valid*\n\nKirim link video yang valid dari:\n• YouTube \\(youtube\\.com/watch\\?v=\\.\\.\\. atau youtu\\.be/\\.\\.\\.\\)\n• Facebook \\(facebook\\.com/watch/\\.\\.\\.\\)\n• TikTok \\(tiktok\\.com/@\\.\\.\\.\\)\n• Instagram \\(instagram\\.com/reel/\\.\\.\\.\\)`,
 
-Kirim link video untuk mulai membuat Shorts! 🎬`,
-
-  invalidUrl: `❌ *URL Tidak Valid*
-    
-Kirim link video yang valid dari:
-• YouTube (youtube.com/watch?v=... atau youtu.be/...)
-• Facebook (facebook.com/watch/...)
-• TikTok (tiktok.com/@.../video/...)
-• Instagram (instagram.com/reel/...)`,
-
-  tooShort: (duration: number) =>
-    `⚠️ *Video Terlalu Pendek*
-    
-Durasi video: ${Math.round(duration)} detik
-Minimal durasi yang disarankan: 60 detik
-
-Video terlalu pendek untuk menghasilkan klip yang optimal.`,
-
-  resultSummary: (clips: { title: string; duration: number; youtubeUrl?: string; viralScore: number }[]) => {
-    let msg = `🎉 *Proses Selesai!*\n\n`;
-    msg += `Berhasil membuat ${clips.length} klip YouTube Shorts:\n\n`;
-    
+  resultSummary: (
+    clips: {
+      title: string;
+      duration: number;
+      youtubeUrl?: string;
+      tiktokPublishId?: string;
+      viralScore: number;
+    }[]
+  ) => {
+    let msg = `🎉 *Proses Selesai\\!*\n\nBerhasil membuat ${clips.length} klip:\n\n`;
     clips.forEach((clip, i) => {
       msg += `*Klip ${i + 1}:* ${clip.title.slice(0, 50)}\n`;
       msg += `⏱ Durasi: ${clip.duration}s | 🔥 Viral Score: ${clip.viralScore}/10\n`;
-      if (clip.youtubeUrl) {
-        msg += `🔗 ${clip.youtubeUrl}\n`;
-      }
+      if (clip.youtubeUrl) msg += `📺 YouTube: ${clip.youtubeUrl}\n`;
+      if (clip.tiktokPublishId)
+        msg += `🎵 TikTok: Tersimpan di Inbox \\(buka app untuk publish\\)\n`;
       msg += "\n";
     });
-
-    msg += `📺 Cek YouTube Studio untuk melihat Draft!`;
     return msg;
   },
 };

@@ -1,20 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone", // Tambahkan baris ini
-  serverExternalPackages: ["child_process", "fs", "path", "os"],
-  experimental: {
-    serverActions: {
-      bodySizeLimit: "50mb",
-    },
+  // Skip type checking during production build to avoid OOM
+  // Types are still checked separately via `tsc --noEmit`
+  typescript: {
+    ignoreBuildErrors: true,
   },
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**",
-      },
-    ],
+  // Reduce memory pressure
+  experimental: {
+    workerThreads: false,
   },
 };
 
