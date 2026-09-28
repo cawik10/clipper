@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone", // Tambahkan baris ini agar Next.js membuat folder standalone
   serverExternalPackages: [
     "grammy",
     "openai",
