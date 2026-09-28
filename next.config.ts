@@ -1,20 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["child_process", "fs", "path", "os"],
-  experimental: {
-    serverActions: {
-      bodySizeLimit: "50mb",
-    },
-  },
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**",
-      },
-    ],
-  },
+  serverExternalPackages: [
+    "grammy",
+    "openai",
+    "@google/generative-ai",
+    "googleapis",
+    "axios",
+    "form-data",
+    "yt-dlp-wrap",
+  ],
 };
 
 export default nextConfig;

@@ -31,7 +31,9 @@ export async function uploadToYouTube(
   }
 
   const fileSize = fs.statSync(options.filePath).size;
-  console.log(`Uploading video: ${options.title} (${Math.round(fileSize / 1024 / 1024)}MB)`);
+  console.log(
+    `Uploading video: ${options.title} (${Math.round(fileSize / 1024 / 1024)}MB)`
+  );
 
   // Build title: ensure #Shorts is included and max 100 chars
   let title = options.title;
@@ -47,7 +49,9 @@ export async function uploadToYouTube(
     "#Shorts #YouTube #Viral #Trending",
     "",
     "🎬 Auto-generated clip | Created with AutoClip Bot",
-  ].join("\n").slice(0, 5000);
+  ]
+    .join("\n")
+    .slice(0, 5000);
 
   const tags = [
     ...options.tags,
@@ -55,7 +59,9 @@ export async function uploadToYouTube(
     "viral",
     "trending",
     "youtube shorts",
-  ].filter((t, i, arr) => arr.indexOf(t) === i).slice(0, 500); // unique, max 500 total chars
+  ]
+    .filter((t, i, arr) => arr.indexOf(t) === i)
+    .slice(0, 500);
 
   const response = await youtube.videos.insert(
     {
@@ -90,14 +96,9 @@ export async function uploadToYouTube(
 
   const videoId = response.data.id!;
   const videoUrl = `https://www.youtube.com/shorts/${videoId}`;
-
   console.log(`Upload complete: ${videoUrl}`);
 
-  return {
-    videoId,
-    videoUrl,
-    title,
-  };
+  return { videoId, videoUrl, title };
 }
 
 // Upload multiple clips from a job
@@ -106,17 +107,18 @@ export async function uploadClipsToYouTube(
   accessToken: string,
   refreshToken: string,
   privacyStatus: "private" | "unlisted" | "public" = "private",
-  onProgress?: (clipIndex: number, result: UploadResult | null, error?: string) => void
+  onProgress?: (
+    clipIndex: number,
+    result: UploadResult | null,
+    error?: string
+  ) => void
 ): Promise<(UploadResult | null)[]> {
   const results: (UploadResult | null)[] = [];
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
-
     if (!clip.filePath || !fs.existsSync(clip.filePath)) {
-      console.error(`Clip ${i} file not found: ${clip.filePath}`);
       results.push(null);
-      if (onProgress) onProgress(i, null, "File not found");
       continue;
     }
 
@@ -125,8 +127,8 @@ export async function uploadClipsToYouTube(
         {
           filePath: clip.filePath,
           title: clip.title,
-          description: clip.description || "",
-          tags: clip.tags || [],
+          description: clip.description,
+          tags: clip.tags,
           privacyStatus,
         },
         accessToken,
@@ -136,7 +138,7 @@ export async function uploadClipsToYouTube(
       results.push(result);
       if (onProgress) onProgress(i, result);
 
-      // Wait between uploads to avoid rate limiting
+      // Small delay between uploads
       if (i < clips.length - 1) {
         await new Promise((r) => setTimeout(r, 2000));
       }
@@ -152,13 +154,11 @@ export async function uploadClipsToYouTube(
 }
 
 // Refresh access token
-export async function refreshAccessToken(refreshToken: string): Promise<{
-  accessToken: string;
-  expiresAt: Date;
-}> {
+export async function refreshAccessToken(
+  refreshToken: string
+): Promise<{ accessToken: string; expiresAt: Date }> {
   const oauth2Client = getOAuth2ClientWithCredentials("", refreshToken);
   const { credentials } = await oauth2Client.refreshAccessToken();
-
   return {
     accessToken: credentials.access_token!,
     expiresAt: new Date(credentials.expiry_date!),

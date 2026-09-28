@@ -1,45 +1,45 @@
 import { db } from "@/db";
-import { clipJobs, userSettings } from "@/db/schema";
-import { sql, desc } from "drizzle-orm";
-import Link from "next/link";
+import { clipJobs, userSettings, uploadedVideos } from "@/db/schema";
+import { sql, count } from "drizzle-orm";
 import { ClipResult } from "@/db/schema";
+import { getAspectRatioMode, getModeLabel, type AspectRatioMode } from "@/lib/video-config";
+
+export const dynamic = "force-dynamic";
 
 async function getStats() {
   try {
-    const [totalJobs] = await db
-      .select({ count: sql<number>`count(*)` })
+    const [jobsResult] = await db
+      .select({ count: count() })
       .from(clipJobs);
 
-    const [doneJobs] = await db
-      .select({ count: sql<number>`count(*)` })
+    const [doneResult] = await db
+      .select({ count: count() })
       .from(clipJobs)
       .where(sql`status = 'done'`);
 
-    const [totalUsers] = await db
-      .select({ count: sql<number>`count(*)` })
+    const [usersResult] = await db
+      .select({ count: count() })
       .from(userSettings);
 
     const recentJobs = await db
       .select()
       .from(clipJobs)
-      .orderBy(desc(clipJobs.createdAt))
+      .orderBy(sql`created_at DESC`)
       .limit(10);
 
-    // Count total clips created
+    // Count total clips and YouTube uploads
     let totalClips = 0;
     let totalYoutubeUploads = 0;
     recentJobs.forEach((job) => {
-      if (job.clips) {
-        const clips = job.clips as ClipResult[];
-        totalClips += clips.length;
-        totalYoutubeUploads += clips.filter((c) => c.youtubeUrl).length;
-      }
+      const clips = (job.clips as ClipResult[] | null) || [];
+      totalClips += clips.length;
+      totalYoutubeUploads += clips.filter((c) => c.youtubeUrl).length;
     });
 
     return {
-      totalJobs: Number(totalJobs?.count || 0),
-      doneJobs: Number(doneJobs?.count || 0),
-      totalUsers: Number(totalUsers?.count || 0),
+      totalJobs: jobsResult.count,
+      doneJobs: doneResult.count,
+      totalUsers: usersResult.count,
       totalClips,
       totalYoutubeUploads,
       recentJobs,
@@ -56,14 +56,17 @@ async function getStats() {
   }
 }
 
-const statusConfig: Record<string, { color: string; bg: string; label: string; dot: string }> = {
-  queued: { color: "text-yellow-400", bg: "bg-yellow-400/10 border-yellow-400/30", label: "Queued", dot: "bg-yellow-400" },
-  downloading: { color: "text-blue-400", bg: "bg-blue-400/10 border-blue-400/30", label: "Downloading", dot: "bg-blue-400 animate-pulse" },
-  analyzing: { color: "text-purple-400", bg: "bg-purple-400/10 border-purple-400/30", label: "Analyzing", dot: "bg-purple-400 animate-pulse" },
-  clipping: { color: "text-orange-400", bg: "bg-orange-400/10 border-orange-400/30", label: "Clipping", dot: "bg-orange-400 animate-pulse" },
-  uploading: { color: "text-cyan-400", bg: "bg-cyan-400/10 border-cyan-400/30", label: "Uploading", dot: "bg-cyan-400 animate-pulse" },
-  done: { color: "text-green-400", bg: "bg-green-400/10 border-green-400/30", label: "Done", dot: "bg-green-400" },
-  error: { color: "text-red-400", bg: "bg-red-400/10 border-red-400/30", label: "Error", dot: "bg-red-400" },
+const statusConfig: Record<
+  string,
+  { color: string; bg: string; label: string; dot: string }
+> = {
+  queued: { color: "text-gray-400", bg: "bg-gray-800", label: "Antrian", dot: "bg-gray-400" },
+  downloading: { color: "text-blue-400", bg: "bg-blue-900/30", label: "Download", dot: "bg-blue-400" },
+  analyzing: { color: "text-purple-400", bg: "bg-purple-900/30", label: "Analisis", dot: "bg-purple-400" },
+  clipping: { color: "text-yellow-400", bg: "bg-yellow-900/30", label: "Clipping", dot: "bg-yellow-400" },
+  uploading: { color: "text-orange-400", bg: "bg-orange-900/30", label: "Upload", dot: "bg-orange-400" },
+  done: { color: "text-green-400", bg: "bg-green-900/30", label: "Selesai", dot: "bg-green-400" },
+  error: { color: "text-red-400", bg: "bg-red-900/30", label: "Error", dot: "bg-red-400" },
 };
 
 const platformConfig: Record<string, { emoji: string; color: string }> = {
@@ -71,65 +74,88 @@ const platformConfig: Record<string, { emoji: string; color: string }> = {
   facebook: { emoji: "📘", color: "text-blue-400" },
   tiktok: { emoji: "🎵", color: "text-pink-400" },
   instagram: { emoji: "📸", color: "text-purple-400" },
+  twitter: { emoji: "🐦", color: "text-sky-400" },
   unknown: { emoji: "🌐", color: "text-gray-400" },
+};
+
+const modeDescriptions: Record<
+  AspectRatioMode,
+  { icon: string; label: string; desc: string; recommended?: boolean; color: string }
+> = {
+  blur: {
+    icon: "🌀",
+    label: "Blur Background",
+    desc: "Video asli di tengah, sisi kosong diisi blur versi video. Tidak bolong, tidak crop. TERBAIK untuk Shorts!",
+    recommended: true,
+    color: "border-green-500/50 bg-green-500/10",
+  },
+  crop: {
+    icon: "✂️",
+    label: "Center Crop",
+    desc: "Zoom & crop tengah video agar mengisi penuh 9:16. Full layar tapi sisi kiri/kanan mungkin terpotong.",
+    color: "border-blue-500/50 bg-blue-500/10",
+  },
+  pad: {
+    icon: "⬛",
+    label: "Black Bars",
+    desc: "Video di tengah dengan black bars di sisi kosong (letterbox). Mode lama, tidak bolong tapi ada hitam.",
+    color: "border-gray-500/50 bg-gray-500/10",
+  },
+  stretch: {
+    icon: "↔️",
+    label: "Stretch to Fill",
+    desc: "Paksa stretch video ke 9:16. Full layar tapi bisa distorsi (gambar gepeng/melet).",
+    color: "border-yellow-500/50 bg-yellow-500/10",
+  },
+  none: {
+    icon: "📐",
+    label: "Original Ratio",
+    desc: "Tidak ada konversi. Video tetap di rasio aslinya. Cocok untuk video yang sudah 9:16.",
+    color: "border-gray-600/50 bg-gray-600/10",
+  },
 };
 
 export default async function Home() {
   const stats = await getStats();
-  const botUsername = process.env.TELEGRAM_BOT_USERNAME || "your_bot";
+  const currentMode = getAspectRatioMode();
+  const currentModeLabel = getModeLabel(currentMode);
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white">
-      {/* Hero Section */}
-      <div
-        className="relative overflow-hidden"
-        style={{
-          backgroundImage: "url('/images/hero-bg.jpg')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      >
-        <div className="absolute inset-0 bg-gray-950/80 backdrop-blur-sm" />
-        <div className="relative z-10 px-6 py-20 text-center">
-          <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur border border-white/20 rounded-full px-4 py-2 text-sm mb-6">
-            <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-            <span>Live & Running on Vercel</span>
+    <main className="min-h-screen bg-[#0a0a0f] text-white">
+      {/* Hero */}
+      <div className="relative overflow-hidden border-b border-white/5">
+        <div className="absolute inset-0 bg-gradient-to-br from-violet-900/20 via-transparent to-blue-900/20" />
+        <div className="relative max-w-6xl mx-auto px-6 py-16">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-4xl">🤖</span>
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-violet-400 to-blue-400 bg-clip-text text-transparent">
+                AutoClip Bot
+              </h1>
+              <p className="text-gray-400 text-sm">AI YouTube Shorts Generator</p>
+            </div>
           </div>
-          <h1 className="text-5xl md:text-7xl font-black mb-6 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-            AutoClip Bot
-          </h1>
-          <p className="text-xl md:text-2xl text-gray-300 mb-4 max-w-2xl mx-auto">
-            Bot Telegram AI untuk membuat YouTube Shorts secara otomatis
+          <p className="text-gray-300 max-w-2xl">
+            Bot Telegram cerdas yang memotong video panjang menjadi klip viral 20-40 detik untuk YouTube Shorts,
+            lalu auto-upload ke YouTube Studio sebagai Draft.
           </p>
-          <p className="text-gray-400 mb-10 max-w-xl mx-auto">
-            Kirim link video YouTube, Facebook, TikTok, atau Instagram — bot kami akan 
-            memilih momen terbaik, memotong video 20-40 detik, dan upload langsung ke YouTube Studio sebagai Draft.
-          </p>
-          <div className="flex flex-wrap gap-4 justify-center">
-            <a
-              href={`https://t.me/${botUsername}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white font-bold px-8 py-4 rounded-2xl text-lg transition-all hover:scale-105 shadow-lg shadow-blue-500/30"
-            >
-              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.026 9.546c-.146.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.889.675z"/>
-              </svg>
-              Buka di Telegram
-            </a>
-            <a
-              href={`/api/webhook/setup?secret=setup-autoclip-2024`}
-              className="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold px-8 py-4 rounded-2xl text-lg transition-all hover:scale-105"
-            >
-              ⚙️ Setup Webhook
-            </a>
+
+          {/* Active mode badge */}
+          <div className="mt-4 inline-flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-1.5">
+            <span className="text-green-400 text-xs font-medium">● AKTIF</span>
+            <span className="text-gray-300 text-sm">
+              Mode 9:16:{" "}
+              <span className="text-violet-400 font-semibold">
+                {modeDescriptions[currentMode]?.icon} {currentModeLabel}
+              </span>
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Stats Section */}
-      <div className="px-6 py-12 max-w-6xl mx-auto">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-12">
+      <div className="max-w-6xl mx-auto px-6 py-10 space-y-10">
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
             { label: "Total Jobs", value: stats.totalJobs, icon: "🎬", color: "from-blue-500/20 to-blue-600/20 border-blue-500/30" },
             { label: "Selesai", value: stats.doneJobs, icon: "✅", color: "from-green-500/20 to-green-600/20 border-green-500/30" },
@@ -139,21 +165,157 @@ export default async function Home() {
           ].map((stat) => (
             <div
               key={stat.label}
-              className={`bg-gradient-to-br ${stat.color} border rounded-2xl p-5 text-center`}
+              className={`bg-gradient-to-br ${stat.color} border rounded-xl p-4 text-center`}
             >
-              <div className="text-3xl mb-2">{stat.icon}</div>
-              <div className="text-3xl font-black text-white">{stat.value}</div>
-              <div className="text-sm text-gray-400 mt-1">{stat.label}</div>
+              <div className="text-2xl mb-1">{stat.icon}</div>
+              <div className="text-2xl font-bold">{stat.value}</div>
+              <div className="text-xs text-gray-400">{stat.label}</div>
             </div>
           ))}
         </div>
 
+        {/* =================== ASPECT RATIO MODE SECTION =================== */}
+        <div className="bg-white/3 border border-white/10 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                📐 Konfigurasi Aspek Rasio 9:16
+              </h2>
+              <p className="text-gray-400 text-sm mt-1">
+                Kontrol bagaimana video dikonversi ke format vertikal 9:16 (1080×1920) untuk YouTube Shorts
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-gray-500 mb-1">Mode Aktif</div>
+              <div className="bg-violet-500/20 border border-violet-500/40 text-violet-300 rounded-lg px-3 py-1 text-sm font-mono font-bold">
+                {currentMode}
+              </div>
+            </div>
+          </div>
+
+          {/* Mode Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            {(Object.entries(modeDescriptions) as [AspectRatioMode, typeof modeDescriptions[AspectRatioMode]][]).map(
+              ([mode, info]) => (
+                <div
+                  key={mode}
+                  className={`relative border rounded-xl p-4 transition-all ${
+                    currentMode === mode
+                      ? `${info.color} ring-2 ring-violet-500/50`
+                      : "border-white/10 bg-white/3 opacity-60"
+                  }`}
+                >
+                  {currentMode === mode && (
+                    <div className="absolute top-3 right-3">
+                      <span className="bg-violet-500 text-white text-xs px-2 py-0.5 rounded-full font-medium">
+                        ● AKTIF
+                      </span>
+                    </div>
+                  )}
+                  {info.recommended && (
+                    <div className="absolute top-3 left-3">
+                      <span className="bg-green-500/20 border border-green-500/40 text-green-400 text-xs px-2 py-0.5 rounded-full font-medium">
+                        ⭐ Rekomendasi
+                      </span>
+                    </div>
+                  )}
+                  <div className={`text-3xl mt-${info.recommended ? "7" : "0"} mb-2`}>{info.icon}</div>
+                  <h3 className="font-bold text-white mb-1">{info.label}</h3>
+                  <code className="text-xs text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded font-mono">
+                    {mode}
+                  </code>
+                  <p className="text-gray-400 text-xs mt-2">{info.desc}</p>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* How to Change */}
+          <div className="bg-gradient-to-r from-violet-900/30 to-blue-900/30 border border-violet-500/20 rounded-xl p-5">
+            <h3 className="font-bold text-violet-300 mb-3 flex items-center gap-2">
+              🔧 Cara Mengubah Mode (Railway)
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <p className="text-gray-400 text-sm mb-2">
+                  1. Buka Railway Dashboard → Project Anda → <strong className="text-white">Variables</strong>
+                </p>
+                <p className="text-gray-400 text-sm mb-2">
+                  2. Tambah atau edit variable:
+                </p>
+                <div className="bg-black/40 rounded-lg p-3 font-mono text-sm">
+                  <span className="text-gray-500"># Nama variable:</span>
+                  <br />
+                  <span className="text-yellow-400">ASPECT_RATIO_MODE</span>
+                  <br />
+                  <br />
+                  <span className="text-gray-500"># Nilai yang tersedia:</span>
+                  <br />
+                  <span className="text-green-400">blur</span>
+                  <span className="text-gray-500">     ← 🌀 Background blur (REKOMENDASI, tidak bolong)</span>
+                  <br />
+                  <span className="text-blue-400">crop</span>
+                  <span className="text-gray-500">     ← ✂️ Center crop (full layar)</span>
+                  <br />
+                  <span className="text-gray-400">pad</span>
+                  <span className="text-gray-500">      ← ⬛ Black bars</span>
+                  <br />
+                  <span className="text-yellow-400">stretch</span>
+                  <span className="text-gray-500">  ← ↔️ Stretch paksa</span>
+                  <br />
+                  <span className="text-gray-400">none</span>
+                  <span className="text-gray-500">     ← 📐 Keep original</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm mb-2">
+                  3. Klik <strong className="text-white">Save</strong> → Railway akan auto-redeploy
+                </p>
+                <p className="text-gray-400 text-sm">
+                  4. Mode baru aktif langsung untuk semua klip berikutnya
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Visual Comparison */}
+          <div className="mt-4 grid grid-cols-5 gap-2">
+            {(
+              [
+                { mode: "blur", frames: ["▓▒░", "███", "▓▒░"], label: "Blur BG" },
+                { mode: "crop", frames: ["███", "███", "███"], label: "Crop" },
+                { mode: "pad", frames: ["   ", "███", "   "], label: "Black Pad" },
+                { mode: "stretch", frames: ["▓██", "███", "▓██"], label: "Stretch" },
+                { mode: "none", frames: [" ", "▓█▓", " "], label: "Original" },
+              ] as { mode: AspectRatioMode; frames: string[]; label: string }[]
+            ).map(({ mode, frames, label }) => (
+              <div
+                key={mode}
+                className={`text-center p-2 rounded-lg border text-xs ${
+                  currentMode === mode
+                    ? "border-violet-500/50 bg-violet-500/10"
+                    : "border-white/10 bg-white/3"
+                }`}
+              >
+                <div className="font-mono text-[9px] leading-tight text-gray-300 mb-1">
+                  {frames.map((f, i) => (
+                    <div key={i} className="border border-white/20 rounded px-1">{f || "\u00A0"}</div>
+                  ))}
+                </div>
+                <div className="text-gray-500">{label}</div>
+                {currentMode === mode && (
+                  <div className="text-violet-400 font-bold">✓</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* =================== END ASPECT RATIO SECTION =================== */}
+
         {/* Features */}
-        <div className="mb-12">
-          <h2 className="text-3xl font-bold text-center mb-8">
-            🚀 Fitur Lengkap
-          </h2>
-          <div className="grid md:grid-cols-3 gap-6">
+        <div className="bg-white/3 border border-white/10 rounded-2xl p-6">
+          <h2 className="text-xl font-bold mb-6">🚀 Fitur Lengkap</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
               {
                 icon: "🧠",
@@ -164,7 +326,7 @@ export default async function Home() {
               {
                 icon: "✂️",
                 title: "Auto Video Clipper",
-                desc: "Memotong video 20-40 detik secara otomatis dalam format vertikal 9:16 yang optimal untuk YouTube Shorts",
+                desc: `Memotong video 20-40 detik dalam format vertikal 9:16 (1080×1920). Mode aktif: ${currentModeLabel}`,
                 tags: ["FFmpeg", "9:16", "1080x1920"],
               },
               {
@@ -194,16 +356,16 @@ export default async function Home() {
             ].map((f) => (
               <div
                 key={f.title}
-                className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-gray-700 transition-colors"
+                className="bg-white/3 border border-white/10 rounded-xl p-4 hover:border-white/20 transition-colors"
               >
-                <div className="text-4xl mb-3">{f.icon}</div>
-                <h3 className="text-lg font-bold mb-2">{f.title}</h3>
-                <p className="text-gray-400 text-sm mb-4">{f.desc}</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="text-3xl mb-2">{f.icon}</div>
+                <h3 className="font-bold mb-1">{f.title}</h3>
+                <p className="text-gray-400 text-sm mb-3">{f.desc}</p>
+                <div className="flex flex-wrap gap-1">
                   {f.tags.map((t) => (
                     <span
                       key={t}
-                      className="text-xs bg-gray-800 border border-gray-700 px-2 py-1 rounded-full text-gray-300"
+                      className="text-xs bg-white/10 text-gray-300 px-2 py-0.5 rounded-full"
                     >
                       {t}
                     </span>
@@ -215,26 +377,30 @@ export default async function Home() {
         </div>
 
         {/* How it works */}
-        <div className="mb-12 bg-gray-900 border border-gray-800 rounded-3xl p-8">
-          <h2 className="text-2xl font-bold mb-8 text-center">🔄 Cara Kerja</h2>
-          <div className="grid md:grid-cols-5 gap-4">
+        <div className="bg-white/3 border border-white/10 rounded-2xl p-6">
+          <h2 className="text-xl font-bold mb-6">🔄 Cara Kerja</h2>
+          <div className="flex flex-col md:flex-row items-start gap-0">
             {[
               { step: "1", icon: "🔗", title: "Kirim Link", desc: "Tempel link video ke chat Telegram bot" },
               { step: "2", icon: "⬇️", title: "Download", desc: "Bot mengunduh video via yt-dlp" },
               { step: "3", icon: "🧠", title: "AI Analisis", desc: "Whisper transkripsi + AI pilih momen viral" },
-              { step: "4", icon: "✂️", title: "Auto Clip", desc: "FFmpeg potong video 20-40 detik, 9:16" },
+              { step: "4", icon: "✂️", title: "Auto Clip", desc: `FFmpeg potong video 20-40 detik, mode: ${currentMode}` },
               { step: "5", icon: "📤", title: "Upload Draft", desc: "Auto upload ke YouTube Studio sebagai Draft" },
             ].map((step, i) => (
-              <div key={step.step} className="flex flex-col items-center text-center relative">
+              <div key={step.step} className="flex md:flex-col items-start md:items-center flex-1">
                 {i < 4 && (
-                  <div className="hidden md:block absolute top-6 left-1/2 w-full h-0.5 bg-gradient-to-r from-purple-500/50 to-transparent z-0" />
+                  <div className="hidden md:block w-full h-px bg-white/10 mt-8 mb-0" />
                 )}
-                <div className="relative z-10 w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center text-xl font-black mb-3 shadow-lg shadow-purple-500/30">
-                  {step.icon}
+                <div className="flex md:flex-col items-center gap-3 md:gap-2 w-full">
+                  <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-2xl shrink-0">
+                    {step.icon}
+                  </div>
+                  <div className="md:text-center">
+                    <div className="text-xs text-gray-500">Step {step.step}</div>
+                    <div className="font-medium text-sm">{step.title}</div>
+                    <div className="text-gray-400 text-xs">{step.desc}</div>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-500 mb-1">Step {step.step}</div>
-                <div className="font-bold text-sm mb-1">{step.title}</div>
-                <div className="text-xs text-gray-400">{step.desc}</div>
               </div>
             ))}
           </div>
@@ -242,221 +408,231 @@ export default async function Home() {
 
         {/* Recent Jobs */}
         {stats.recentJobs.length > 0 && (
-          <div className="mb-12">
-            <h2 className="text-2xl font-bold mb-6">📊 Job Terbaru</h2>
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-800">
-                      <th className="px-4 py-3 text-left text-gray-400 font-medium">Video</th>
-                      <th className="px-4 py-3 text-left text-gray-400 font-medium">Platform</th>
-                      <th className="px-4 py-3 text-left text-gray-400 font-medium">Status</th>
-                      <th className="px-4 py-3 text-left text-gray-400 font-medium">Klip</th>
-                      <th className="px-4 py-3 text-left text-gray-400 font-medium">Waktu</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats.recentJobs.map((job) => {
-                      const status = statusConfig[job.status] || statusConfig.queued;
-                      const platform = platformConfig[job.platform] || platformConfig.unknown;
-                      const clips = (job.clips as ClipResult[] | null) || [];
+          <div className="bg-white/3 border border-white/10 rounded-2xl p-6">
+            <h2 className="text-xl font-bold mb-4">📊 Job Terbaru</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    <th className="text-left py-2 px-3 text-gray-400 font-medium">Video</th>
+                    <th className="text-left py-2 px-3 text-gray-400 font-medium">Platform</th>
+                    <th className="text-left py-2 px-3 text-gray-400 font-medium">Status</th>
+                    <th className="text-left py-2 px-3 text-gray-400 font-medium">Klip</th>
+                    <th className="text-left py-2 px-3 text-gray-400 font-medium">Waktu</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.recentJobs.map((job) => {
+                    const status = statusConfig[job.status] || statusConfig.queued;
+                    const platform = platformConfig[job.platform] || platformConfig.unknown;
+                    const clips = (job.clips as ClipResult[] | null) || [];
 
-                      return (
-                        <tr
-                          key={job.id}
-                          className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
-                        >
-                          <td className="px-4 py-3">
-                            <div className="max-w-xs truncate font-medium">
-                              {job.videoTitle || "Memproses..."}
-                            </div>
-                            <div className="text-xs text-gray-500 font-mono truncate max-w-xs">
-                              {job.sourceUrl.slice(0, 50)}...
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`${platform.color} font-medium`}>
-                              {platform.emoji} {job.platform}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center gap-1.5 ${status.bg} ${status.color} border px-2.5 py-1 rounded-full text-xs font-medium`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
-                              {status.label}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className="text-gray-300">
-                              {clips.length > 0 ? (
-                                <span>
-                                  {clips.length}
-                                  {clips.some((c) => c.youtubeUrl) && (
-                                    <span className="text-red-400 ml-1">
-                                      ({clips.filter((c) => c.youtubeUrl).length} 📺)
-                                    </span>
-                                  )}
+                    return (
+                      <tr
+                        key={job.jobId}
+                        className="border-b border-white/5 hover:bg-white/3 transition-colors"
+                      >
+                        <td className="py-3 px-3">
+                          <div className="font-medium truncate max-w-[200px]">
+                            {job.videoTitle || "Memproses..."}
+                          </div>
+                          <div className="text-gray-500 text-xs truncate max-w-[200px]">
+                            {job.sourceUrl.slice(0, 50)}...
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className={`${platform.color}`}>
+                            {platform.emoji} {job.platform}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs ${status.bg} ${status.color}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
+                            {status.label}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          {clips.length > 0 ? (
+                            <div className="flex items-center gap-2">
+                              <span>{clips.length}</span>
+                              {clips.some((c) => c.youtubeUrl) && (
+                                <span className="text-red-400 text-xs">
+                                  ({clips.filter((c) => c.youtubeUrl).length} 📺)
                                 </span>
-                              ) : (
-                                <span className="text-gray-600">—</span>
                               )}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-400 text-xs">
-                            {new Date(job.createdAt).toLocaleString("id-ID", {
-                              dateStyle: "short",
-                              timeStyle: "short",
-                            })}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                            </div>
+                          ) : (
+                            <span className="text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-gray-400 text-xs">
+                          {new Date(job.createdAt).toLocaleString("id-ID", {
+                            dateStyle: "short",
+                            timeStyle: "short",
+                          })}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
 
         {/* Setup Guide */}
-        <div className="bg-gray-900 border border-gray-800 rounded-3xl p-8 mb-12">
-          <h2 className="text-2xl font-bold mb-6">📋 Panduan Setup</h2>
-          <div className="space-y-4 text-sm">
-            <div className="bg-gray-800/50 rounded-xl p-4">
-              <div className="font-mono text-xs text-gray-400 mb-3">.env / Vercel Environment Variables</div>
-              <div className="space-y-2 font-mono text-sm">
+        <div className="bg-white/3 border border-white/10 rounded-2xl p-6">
+          <h2 className="text-xl font-bold mb-6">📋 Panduan Setup</h2>
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-gray-300 mb-2">
+                Environment Variables (Railway / .env)
+              </h3>
+              <div className="bg-black/40 rounded-lg p-4 font-mono text-xs space-y-1">
                 {[
                   { key: "TELEGRAM_BOT_TOKEN", desc: "Token dari @BotFather", required: true },
                   { key: "DATABASE_URL", desc: "PostgreSQL connection string", required: true },
+                  { key: "ASPECT_RATIO_MODE", desc: "blur | crop | pad | stretch | none (default: blur)", required: false, highlight: true },
                   { key: "GOOGLE_CLIENT_ID", desc: "Google OAuth Client ID", required: false },
                   { key: "GOOGLE_CLIENT_SECRET", desc: "Google OAuth Client Secret", required: false },
-                  { key: "GOOGLE_REDIRECT_URI", desc: "https://yourapp.vercel.app/api/youtube/callback", required: false },
+                  { key: "GOOGLE_REDIRECT_URI", desc: "https://yourapp.railway.app/api/youtube/callback", required: false },
                   { key: "OPENAI_API_KEY", desc: "OpenAI API Key (untuk AI analysis & Whisper)", required: false },
                   { key: "GEMINI_API_KEY", desc: "Google Gemini API Key (alternatif)", required: false },
                   { key: "GROQ_API_KEY", desc: "Groq API Key (untuk Whisper transcription gratis)", required: false },
                   { key: "NEXT_PUBLIC_APP_URL", desc: "URL app Anda (untuk webhook setup)", required: false },
                 ].map((env) => (
                   <div key={env.key} className="flex items-start gap-3">
-                    <span className={`shrink-0 text-xs px-2 py-0.5 rounded font-bold ${env.required ? "bg-red-500/20 text-red-400" : "bg-gray-700 text-gray-400"}`}>
+                    <span
+                      className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-bold ${
+                        env.required
+                          ? "bg-red-900/50 text-red-400"
+                          : "bg-gray-800 text-gray-500"
+                      }`}
+                    >
                       {env.required ? "REQ" : "OPT"}
                     </span>
-                    <span className="text-blue-300">{env.key}</span>
-                    <span className="text-gray-500 text-xs mt-0.5"># {env.desc}</span>
+                    <span className={env.highlight ? "text-violet-400 font-bold" : "text-green-400"}>
+                      {env.key}
+                    </span>
+                    <span className="text-gray-600"># {env.desc}</span>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="bg-gray-800/50 rounded-xl p-4">
-              <div className="font-semibold mb-3">🔧 Setup Webhook (Jalankan setelah deploy)</div>
-              <div className="font-mono text-xs bg-gray-900 p-3 rounded-lg text-green-400 overflow-auto">
+            <div>
+              <h3 className="text-sm font-medium text-gray-300 mb-2">
+                Setup Webhook (Jalankan setelah deploy)
+              </h3>
+              <div className="bg-black/40 rounded-lg p-3 font-mono text-xs text-green-400">
                 GET /api/webhook/setup?secret=setup-autoclip-2024
               </div>
             </div>
 
-            <div className="bg-gray-800/50 rounded-xl p-4">
-              <div className="font-semibold mb-3">📦 Dependensi Sistem (VPS/Server)</div>
-              <div className="font-mono text-xs bg-gray-900 p-3 rounded-lg text-green-400 overflow-auto">
-                {`# Install yt-dlp dan ffmpeg
-pip3 install yt-dlp
-# atau
-curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-chmod +x /usr/local/bin/yt-dlp
-
-# FFmpeg
-apt-get install ffmpeg  # Ubuntu/Debian
-brew install ffmpeg     # macOS`}
+            <div>
+              <h3 className="text-sm font-medium text-gray-300 mb-2">
+                Dockerfile untuk Railway
+              </h3>
+              <div className="bg-black/40 rounded-lg p-4 font-mono text-xs text-gray-300">
+                <pre>{`FROM node:20-alpine
+RUN apk add --no-cache ffmpeg python3 py3-pip curl
+RUN pip3 install yt-dlp --break-system-packages || pip3 install yt-dlp
+WORKDIR /app
+COPY . .
+RUN npm ci
+RUN npm run build
+EXPOSE 3000
+CMD ["npm", "start"]`}</pre>
               </div>
-              <div className="mt-2 text-xs text-yellow-400">
-                ⚠️ Vercel Serverless tidak mendukung ffmpeg. Gunakan Railway, Render, atau VPS untuk fitur video processing penuh.
-              </div>
+              <p className="text-yellow-400 text-xs mt-2">
+                ⚠️ ffmpeg dan yt-dlp wajib ada di server untuk video processing.
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Platform & Tech Stack */}
-        <div className="grid md:grid-cols-2 gap-6 mb-12">
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
-            <h3 className="font-bold text-lg mb-4">🔧 Tech Stack</h3>
-            <div className="space-y-3">
+        {/* Tech Stack & Deploy */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white/3 border border-white/10 rounded-2xl p-6">
+            <h2 className="text-xl font-bold mb-4">🔧 Tech Stack</h2>
+            <div className="space-y-2">
               {[
                 { name: "Next.js 16 (App Router)", role: "Framework & API" },
                 { name: "Grammy.js", role: "Telegram Bot SDK" },
                 { name: "PostgreSQL + Drizzle ORM", role: "Database" },
                 { name: "yt-dlp", role: "Video Downloader" },
-                { name: "FFmpeg", role: "Video Processing" },
+                { name: "FFmpeg", role: "Video Processing (9:16)" },
                 { name: "OpenAI Whisper", role: "Audio Transcription" },
                 { name: "GPT-4o-mini / Gemini", role: "AI Analysis" },
                 { name: "YouTube Data API v3", role: "YouTube Upload" },
               ].map((tech) => (
-                <div key={tech.name} className="flex justify-between items-center">
-                  <span className="text-white font-medium text-sm">{tech.name}</span>
-                  <span className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">{tech.role}</span>
+                <div
+                  key={tech.name}
+                  className="flex items-center justify-between py-1.5 border-b border-white/5"
+                >
+                  <span className="text-sm font-medium">{tech.name}</span>
+                  <span className="text-xs text-gray-500">{tech.role}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
-            <h3 className="font-bold text-lg mb-4">🌐 Deployment Options</h3>
-            <div className="space-y-4">
+          <div className="bg-white/3 border border-white/10 rounded-2xl p-6">
+            <h2 className="text-xl font-bold mb-4">🌐 Deployment</h2>
+            <div className="space-y-3">
               {[
                 {
-                  name: "Vercel (Recommended for UI)",
-                  color: "text-white",
-                  note: "Bot UI + DB queries berjalan baik. Video processing perlu external service.",
-                  icon: "▲",
-                },
-                {
-                  name: "Railway / Render",
+                  name: "Railway (Recommended)",
                   color: "text-purple-400",
-                  note: "Mendukung ffmpeg dan yt-dlp langsung. Ideal untuk full video processing.",
+                  note: "✅ Mendukung ffmpeg + yt-dlp. Set ASPECT_RATIO_MODE=blur untuk hasil terbaik.",
                   icon: "🚂",
                 },
                 {
                   name: "VPS (DigitalOcean / Hetzner)",
                   color: "text-blue-400",
-                  note: "Kontrol penuh atas semua dependensi. Performance terbaik.",
+                  note: "Kontrol penuh. Install ffmpeg & yt-dlp manual. Performance terbaik.",
                   icon: "🖥️",
                 },
+                {
+                  name: "Vercel",
+                  color: "text-white",
+                  note: "⚠️ Tidak support ffmpeg. Hanya cocok untuk UI & bot tanpa video processing.",
+                  icon: "▲",
+                },
               ].map((opt) => (
-                <div key={opt.name} className="bg-gray-800/50 rounded-xl p-4">
-                  <div className={`font-bold ${opt.color} mb-1`}>
+                <div
+                  key={opt.name}
+                  className="bg-white/3 border border-white/10 rounded-xl p-4"
+                >
+                  <div className={`font-medium mb-1 ${opt.color}`}>
                     {opt.icon} {opt.name}
                   </div>
-                  <div className="text-xs text-gray-400">{opt.note}</div>
+                  <div className="text-gray-400 text-xs">{opt.note}</div>
                 </div>
               ))}
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Footer */}
-      <footer className="border-t border-gray-800 px-6 py-8 text-center text-gray-500 text-sm">
-        <p className="mb-2">
-          🤖 <strong className="text-white">AutoClip Bot</strong> — AI-Powered YouTube Shorts Generator
-        </p>
-        <p>
-          Built with Next.js · Grammy.js · FFmpeg · OpenAI · YouTube API v3
-        </p>
-        <div className="flex justify-center gap-4 mt-4">
-          <a
-            href="/api/health"
-            className="text-gray-600 hover:text-white transition-colors text-xs"
-          >
-            API Health
-          </a>
-          <a
-            href="/api/telegram/webhook"
-            className="text-gray-600 hover:text-white transition-colors text-xs"
-          >
-            Webhook Status
-          </a>
+        {/* Footer */}
+        <div className="text-center py-6 text-gray-600 text-sm border-t border-white/5">
+          <p>
+            🤖 AutoClip Bot • Made with Next.js, Grammy.js, FFmpeg & OpenAI
+          </p>
+          <p className="text-xs mt-1">
+            Mode 9:16 aktif:{" "}
+            <code className="bg-white/5 px-2 py-0.5 rounded text-violet-400">
+              {currentMode}
+            </code>{" "}
+            — Ubah via{" "}
+            <code className="bg-white/5 px-2 py-0.5 rounded text-gray-400">
+              ASPECT_RATIO_MODE
+            </code>
+          </p>
         </div>
-      </footer>
+      </div>
     </main>
   );
 }

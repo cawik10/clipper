@@ -1,24 +1,33 @@
 import { Bot, Context, InlineKeyboard, InputFile } from "grammy";
 import { db } from "@/db";
-import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
+import {
+  clipJobs,
+  youtubeTokens,
+  userSettings,
+  ClipResult,
+} from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { detectPlatform } from "@/lib/video-processor";
 import { getAuthUrl } from "@/lib/youtube-oauth";
-import { messages, getPlatformEmoji, formatDuration } from "@/lib/bot-messages";
+import {
+  messages,
+  getPlatformEmoji,
+  formatDuration,
+} from "@/lib/bot-messages";
 import { processJob } from "@/lib/job-processor";
+import { getAspectRatioMode, getModeLabel } from "@/lib/video-config";
 import fs from "fs";
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
-if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set");
+const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
 
 export const bot = new Bot(token);
 
 // URL detection regex
-const URL_REGEX = /https?:\/\/(www\.)?(youtube\.com\/watch|youtu\.be|youtube\.com\/shorts|facebook\.com\/(watch|video)|fb\.watch|tiktok\.com\/@[^/]+\/video|instagram\.com\/(reel|p|tv))[^\s]*/i;
+const URL_REGEX =
+  /https?:\/\/(www\.)?(youtube\.com\/watch|youtu\.be|youtube\.com\/shorts|facebook\.com\/(watch|video)|fb\.watch|tiktok\.com\/@[^/]+\/video|instagram\.com\/(reel|p|tv))[^\s]*/i;
 
 // ===== COMMANDS =====
-
 bot.command("start", async (ctx) => {
   await ensureUserSettings(ctx.from?.id?.toString() || "");
   await ctx.reply(messages.welcome, {
@@ -43,13 +52,11 @@ bot.command("connect", async (ctx) => {
 bot.command("disconnect", async (ctx) => {
   const userId = ctx.from?.id?.toString();
   if (!userId) return;
-
   await db.delete(youtubeTokens).where(eq(youtubeTokens.telegramUserId, userId));
   await db
     .update(userSettings)
     .set({ youtubeConnected: false, updatedAt: new Date() })
     .where(eq(userSettings.telegramUserId, userId));
-
   await ctx.reply("✅ Akun YouTube berhasil diputus.");
 });
 
@@ -69,7 +76,6 @@ bot.command("status", async (ctx) => {
     return;
   }
 
-  const latest = jobs[0];
   const statusEmoji: Record<string, string> = {
     queued: "⏳",
     downloading: "⬇️",
@@ -100,7 +106,27 @@ bot.command("history", async (ctx) => {
 });
 
 bot.command("cancel", async (ctx) => {
-  await ctx.reply("⛔ Untuk membatalkan proses yang sedang berjalan, silakan tunggu sebentar. Proses akan otomatis berhenti jika ada error.");
+  await ctx.reply(
+    "⛔ Untuk membatalkan proses yang sedang berjalan, silakan tunggu sebentar. Proses akan otomatis berhenti jika ada error."
+  );
+});
+
+// Command untuk info mode aspect ratio
+bot.command("mode", async (ctx) => {
+  const currentMode = getAspectRatioMode();
+  const modeLabel = getModeLabel(currentMode);
+  await ctx.reply(
+    `📐 *Mode Aspect Ratio 9:16 Aktif:*\n\n` +
+      `Mode: *${modeLabel}* (\`${currentMode}\`)\n\n` +
+      `*Semua Mode yang Tersedia:*\n` +
+      `• \`blur\` → 🌀 Background blur (tidak bolong, rekomendasi)\n` +
+      `• \`crop\` → ✂️ Center crop (full layar, bisa terpotong sisi)\n` +
+      `• \`pad\`  → ⬛ Black bars (letterbox)\n` +
+      `• \`stretch\` → ↔️ Stretch paksa (bisa distorsi)\n` +
+      `• \`none\` → 📐 Keep original ratio\n\n` +
+      `Untuk mengubah: set env var \`ASPECT_RATIO_MODE=blur\` di Railway`,
+    { parse_mode: "Markdown" }
+  );
 });
 
 // ===== MESSAGE HANDLER (URL detection) =====
@@ -109,7 +135,6 @@ bot.on("message:text", async (ctx) => {
   const urlMatch = text.match(URL_REGEX);
 
   if (!urlMatch) {
-    // Not a URL - show help
     if (text.startsWith("/")) return; // ignore unknown commands
     await ctx.reply(
       "Kirim link video YouTube, Facebook, TikTok, atau Instagram untuk mulai! 🎬\n\nGunakan /help untuk panduan lengkap.",
@@ -127,7 +152,6 @@ bot.on("message:text", async (ctx) => {
 });
 
 // ===== CALLBACK QUERY HANDLERS =====
-
 bot.callbackQuery("help", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.reply(messages.help, { parse_mode: "Markdown" });
@@ -168,13 +192,15 @@ bot.callbackQuery(/^set_privacy_(private|unlisted|public)$/, async (ctx) => {
     .update(userSettings)
     .set({ defaultPrivacy: privacy, updatedAt: new Date() })
     .where(eq(userSettings.telegramUserId, userId));
-  await ctx.editMessageText(`✅ Privacy video diset ke: *${privacy}*`, { parse_mode: "Markdown" });
+  await ctx.editMessageText(`✅ Privacy video diset ke: *${privacy}*`, {
+    parse_mode: "Markdown",
+  });
 });
 
 bot.callbackQuery(/^retry_job_(.+)$/, async (ctx) => {
   const jobId = ctx.match[1];
   await ctx.answerCallbackQuery("🔄 Mencoba ulang...");
-  
+
   const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
   if (!jobs.length) {
     await ctx.reply("❌ Job tidak ditemukan.");
@@ -190,7 +216,6 @@ bot.callbackQuery(/^retry_job_(.+)$/, async (ctx) => {
 });
 
 // ===== HANDLER FUNCTIONS =====
-
 async function handleVideoUrl(ctx: Context, url: string) {
   const userId = ctx.from?.id?.toString();
   const chatId = ctx.chat?.id?.toString();
@@ -225,12 +250,15 @@ async function handleVideoUrl(ctx: Context, url: string) {
     .where(eq(youtubeTokens.telegramUserId, userId));
 
   const isConnected = tokens.length > 0;
+  const currentMode = getAspectRatioMode();
+  const modeLabel = getModeLabel(currentMode);
 
   if (!isConnected) {
     await ctx.reply(
       `${getPlatformEmoji(platform)} *Video terdeteksi!*\n\n` +
-      `⚠️ YouTube belum terhubung. Klip akan dikirim ke Telegram saja.\n\n` +
-      `Hubungkan YouTube untuk auto-upload ke YouTube Studio!`,
+        `⚠️ YouTube belum terhubung. Klip akan dikirim ke Telegram saja.\n\n` +
+        `📐 Mode 9:16: *${modeLabel}*\n\n` +
+        `Hubungkan YouTube untuk auto-upload ke YouTube Studio!`,
       {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard()
@@ -242,13 +270,13 @@ async function handleVideoUrl(ctx: Context, url: string) {
   } else {
     await ctx.reply(
       `${getPlatformEmoji(platform)} *Video terdeteksi!*\n\n` +
-      `Platform: ${platform.toUpperCase()}\n` +
-      `URL: \`${url.slice(0, 50)}${url.length > 50 ? "..." : ""}\`\n\n` +
-      `Pilih format output:`,
+        `Platform: ${platform.toUpperCase()}\n` +
+        `URL: \`${url.slice(0, 50)}${url.length > 50 ? "..." : ""}\`\n\n` +
+        `Pilih format output:`,
       {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard()
-          .text("📱 Vertikal 9:16 (Shorts)", `process_v_${jobId}`)
+          .text(`📱 Vertikal 9:16 (${modeLabel})`, `process_v_${jobId}`)
           .row()
           .text("🎬 Original (Keep Ratio)", `process_o_${jobId}`),
       }
@@ -259,24 +287,29 @@ async function handleVideoUrl(ctx: Context, url: string) {
 bot.callbackQuery(/^process_v_(.+)$/, async (ctx) => {
   const jobId = ctx.match[1];
   await ctx.answerCallbackQuery("🚀 Memproses video...");
-  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
+  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", {
+    parse_mode: "Markdown",
+  });
   await processJobWithUpdates(ctx, jobId, true);
 });
 
 bot.callbackQuery(/^process_o_(.+)$/, async (ctx) => {
   const jobId = ctx.match[1];
   await ctx.answerCallbackQuery("🚀 Memproses video...");
-  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
+  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", {
+    parse_mode: "Markdown",
+  });
   await processJobWithUpdates(ctx, jobId, false);
 });
 
 bot.callbackQuery(/^process_(.+)$/, async (ctx) => {
   const rawMatch = ctx.match[1];
-  // Make sure it's not handled by the above patterns
   if (rawMatch.startsWith("v_") || rawMatch.startsWith("o_")) return;
   const jobId = rawMatch;
   await ctx.answerCallbackQuery("🚀 Memproses video...");
-  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
+  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", {
+    parse_mode: "Markdown",
+  });
   await processJobWithUpdates(ctx, jobId, true);
 });
 
@@ -290,7 +323,6 @@ async function processJobWithUpdates(
 
   let statusMessageId: number | null = null;
 
-  // Send initial status message
   const statusMsg = await ctx.api.sendMessage(chatId, "⏳ *Memproses...*", {
     parse_mode: "Markdown",
   });
@@ -312,7 +344,10 @@ async function processJobWithUpdates(
     await processJob(jobId, onStatusUpdate);
 
     // Get completed job
-    const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+    const jobs = await db
+      .select()
+      .from(clipJobs)
+      .where(eq(clipJobs.jobId, jobId));
     const job = jobs[0];
 
     if (job.status === "done" && job.clips) {
@@ -335,15 +370,17 @@ async function processJobWithUpdates(
         if (!clip.filePath || !fs.existsSync(clip.filePath)) continue;
 
         const caption = [
-          `🎬 *Klip ${i + 1}/${successClips.length}*`,
+          `<b>🎬 Klip ${i + 1}/${successClips.length}</b>`,
           ``,
-          `📝 *${clip.title}*`,
+          `📝 ${clip.title}`,
           ``,
           `⏱ Durasi: ${clip.duration}s`,
           `🔥 Viral Score: ${clip.viralScore}/10`,
           `💡 ${clip.reason}`,
           clip.youtubeUrl ? `\n🔗 YouTube: ${clip.youtubeUrl}` : "",
-          clip.youtubeUrl ? `_(Tersimpan sebagai Draft di YouTube Studio)_` : ``,
+          clip.youtubeUrl
+            ? `<i>(Tersimpan sebagai Draft di YouTube Studio)</i>`
+            : ``,
         ]
           .join("\n")
           .trim();
@@ -351,28 +388,28 @@ async function processJobWithUpdates(
         try {
           await ctx.api.sendVideo(chatId, new InputFile(clip.filePath), {
             caption,
-            parse_mode: "Markdown",
-            supports_streaming: true,
+            parse_mode: "HTML",
           });
         } catch (err) {
-          console.error(`Failed to send clip ${i}:`, err);
+          console.error(`Failed to send clip ${i + 1}:`, err);
           await ctx.api.sendMessage(
             chatId,
-            `⚠️ Gagal mengirim klip ${i + 1}: File mungkin terlalu besar.`
+            `✅ Klip ${i + 1} dibuat: *${clip.title}*${clip.youtubeUrl ? `\n🔗 ${clip.youtubeUrl}` : ""}`,
+            { parse_mode: "Markdown" }
           );
         }
       }
 
-      // Summary with YouTube link if available
+      // Summary message
       const hasYoutube = successClips.some((c) => c.youtubeUrl);
       const summaryKeyboard = new InlineKeyboard();
-
       if (hasYoutube) {
-        summaryKeyboard.url(
-          "📺 Buka YouTube Studio",
-          "https://studio.youtube.com/channel/videos/upload"
-        );
-        summaryKeyboard.row();
+        summaryKeyboard
+          .url(
+            "📺 Buka YouTube Studio",
+            "https://studio.youtube.com/channel/videos/upload"
+          )
+          .row();
       }
       summaryKeyboard.text("🎬 Proses Video Lain", "help");
 
@@ -398,7 +435,9 @@ async function processJobWithUpdates(
           if (c.filePath && fs.existsSync(c.filePath)) {
             try {
               fs.unlinkSync(c.filePath);
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
           }
         });
       }, 30000); // Wait 30s before cleanup
@@ -410,7 +449,10 @@ async function processJobWithUpdates(
           messages.error(job.errorMessage || "Terjadi kesalahan tidak diketahui"),
           {
             parse_mode: "Markdown",
-            reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
+            reply_markup: new InlineKeyboard().text(
+              "🔄 Coba Lagi",
+              `retry_job_${jobId}`
+            ),
           }
         );
       }
@@ -421,7 +463,10 @@ async function processJobWithUpdates(
       await ctx.api
         .editMessageText(chatId, statusMessageId, messages.error(errorMsg), {
           parse_mode: "Markdown",
-          reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
+          reply_markup: new InlineKeyboard().text(
+            "🔄 Coba Lagi",
+            `retry_job_${jobId}`
+          ),
         })
         .catch(() => {});
     }
@@ -433,7 +478,6 @@ async function handleConnect(ctx: Context) {
   if (!userId) return;
 
   const connectUrl = await getConnectUrl(userId);
-
   await ctx.reply(messages.connecting, {
     parse_mode: "Markdown",
     reply_markup: new InlineKeyboard()
@@ -456,16 +500,21 @@ async function handleSettings(ctx: Context) {
   if (!userId) return;
 
   await ensureUserSettings(userId);
+
   const settingsRows = await db
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, userId));
+
   const settings = settingsRows[0];
 
   const tokens = await db
     .select()
     .from(youtubeTokens)
     .where(eq(youtubeTokens.telegramUserId, userId));
+
+  const currentMode = getAspectRatioMode();
+  const modeLabel = getModeLabel(currentMode);
 
   await ctx.reply(
     messages.settings({
@@ -474,7 +523,9 @@ async function handleSettings(ctx: Context) {
       maxDuration: settings.maxDuration || 40,
       defaultPrivacy: settings.defaultPrivacy || "private",
       youtubeConnected: tokens.length > 0,
-    }),
+    }) +
+      `\n• Mode 9:16: *${modeLabel}*\n\n` +
+      `_Ubah mode via env: ASPECT\\_RATIO\\_MODE=blur_`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
@@ -523,10 +574,8 @@ async function handleHistory(ctx: Context) {
   jobs.forEach((job, i) => {
     const clips = (job.clips as ClipResult[] | null) || [];
     const doneClips = clips.filter((c) => c.youtubeUrl).length;
-    msg += `${i + 1}. ${statusEmoji[job.status] || "❓"} *${
-      (job.videoTitle || "Video").slice(0, 35)
-    }*\n`;
-    msg += `   ${getPlatformEmoji(job.platform)} ${job.platform} | ${job.status}`;
+    msg += `${i + 1}. ${statusEmoji[job.status] || "❓"} *${(job.videoTitle || "Video").slice(0, 35)}*\n`;
+    msg += ` ${getPlatformEmoji(job.platform)} ${job.platform} | ${job.status}`;
     if (job.status === "done" && clips.length) {
       msg += ` | ${clips.length} klip`;
       if (doneClips) msg += ` (${doneClips} di YT)`;
@@ -563,3 +612,6 @@ bot.catch((err) => {
 });
 
 export default bot;
+
+// Export formatDuration for usage elsewhere
+export { formatDuration };

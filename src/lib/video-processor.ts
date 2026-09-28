@@ -5,12 +5,13 @@ import path from "path";
 import os from "os";
 import { ClipResult } from "@/db/schema";
 import type { TranscriptSegment } from "@/lib/ai-analyzer";
+import { getAspectRatioMode, buildFFmpegFilterArgs, getModeLabel, type AspectRatioMode } from "@/lib/video-config";
 
 export type { TranscriptSegment };
 
 const execAsync = promisify(exec);
 
-// Use /tmp for Vercel (writable) or local temp
+// Use /tmp for Railway/Vercel (writable) or local temp
 function getTempDir(): string {
   const tmpDir = process.env.TEMP_DIR || os.tmpdir();
   const dir = path.join(tmpDir, "autoclip");
@@ -47,7 +48,7 @@ export function detectPlatform(url: string): string {
 
 // Check if yt-dlp is available
 async function checkYtDlp(): Promise<string> {
-  const candidates = ["yt-dlp", "yt-dlp-bin", "python3 -m yt_dlp"];
+  const candidates = ["yt-dlp", "python3 -m yt_dlp"];
   for (const cmd of candidates) {
     try {
       await execAsync(`${cmd} --version`);
@@ -77,17 +78,17 @@ export async function downloadVideo(
 ): Promise<{ filePath: string; title: string; duration: number }> {
   const jobDir = getJobDir(jobId);
   const outputTemplate = path.join(jobDir, "source.%(ext)s");
-
   const ytDlp = await checkYtDlp();
   const hasFFmpeg = await checkFFmpeg();
 
   const args = [
     url,
-    "-o", outputTemplate,
-    "--format", hasFFmpeg
-      ? "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
-      : "best[height<=720]/best",
-    "--merge-output-format", "mp4",
+    "--extractor-args",
+    "youtube:player_client=android",
+    "-o",
+    outputTemplate,
+    "--format",
+    "b",
     "--no-playlist",
     "--restrict-filenames",
     "--write-info-json",
@@ -96,7 +97,8 @@ export async function downloadVideo(
   ];
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(ytDlp.includes(" ") ? "python3" : ytDlp,
+    const proc = spawn(
+      ytDlp.includes(" ") ? "python3" : ytDlp,
       ytDlp.includes(" ") ? ["-m", "yt_dlp", ...args] : args
     );
 
@@ -126,8 +128,10 @@ export async function downloadVideo(
 
       // Find the downloaded file
       const files = fs.readdirSync(jobDir);
-      const videoFile = files.find((f) =>
-        f.startsWith("source") && (f.endsWith(".mp4") || f.endsWith(".mkv") || f.endsWith(".webm"))
+      const videoFile = files.find(
+        (f) =>
+          f.startsWith("source") &&
+          (f.endsWith(".mp4") || f.endsWith(".mkv") || f.endsWith(".webm"))
       );
 
       if (!videoFile) {
@@ -144,7 +148,9 @@ export async function downloadVideo(
 
       if (infoFile) {
         try {
-          const info = JSON.parse(fs.readFileSync(path.join(jobDir, infoFile), "utf-8"));
+          const info = JSON.parse(
+            fs.readFileSync(path.join(jobDir, infoFile), "utf-8")
+          );
           title = info.title || title;
           duration = info.duration || 0;
         } catch {
@@ -176,11 +182,11 @@ export async function downloadVideo(
 export async function transcribeAudio(
   filePath: string,
   language?: string
-): Promise<import("@/lib/ai-analyzer").TranscriptSegment[]> {
+): Promise<TranscriptSegment[]> {
   // Extract audio first
   const audioPath = filePath.replace(/\.[^.]+$/, ".mp3");
-
   const hasFFmpeg = await checkFFmpeg();
+
   if (!hasFFmpeg) {
     console.warn("FFmpeg not available, skipping transcription");
     return [];
@@ -242,14 +248,13 @@ export async function transcribeAudio(
 
   // Clean up
   if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-
   return [];
 }
 
 async function transcribeWithGroq(
   audioPath: string,
   language?: string
-): Promise<import("@/lib/ai-analyzer").TranscriptSegment[]> {
+): Promise<TranscriptSegment[]> {
   const FormData = (await import("form-data")).default;
   const axios = (await import("axios")).default;
 
@@ -285,11 +290,22 @@ async function transcribeWithGroq(
       text: seg.text.trim(),
     }));
   }
-
   return [];
 }
 
-// Cut video clip using FFmpeg
+/**
+ * Cut video clip using FFmpeg dengan mode aspect ratio yang bisa dikonfigurasi.
+ *
+ * Mode dikontrol via env var ASPECT_RATIO_MODE:
+ *   - blur    → background blur (default, tidak bolong)
+ *   - crop    → center crop
+ *   - pad     → black bars
+ *   - stretch → stretch paksa
+ *   - none    → keep original
+ *
+ * makeVertical=true  → gunakan mode dari env (default: blur)
+ * makeVertical=false → keep original (mode=none)
+ */
 export async function cutVideoClip(
   sourceFile: string,
   startTime: number,
@@ -303,40 +319,64 @@ export async function cutVideoClip(
   }
 
   const duration = endTime - startTime;
+  const mode: AspectRatioMode = makeVertical ? getAspectRatioMode() : "none";
 
-  let filterComplex = "";
-  if (makeVertical) {
-    // Convert to 9:16 vertical (1080x1920) for Shorts
-    filterComplex = [
-      `-vf "scale=1080:1920:force_original_aspect_ratio=decrease,`,
-      `pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,`,
-      `setsar=1"`,
-    ].join("");
+  console.log(`[video-processor] Mode 9:16: ${getModeLabel(mode)} (makeVertical=${makeVertical})`);
+
+  const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
+
+  let cmd: string;
+
+  if (useFilterComplex) {
+    // Filter complex (dipakai untuk blur mode dengan multi-stream)
+    cmd = [
+      "ffmpeg",
+      "-y",
+      "-ss", startTime.toString(),
+      "-i", `"${sourceFile}"`,
+      "-t", duration.toString(),
+      "-filter_complex", `"${filterValue}"`,
+      "-map", `"[out]"`,
+      "-map", "0:a?",
+      "-threads", "2",
+      "-c:v", "libx264",
+      "-preset", "fast",
+      "-crf", "23",
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-movflags", "+faststart",
+      `"${outputPath}"`,
+    ].join(" ");
   } else {
-    filterComplex = `-vf "scale=trunc(iw/2)*2:trunc(ih/2)*2"`;
+    // Simple -vf filter
+    cmd = [
+      "ffmpeg",
+      "-y",
+      "-ss", startTime.toString(),
+      "-i", `"${sourceFile}"`,
+      "-t", duration.toString(),
+      "-vf", `"${filterValue}"`,
+      "-threads", "2",
+      "-c:v", "libx264",
+      "-preset", "fast",
+      "-crf", "23",
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-movflags", "+faststart",
+      `"${outputPath}"`,
+    ].join(" ");
   }
-
-  const cmd = [
-    "ffmpeg",
-    "-y",
-    "-ss", startTime.toString(),
-    "-i", `"${sourceFile}"`,
-    "-t", duration.toString(),
-    makeVertical ? filterComplex : filterComplex,
-    "-c:v", "libx264",
-    "-preset", "fast",
-    "-crf", "23",
-    "-c:a", "aac",
-    "-b:a", "128k",
-    "-movflags", "+faststart",
-    `"${outputPath}"`,
-  ].join(" ");
 
   try {
     await execAsync(cmd, { timeout: 300000 }); // 5 minute timeout
     return outputPath;
   } catch (err) {
     console.error("FFmpeg cut failed:", err);
+    // Fallback ke pad mode jika blur gagal
+    if (mode === "blur") {
+      console.warn("[video-processor] Blur mode gagal, fallback ke crop mode...");
+      return await cutVideoClip(sourceFile, startTime, endTime, outputPath + "_retry.mp4", makeVertical);
+    }
     throw new Error(`Video cutting failed: ${err}`);
   }
 }
@@ -351,17 +391,33 @@ export async function processClips(
 ): Promise<ClipResult[]> {
   const jobDir = getJobDir(jobId);
   const results: ClipResult[] = [];
+  const mode = makeVertical ? getAspectRatioMode() : "none";
+
+  console.log(`[processClips] Processing ${clips.length} clips with mode: ${getModeLabel(mode)}`);
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
-    const outputPath = path.join(jobDir, `clip_${i}.mp4`);
+    if (onProgress) onProgress(i, clips.length);
+
+    const outputPath = path.join(jobDir, `clip_${i + 1}.mp4`);
 
     try {
-      if (onProgress) onProgress(i, clips.length);
-      await cutVideoClip(sourceFile, clip.startTime, clip.endTime, outputPath, makeVertical);
-      results.push({ ...clip, filePath: outputPath });
+      await cutVideoClip(
+        sourceFile,
+        clip.startTime,
+        clip.endTime,
+        outputPath,
+        makeVertical
+      );
+
+      const actualDuration = await getVideoDuration(outputPath);
+      results.push({
+        ...clip,
+        duration: Math.round(actualDuration || clip.duration),
+        filePath: outputPath,
+      });
     } catch (err) {
-      console.error(`Failed to cut clip ${i}:`, err);
+      console.error(`Failed to process clip ${i + 1}:`, err);
       results.push({ ...clip, filePath: undefined });
     }
   }
@@ -369,7 +425,7 @@ export async function processClips(
   return results;
 }
 
-// Get video duration with ffprobe
+// Get video duration via ffprobe
 export async function getVideoDuration(filePath: string): Promise<number> {
   try {
     const { stdout } = await execAsync(

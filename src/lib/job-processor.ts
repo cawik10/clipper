@@ -1,9 +1,18 @@
 import { db } from "@/db";
 import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { downloadVideo, transcribeAudio, processClips, cleanupJobDir } from "@/lib/video-processor";
+import {
+  downloadVideo,
+  transcribeAudio,
+  processClips,
+  cleanupJobDir,
+} from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
-import { uploadClipsToYouTube, isTokenExpired, refreshAccessToken } from "@/lib/youtube-uploader";
+import {
+  uploadClipsToYouTube,
+  isTokenExpired,
+  refreshAccessToken,
+} from "@/lib/youtube-uploader";
 
 type StatusUpdateFn = (status: string, message: string) => Promise<void>;
 
@@ -14,7 +23,11 @@ export async function processJob(
   const update = onStatusUpdate || (async () => {});
 
   // Get job from DB
-  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  const jobs = await db
+    .select()
+    .from(clipJobs)
+    .where(eq(clipJobs.jobId, jobId));
+
   if (!jobs.length) {
     throw new Error(`Job ${jobId} not found`);
   }
@@ -26,7 +39,7 @@ export async function processJob(
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, job.telegramUserId));
-  
+
   const settings = settingsRows[0] || {
     maxClips: 3,
     minDuration: 20,
@@ -52,12 +65,17 @@ export async function processJob(
         jobId,
         async (progress) => {
           if (progress % 20 === 0) {
-            await update("downloading", `⬇️ Mengunduh video... ${progress.toFixed(0)}%`);
+            await update(
+              "downloading",
+              `⬇️ Mengunduh video... ${progress.toFixed(0)}%`
+            );
           }
         }
       );
     } catch (err) {
-      throw new Error(`Gagal mengunduh video: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `Gagal mengunduh video: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     await db
@@ -80,7 +98,10 @@ export async function processJob(
 
     let transcript: { start: number; end: number; text: string }[] = [];
     try {
-      transcript = await transcribeAudio(downloadResult.filePath, settings.language || "id");
+      transcript = await transcribeAudio(
+        downloadResult.filePath,
+        settings.language || "id"
+      );
     } catch (err) {
       console.warn("Transcription failed, proceeding without:", err);
     }
@@ -88,7 +109,10 @@ export async function processJob(
     // === STEP 3: ANALYZE ===
     await update("analyzing", "🧠 Menganalisis momen viral dengan AI...");
 
-    let analysisClips: Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[];
+    let analysisClips: Omit<
+      ClipResult,
+      "filePath" | "youtubeVideoId" | "youtubeUrl"
+    >[];
     try {
       analysisClips = await analyzeVideoForClips(
         {
@@ -103,11 +127,15 @@ export async function processJob(
         settings.maxDuration || 40
       );
     } catch (err) {
-      throw new Error(`Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     if (!analysisClips.length) {
-      throw new Error("Tidak ada momen yang cocok ditemukan untuk dijadikan Shorts");
+      throw new Error(
+        "Tidak ada momen yang cocok ditemukan untuk dijadikan Shorts"
+      );
     }
 
     await update("analyzing", `🎯 ${analysisClips.length} momen viral ditemukan!`);
@@ -122,7 +150,7 @@ export async function processJob(
       downloadResult.filePath,
       analysisClips,
       jobId,
-      true, // make vertical 9:16
+      true, // makeVertical — mode dikontrol via ASPECT_RATIO_MODE env var
       async (clipIndex, total) => {
         await update("clipping", `✂️ Memotong klip ${clipIndex + 1}/${total}...`);
       }
@@ -153,8 +181,8 @@ export async function processJob(
     if (tokenRows.length > 0) {
       const tokenRow = tokenRows[0];
 
-      // Refresh token if expired
       let { accessToken, refreshToken } = tokenRow;
+
       if (isTokenExpired(tokenRow.expiresAt)) {
         try {
           const newTokens = await refreshAccessToken(tokenRow.refreshToken);
@@ -178,7 +206,8 @@ export async function processJob(
         successfulClips,
         accessToken,
         refreshToken,
-        (settings.defaultPrivacy as "private" | "unlisted" | "public") || "private",
+        (settings.defaultPrivacy as "private" | "unlisted" | "public") ||
+          "private",
         async (clipIndex, result, error) => {
           if (result) {
             await update(

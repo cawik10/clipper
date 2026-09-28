@@ -17,7 +17,10 @@ export async function POST(req: Request) {
 
 export async function GET() {
   return new Response(
-    JSON.stringify({ status: "Telegram webhook is active", bot: "AutoClip Bot" }),
+    JSON.stringify({
+      status: "Telegram webhook is active",
+      bot: "AutoClip Bot",
+    }),
     { headers: { "Content-Type": "application/json" } }
   );
 }

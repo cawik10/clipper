@@ -3,54 +3,44 @@ import { db } from "@/db";
 import { youtubeTokens, userSettings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { exchangeCodeForTokens } from "@/lib/youtube-oauth";
-import { bot } from "@/lib/telegram-bot";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const code = searchParams.get("code");
-  const state = searchParams.get("state"); // Contains Telegram user ID
-  const error = searchParams.get("error");
+  const code = req.nextUrl.searchParams.get("code");
+  const state = req.nextUrl.searchParams.get("state"); // telegramUserId
+  const error = req.nextUrl.searchParams.get("error");
 
   if (error) {
     return new NextResponse(
-      `<html><body style="font-family:sans-serif;text-align:center;padding:40px">
-        <h2>❌ Authorization Denied</h2>
-        <p>You denied access. Close this window and try again.</p>
-        <script>setTimeout(()=>window.close(),3000)</script>
-      </body></html>`,
+      `<html><body><h2>❌ OAuth Error: ${error}</h2><p>Kembali ke Telegram dan coba lagi.</p></body></html>`,
       { headers: { "Content-Type": "text/html" } }
     );
   }
 
   if (!code || !state) {
     return new NextResponse(
-      `<html><body style="font-family:sans-serif;text-align:center;padding:40px">
-        <h2>❌ Invalid Request</h2>
-        <p>Missing authorization code or state.</p>
-      </body></html>`,
+      `<html><body><h2>❌ Missing Parameters</h2><p>Code atau state tidak ditemukan.</p></body></html>`,
       { headers: { "Content-Type": "text/html" } }
     );
   }
 
-  const telegramUserId = state;
-
   try {
-    // Exchange code for tokens
     const tokens = await exchangeCodeForTokens(code);
 
     if (!tokens.access_token || !tokens.refresh_token) {
-      throw new Error("Missing tokens in response");
+      throw new Error("Invalid tokens received from Google");
     }
 
-    const expiresAt = new Date(tokens.expiry_date || Date.now() + 3600 * 1000);
+    const expiresAt = tokens.expiry_date
+      ? new Date(tokens.expiry_date)
+      : new Date(Date.now() + 3600 * 1000);
 
-    // Save tokens to DB
+    // Upsert token
     const existing = await db
       .select()
       .from(youtubeTokens)
-      .where(eq(youtubeTokens.telegramUserId, telegramUserId));
+      .where(eq(youtubeTokens.telegramUserId, state));
 
     if (existing.length > 0) {
       await db
@@ -59,17 +49,17 @@ export async function GET(req: NextRequest) {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
           expiresAt,
-          scope: tokens.scope || "",
+          scope: tokens.scope || null,
           updatedAt: new Date(),
         })
-        .where(eq(youtubeTokens.telegramUserId, telegramUserId));
+        .where(eq(youtubeTokens.telegramUserId, state));
     } else {
       await db.insert(youtubeTokens).values({
-        telegramUserId,
+        telegramUserId: state,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         expiresAt,
-        scope: tokens.scope || "",
+        scope: tokens.scope || null,
       });
     }
 
@@ -77,73 +67,56 @@ export async function GET(req: NextRequest) {
     await db
       .update(userSettings)
       .set({ youtubeConnected: true, updatedAt: new Date() })
-      .where(eq(userSettings.telegramUserId, telegramUserId));
+      .where(eq(userSettings.telegramUserId, state));
 
-    // Notify user via Telegram
-    try {
-      await bot.api.sendMessage(
-        parseInt(telegramUserId),
-        `✅ *YouTube Studio berhasil terhubung!*\n\n` +
-          `Sekarang klip video Anda akan otomatis diupload ke YouTube Studio sebagai Draft.\n\n` +
-          `🎬 Kirim link video untuk mulai membuat Shorts!`,
-        { parse_mode: "Markdown" }
-      );
-    } catch (telegramErr) {
-      console.error("Failed to notify user:", telegramErr);
+    // Send confirmation message via Telegram bot
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (botToken && state) {
+      try {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: state,
+            text: "✅ *YouTube Berhasil Terhubung!*\n\nAkun YouTube Anda sudah terhubung.\nKirim link video untuk mulai membuat Shorts! 🎬",
+            parse_mode: "Markdown",
+          }),
+        });
+      } catch {
+        // ignore notification error
+      }
     }
 
     return new NextResponse(
-      `<html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body { font-family: -apple-system, sans-serif; text-align: center; padding: 40px 20px; background: #f5f5f5; }
-          .card { background: white; border-radius: 16px; padding: 40px; max-width: 400px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-          h2 { color: #22c55e; font-size: 24px; margin-bottom: 16px; }
-          p { color: #666; line-height: 1.6; }
-          .icon { font-size: 64px; margin-bottom: 20px; }
-          .close-btn { background: #ef4444; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 20px; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <div class="icon">✅</div>
-          <h2>YouTube Terhubung!</h2>
-          <p>Akun YouTube Studio Anda berhasil terhubung dengan AutoClip Bot.</p>
-          <p>Kembali ke Telegram dan mulai kirim link video!</p>
-          <button class="close-btn" onclick="window.close()">Tutup Window</button>
-        </div>
-        <script>setTimeout(()=>window.close(), 5000)</script>
-      </body>
-      </html>`,
+      `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Terhubung - AutoClip Bot</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #0f0f0f; color: #fff; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    .card { background: #1a1a2e; border: 1px solid #16213e; border-radius: 16px; padding: 40px; text-align: center; max-width: 400px; }
+    .icon { font-size: 64px; margin-bottom: 16px; }
+    h1 { color: #4ade80; margin: 0 0 12px; }
+    p { color: #9ca3af; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✅</div>
+    <h1>YouTube Terhubung!</h1>
+    <p>Akun YouTube Studio Anda berhasil terhubung dengan AutoClip Bot.<br><br>Kembali ke Telegram dan mulai kirim link video!</p>
+  </div>
+</body>
+</html>`,
       { headers: { "Content-Type": "text/html" } }
     );
   } catch (err) {
     console.error("OAuth callback error:", err);
-    const errorMsg = err instanceof Error ? err.message : "Unknown error";
-
     return new NextResponse(
-      `<html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          body { font-family: -apple-system, sans-serif; text-align: center; padding: 40px 20px; background: #f5f5f5; }
-          .card { background: white; border-radius: 16px; padding: 40px; max-width: 400px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-          h2 { color: #ef4444; }
-          .icon { font-size: 64px; margin-bottom: 20px; }
-          pre { background: #f5f5f5; padding: 12px; border-radius: 8px; text-align: left; font-size: 12px; overflow: auto; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <div class="icon">❌</div>
-          <h2>Connection Failed</h2>
-          <pre>${errorMsg}</pre>
-          <p>Close this window and try again from Telegram.</p>
-        </div>
-      </body>
-      </html>`,
-      { headers: { "Content-Type": "text/html" } }
+      `<html><body><h2>❌ Error: ${err instanceof Error ? err.message : String(err)}</h2></body></html>`,
+      { headers: { "Content-Type": "text/html" }, status: 500 }
     );
   }
 }
