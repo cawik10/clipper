@@ -10,6 +10,7 @@ export type { TranscriptSegment };
 
 const execAsync = promisify(exec);
 
+// Use /tmp for Vercel (writable) or local temp
 function getTempDir(): string {
   const tmpDir = process.env.TEMP_DIR || os.tmpdir();
   const dir = path.join(tmpDir, "autoclip");
@@ -34,6 +35,7 @@ export function cleanupJobDir(jobId: string): void {
   }
 }
 
+// Detect platform from URL
 export function detectPlatform(url: string): string {
   if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
   if (/facebook\.com|fb\.watch/.test(url)) return "facebook";
@@ -43,6 +45,7 @@ export function detectPlatform(url: string): string {
   return "unknown";
 }
 
+// Check if yt-dlp is available
 async function checkYtDlp(): Promise<string> {
   const candidates = ["yt-dlp", "yt-dlp-bin", "python3 -m yt_dlp"];
   for (const cmd of candidates) {
@@ -56,6 +59,7 @@ async function checkYtDlp(): Promise<string> {
   throw new Error("yt-dlp not found. Please install yt-dlp.");
 }
 
+// Check if ffmpeg is available
 async function checkFFmpeg(): Promise<boolean> {
   try {
     await execAsync("ffmpeg -version");
@@ -65,6 +69,7 @@ async function checkFFmpeg(): Promise<boolean> {
   }
 }
 
+// Download video using yt-dlp
 export async function downloadVideo(
   url: string,
   jobId: string,
@@ -72,17 +77,17 @@ export async function downloadVideo(
 ): Promise<{ filePath: string; title: string; duration: number }> {
   const jobDir = getJobDir(jobId);
   const outputTemplate = path.join(jobDir, "source.%(ext)s");
+
   const ytDlp = await checkYtDlp();
   const hasFFmpeg = await checkFFmpeg();
 
   const args = [
     url,
-    "--extractor-args",
-    "youtube:player_client=android",
-    "-o",
-    outputTemplate,
-    "--format",
-    "b",
+    "-o", outputTemplate,
+    "--format", hasFFmpeg
+      ? "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+      : "best[height<=720]/best",
+    "--merge-output-format", "mp4",
     "--no-playlist",
     "--restrict-filenames",
     "--write-info-json",
@@ -91,8 +96,7 @@ export async function downloadVideo(
   ];
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(
-      ytDlp.includes(" ") ? "python3" : ytDlp,
+    const proc = spawn(ytDlp.includes(" ") ? "python3" : ytDlp,
       ytDlp.includes(" ") ? ["-m", "yt_dlp", ...args] : args
     );
 
@@ -120,11 +124,10 @@ export async function downloadVideo(
         return;
       }
 
+      // Find the downloaded file
       const files = fs.readdirSync(jobDir);
-      const videoFile = files.find(
-        (f) =>
-          f.startsWith("source") &&
-          (f.endsWith(".mp4") || f.endsWith(".mkv") || f.endsWith(".webm"))
+      const videoFile = files.find((f) =>
+        f.startsWith("source") && (f.endsWith(".mp4") || f.endsWith(".mkv") || f.endsWith(".webm"))
       );
 
       if (!videoFile) {
@@ -134,15 +137,14 @@ export async function downloadVideo(
 
       const filePath = path.join(jobDir, videoFile);
 
+      // Read info JSON for title and duration
       const infoFile = files.find((f) => f.endsWith(".info.json"));
       let title = "Untitled Video";
       let duration = 0;
 
       if (infoFile) {
         try {
-          const info = JSON.parse(
-            fs.readFileSync(path.join(jobDir, infoFile), "utf-8")
-          );
+          const info = JSON.parse(fs.readFileSync(path.join(jobDir, infoFile), "utf-8"));
           title = info.title || title;
           duration = info.duration || 0;
         } catch {
@@ -150,6 +152,7 @@ export async function downloadVideo(
         }
       }
 
+      // If duration not from info, probe with ffprobe
       if (!duration && hasFFmpeg) {
         try {
           const { stdout } = await execAsync(
@@ -169,13 +172,15 @@ export async function downloadVideo(
   });
 }
 
+// Transcribe audio using Whisper API or local method
 export async function transcribeAudio(
   filePath: string,
   language?: string
-): Promise<{ start: number; end: number; text: string }[]> {
+): Promise<import("@/lib/ai-analyzer").TranscriptSegment[]> {
+  // Extract audio first
   const audioPath = filePath.replace(/\.[^.]+$/, ".mp3");
-  const hasFFmpeg = await checkFFmpeg();
 
+  const hasFFmpeg = await checkFFmpeg();
   if (!hasFFmpeg) {
     console.warn("FFmpeg not available, skipping transcription");
     return [];
@@ -190,20 +195,22 @@ export async function transcribeAudio(
     return [];
   }
 
+  // Try OpenAI Whisper API
   if (process.env.OPENAI_API_KEY) {
     try {
       const OpenAI = (await import("openai")).default;
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
       const audioStream = fs.createReadStream(audioPath);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transcription = await openai.audio.transcriptions.create({
-        file: audioStream as any,
+        file: audioStream as Parameters<typeof openai.audio.transcriptions.create>[0]["file"],
         model: "whisper-1",
         response_format: "verbose_json",
         timestamp_granularities: ["segment"],
         language: language || undefined,
       });
 
+      // Clean up audio file
       if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
 
       interface WhisperSegment {
@@ -224,6 +231,7 @@ export async function transcribeAudio(
     }
   }
 
+  // Groq Whisper fallback
   if (process.env.GROQ_API_KEY) {
     try {
       return await transcribeWithGroq(audioPath, language);
@@ -232,14 +240,16 @@ export async function transcribeAudio(
     }
   }
 
+  // Clean up
   if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+
   return [];
 }
 
 async function transcribeWithGroq(
   audioPath: string,
   language?: string
-): Promise<{ start: number; end: number; text: string }[]> {
+): Promise<import("@/lib/ai-analyzer").TranscriptSegment[]> {
   const FormData = (await import("form-data")).default;
   const axios = (await import("axios")).default;
 
@@ -279,6 +289,7 @@ async function transcribeWithGroq(
   return [];
 }
 
+// Cut video clip using FFmpeg
 export async function cutVideoClip(
   sourceFile: string,
   startTime: number,
@@ -295,6 +306,7 @@ export async function cutVideoClip(
 
   let filterComplex = "";
   if (makeVertical) {
+    // Convert to 9:16 vertical (1080x1920) for Shorts
     filterComplex = [
       `-vf "scale=1080:1920:force_original_aspect_ratio=decrease,`,
       `pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,`,
@@ -307,32 +319,21 @@ export async function cutVideoClip(
   const cmd = [
     "ffmpeg",
     "-y",
-    "-ss",
-    startTime.toString(),
-    "-i",
-    `"${sourceFile}"`,
-    "-t",
-    duration.toString(),
-    filterComplex,
-    "-threads",
-    "2",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "fast",
-    "-crf",
-    "23",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k",
-    "-movflags",
-    "+faststart",
+    "-ss", startTime.toString(),
+    "-i", `"${sourceFile}"`,
+    "-t", duration.toString(),
+    makeVertical ? filterComplex : filterComplex,
+    "-c:v", "libx264",
+    "-preset", "fast",
+    "-crf", "23",
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-movflags", "+faststart",
     `"${outputPath}"`,
   ].join(" ");
 
   try {
-    await execAsync(cmd, { timeout: 300000 });
+    await execAsync(cmd, { timeout: 300000 }); // 5 minute timeout
     return outputPath;
   } catch (err) {
     console.error("FFmpeg cut failed:", err);
@@ -340,9 +341,10 @@ export async function cutVideoClip(
   }
 }
 
+// Process all clips for a job
 export async function processClips(
   sourceFile: string,
-  clips: Omit<ClipResult, "filePath">[],
+  clips: Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[],
   jobId: string,
   makeVertical: boolean = true,
   onProgress?: (clipIndex: number, total: number) => void
@@ -352,29 +354,22 @@ export async function processClips(
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
-    if (onProgress) onProgress(i, clips.length);
-
-    const outputPath = path.join(jobDir, `clip_${i + 1}.mp4`);
+    const outputPath = path.join(jobDir, `clip_${i}.mp4`);
 
     try {
-      await cutVideoClip(
-        sourceFile,
-        clip.startTime,
-        clip.endTime,
-        outputPath,
-        makeVertical
-      );
-
+      if (onProgress) onProgress(i, clips.length);
+      await cutVideoClip(sourceFile, clip.startTime, clip.endTime, outputPath, makeVertical);
       results.push({ ...clip, filePath: outputPath });
     } catch (err) {
-      console.error(`Failed to process clip ${i + 1}:`, err);
-      results.push({ ...clip });
+      console.error(`Failed to cut clip ${i}:`, err);
+      results.push({ ...clip, filePath: undefined });
     }
   }
 
   return results;
 }
 
+// Get video duration with ffprobe
 export async function getVideoDuration(filePath: string): Promise<number> {
   try {
     const { stdout } = await execAsync(

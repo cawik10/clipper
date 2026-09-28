@@ -9,7 +9,7 @@ RUN apk add --no-cache \
     ca-certificates
 
 # Install yt-dlp
-RUN pip3 install -U yt-dlp --break-system-packages || pip3 install -U yt-dlp
+RUN pip3 install yt-dlp --break-system-packages || pip3 install yt-dlp
 
 # Dependencies stage
 FROM base AS deps
@@ -21,9 +21,9 @@ RUN npm ci --only=production
 FROM base AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 COPY . .
-RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" TELEGRAM_BOT_TOKEN="dummy_token_for_build" npm run build
+RUN npm run build
 
 # Production stage
 FROM base AS runner
@@ -38,8 +38,7 @@ RUN mkdir -p /tmp/autoclip
 # Copy built app
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-# COPY --from=builder /app/public ./public
-COPY --from=builder /app/youtube-cookies.txt ./
+COPY --from=builder /app/public ./public
 
 EXPOSE 3000
 

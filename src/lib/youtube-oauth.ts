@@ -36,7 +36,10 @@ export async function exchangeCodeForTokens(code: string) {
   return tokens;
 }
 
-export function getYouTubeClient(accessToken: string, refreshToken: string) {
+export function getYouTubeClient(
+  accessToken: string,
+  refreshToken: string
+) {
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials({
     access_token: accessToken,

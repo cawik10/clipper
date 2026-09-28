@@ -7,11 +7,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    // Test DB connection
     await db.select({ count: sql<number>`count(*)` }).from(clipJobs);
 
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const googleClientId = process.env.GOOGLE_CLIENT_ID;
-    const tiktokClientKey = process.env.TIKTOK_CLIENT_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
@@ -23,9 +23,6 @@ export async function GET() {
         database: "connected",
         telegram: botToken ? "configured" : "missing TELEGRAM_BOT_TOKEN",
         google_oauth: googleClientId ? "configured" : "missing GOOGLE_CLIENT_ID",
-        tiktok_oauth: tiktokClientKey
-          ? "configured"
-          : "missing TIKTOK_CLIENT_KEY",
         ai: openaiKey
           ? "openai"
           : geminiKey
@@ -39,7 +36,6 @@ export async function GET() {
         ai_analysis: !!(openaiKey || geminiKey),
         transcription: !!(openaiKey || groqKey),
         youtube_upload: !!googleClientId,
-        tiktok_upload: !!tiktokClientKey,
         platforms: ["youtube", "facebook", "tiktok", "instagram"],
       },
     });

@@ -1,31 +1,9 @@
 import { db } from "@/db";
-import {
-  clipJobs,
-  youtubeTokens,
-  tiktokTokens,
-  userSettings,
-  ClipResult,
-} from "@/db/schema";
+import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import {
-  downloadVideo,
-  transcribeAudio,
-  processClips,
-} from "@/lib/video-processor";
+import { downloadVideo, transcribeAudio, processClips, cleanupJobDir } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
-import {
-  uploadClipsToYouTube,
-  isTokenExpired as isYoutubeTokenExpired,
-  refreshAccessToken as refreshYoutubeToken,
-} from "@/lib/youtube-uploader";
-import {
-  uploadClipsToTikTok,
-  TikTokPrivacy,
-} from "@/lib/tiktok-uploader";
-import {
-  isTokenExpired as isTikTokTokenExpired,
-  refreshAccessToken as refreshTikTokToken,
-} from "@/lib/tiktok-oauth";
+import { uploadClipsToYouTube, isTokenExpired, refreshAccessToken } from "@/lib/youtube-uploader";
 
 type StatusUpdateFn = (status: string, message: string) => Promise<void>;
 
@@ -35,22 +13,20 @@ export async function processJob(
 ): Promise<void> {
   const update = onStatusUpdate || (async () => {});
 
-  const jobs = await db
-    .select()
-    .from(clipJobs)
-    .where(eq(clipJobs.jobId, jobId));
-
+  // Get job from DB
+  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
   if (!jobs.length) {
     throw new Error(`Job ${jobId} not found`);
   }
 
   const job = jobs[0];
 
+  // Get user settings
   const settingsRows = await db
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, job.telegramUserId));
-
+  
   const settings = settingsRows[0] || {
     maxClips: 3,
     minDuration: 20,
@@ -58,13 +34,10 @@ export async function processJob(
     defaultPrivacy: "private",
     language: "id",
     youtubeConnected: false,
-    tiktokConnected: false,
-    tiktokPrivacy: "SELF_ONLY",
-    tiktokAutoUpload: true,
   };
 
   try {
-    // ── STEP 1: DOWNLOAD ────────────────────────────────────────────────────
+    // === STEP 1: DOWNLOAD ===
     await db
       .update(clipJobs)
       .set({ status: "downloading", updatedAt: new Date() })
@@ -73,24 +46,18 @@ export async function processJob(
     await update("downloading", "⬇️ Mengunduh video...");
 
     let downloadResult: { filePath: string; title: string; duration: number };
-
     try {
       downloadResult = await downloadVideo(
         job.sourceUrl,
         jobId,
         async (progress) => {
           if (progress % 20 === 0) {
-            await update(
-              "downloading",
-              `⬇️ Mengunduh video... ${progress.toFixed(0)}%`
-            );
+            await update("downloading", `⬇️ Mengunduh video... ${progress.toFixed(0)}%`);
           }
         }
       );
     } catch (err) {
-      throw new Error(
-        `Gagal mengunduh video: ${err instanceof Error ? err.message : String(err)}`
-      );
+      throw new Error(`Gagal mengunduh video: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     await db
@@ -103,7 +70,7 @@ export async function processJob(
       })
       .where(eq(clipJobs.jobId, jobId));
 
-    // ── STEP 2: TRANSCRIBE ──────────────────────────────────────────────────
+    // === STEP 2: TRANSCRIBE ===
     await db
       .update(clipJobs)
       .set({ status: "analyzing", updatedAt: new Date() })
@@ -113,18 +80,15 @@ export async function processJob(
 
     let transcript: { start: number; end: number; text: string }[] = [];
     try {
-      transcript = await transcribeAudio(
-        downloadResult.filePath,
-        settings.language || "id"
-      );
+      transcript = await transcribeAudio(downloadResult.filePath, settings.language || "id");
     } catch (err) {
       console.warn("Transcription failed, proceeding without:", err);
     }
 
-    // ── STEP 3: ANALYZE ─────────────────────────────────────────────────────
+    // === STEP 3: ANALYZE ===
     await update("analyzing", "🧠 Menganalisis momen viral dengan AI...");
 
-    let analysisClips: Omit<ClipResult, "filePath">[];
+    let analysisClips: Omit<ClipResult, "filePath" | "youtubeVideoId" | "youtubeUrl">[];
     try {
       analysisClips = await analyzeVideoForClips(
         {
@@ -139,20 +103,16 @@ export async function processJob(
         settings.maxDuration || 40
       );
     } catch (err) {
-      throw new Error(
-        `Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`
-      );
+      throw new Error(`Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (!analysisClips.length) {
-      throw new Error(
-        "Tidak ada momen yang cocok ditemukan untuk dijadikan Shorts"
-      );
+      throw new Error("Tidak ada momen yang cocok ditemukan untuk dijadikan Shorts");
     }
 
     await update("analyzing", `🎯 ${analysisClips.length} momen viral ditemukan!`);
 
-    // ── STEP 4: CLIP ─────────────────────────────────────────────────────────
+    // === STEP 4: CLIP ===
     await db
       .update(clipJobs)
       .set({ status: "clipping", updatedAt: new Date() })
@@ -174,6 +134,7 @@ export async function processJob(
       throw new Error("Semua klip gagal diproses");
     }
 
+    // Save clips to DB
     await db
       .update(clipJobs)
       .set({
@@ -183,22 +144,21 @@ export async function processJob(
       })
       .where(eq(clipJobs.jobId, jobId));
 
-    // ── STEP 5: UPLOAD TO YOUTUBE ──────────────────────────────────────────
-    let updatedClips = [...processedClips];
-
-    const ytTokenRows = await db
+    // === STEP 5: UPLOAD TO YOUTUBE (if connected) ===
+    const tokenRows = await db
       .select()
       .from(youtubeTokens)
       .where(eq(youtubeTokens.telegramUserId, job.telegramUserId));
 
-    if (ytTokenRows.length > 0) {
-      const ytToken = ytTokenRows[0];
-      let { accessToken: ytAccess, refreshToken: ytRefresh } = ytToken;
+    if (tokenRows.length > 0) {
+      const tokenRow = tokenRows[0];
 
-      if (isYoutubeTokenExpired(ytToken.expiresAt)) {
+      // Refresh token if expired
+      let { accessToken, refreshToken } = tokenRow;
+      if (isTokenExpired(tokenRow.expiresAt)) {
         try {
-          const newTokens = await refreshYoutubeToken(ytToken.refreshToken);
-          ytAccess = newTokens.accessToken;
+          const newTokens = await refreshAccessToken(tokenRow.refreshToken);
+          accessToken = newTokens.accessToken;
           await db
             .update(youtubeTokens)
             .set({
@@ -208,41 +168,37 @@ export async function processJob(
             })
             .where(eq(youtubeTokens.telegramUserId, job.telegramUserId));
         } catch (err) {
-          console.error("YouTube token refresh failed:", err);
+          console.error("Token refresh failed:", err);
         }
       }
 
-      await update("uploading", "📺 Mengupload ke YouTube Studio sebagai Draft...");
+      await update("uploading", "📤 Mengupload ke YouTube Studio sebagai Draft...");
 
-      const ytResults = await uploadClipsToYouTube(
+      const uploadResults = await uploadClipsToYouTube(
         successfulClips,
-        ytAccess,
-        ytRefresh,
-        (settings.defaultPrivacy as "private" | "unlisted" | "public") ||
-          "private",
+        accessToken,
+        refreshToken,
+        (settings.defaultPrivacy as "private" | "unlisted" | "public") || "private",
         async (clipIndex, result, error) => {
           if (result) {
             await update(
               "uploading",
-              `✅ Klip ${clipIndex + 1} berhasil diupload ke YouTube!\n🔗 ${result.videoUrl}`
+              `✅ Klip ${clipIndex + 1} berhasil diupload!\n🔗 ${result.videoUrl}`
             );
           } else {
-            await update(
-              "uploading",
-              `⚠️ YouTube Klip ${clipIndex + 1} gagal: ${error}`
-            );
+            await update("uploading", `⚠️ Klip ${clipIndex + 1} gagal: ${error}`);
           }
         }
       );
 
-      // Merge YouTube results into clips
-      updatedClips = updatedClips.map((clip, i) => {
-        const ytResult = ytResults[i];
-        if (ytResult) {
+      // Update clips with YouTube URLs
+      const updatedClips = processedClips.map((clip, i) => {
+        const uploadResult = uploadResults[i];
+        if (uploadResult) {
           return {
             ...clip,
-            youtubeVideoId: ytResult.videoId,
-            youtubeUrl: ytResult.videoUrl,
+            youtubeVideoId: uploadResult.videoId,
+            youtubeUrl: uploadResult.videoUrl,
           };
         }
         return clip;
@@ -250,91 +206,21 @@ export async function processJob(
 
       await db
         .update(clipJobs)
-        .set({ clips: updatedClips, updatedAt: new Date() })
+        .set({
+          clips: updatedClips,
+          status: "done",
+          updatedAt: new Date(),
+        })
         .where(eq(clipJobs.jobId, jobId));
-    }
-
-    // ── STEP 6: UPLOAD TO TIKTOK ───────────────────────────────────────────
-    const ttTokenRows = await db
-      .select()
-      .from(tiktokTokens)
-      .where(eq(tiktokTokens.telegramUserId, job.telegramUserId));
-
-    const tiktokAutoUpload =
-      settings.tiktokAutoUpload !== false; // default true
-
-    if (ttTokenRows.length > 0 && tiktokAutoUpload) {
-      const ttToken = ttTokenRows[0];
-      let { accessToken: ttAccess } = ttToken;
-
-      if (isTikTokTokenExpired(ttToken.expiresAt)) {
-        try {
-          const newTokens = await refreshTikTokToken(ttToken.refreshToken);
-          ttAccess = newTokens.accessToken;
-          await db
-            .update(tiktokTokens)
-            .set({
-              accessToken: newTokens.accessToken,
-              refreshToken: newTokens.refreshToken,
-              expiresAt: newTokens.expiresAt,
-              updatedAt: new Date(),
-            })
-            .where(eq(tiktokTokens.telegramUserId, job.telegramUserId));
-        } catch (err) {
-          console.error("TikTok token refresh failed:", err);
-        }
-      }
-
-      await update("uploading", "🎵 Mengupload ke TikTok Inbox...");
-
-      const privacyLevel = (settings.tiktokPrivacy ||
-        "SELF_ONLY") as TikTokPrivacy;
-
-      const ttResults = await uploadClipsToTikTok(
-        successfulClips,
-        ttAccess,
-        privacyLevel,
-        "inbox", // change to "direct" when your TikTok app is approved
-        async (clipIndex, result, error) => {
-          if (result) {
-            await update(
-              "uploading",
-              `✅ Klip ${clipIndex + 1} berhasil dikirim ke TikTok Inbox!`
-            );
-          } else {
-            await update(
-              "uploading",
-              `⚠️ TikTok Klip ${clipIndex + 1} gagal: ${error}`
-            );
-          }
-        }
-      );
-
-      // Merge TikTok results into clips
-      updatedClips = updatedClips.map((clip, i) => {
-        const ttResult = ttResults[i];
-        if (ttResult) {
-          return {
-            ...clip,
-            tiktokPublishId: ttResult.publishId,
-          };
-        }
-        return clip;
-      });
-
+    } else {
+      // No YouTube connected - just mark as done
       await db
         .update(clipJobs)
-        .set({ clips: updatedClips, updatedAt: new Date() })
+        .set({ status: "done", updatedAt: new Date() })
         .where(eq(clipJobs.jobId, jobId));
     }
 
-    // ── DONE ──────────────────────────────────────────────────────────────
-    await db
-      .update(clipJobs)
-      .set({ clips: updatedClips, status: "done", updatedAt: new Date() })
-      .where(eq(clipJobs.jobId, jobId));
-
-    // Cleanup source video
+    // Cleanup source video (keep clips for sending)
     try {
       const { unlinkSync, existsSync } = await import("fs");
       if (existsSync(downloadResult.filePath)) {
@@ -349,7 +235,11 @@ export async function processJob(
 
     await db
       .update(clipJobs)
-      .set({ status: "error", errorMessage: errorMsg, updatedAt: new Date() })
+      .set({
+        status: "error",
+        errorMessage: errorMsg,
+        updatedAt: new Date(),
+      })
       .where(eq(clipJobs.jobId, jobId));
 
     await update("error", `❌ ${errorMsg}`);

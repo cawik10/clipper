@@ -1,14 +1,19 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Skip type checking during production build to avoid OOM
-  // Types are still checked separately via `tsc --noEmit`
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  // Reduce memory pressure
+  serverExternalPackages: ["child_process", "fs", "path", "os"],
   experimental: {
-    workerThreads: false,
+    serverActions: {
+      bodySizeLimit: "50mb",
+    },
+  },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**",
+      },
+    ],
   },
 };
 
