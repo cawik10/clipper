@@ -84,7 +84,7 @@ export async function downloadVideo(
   const filePath = path.join(TMP_DIR, files[0]);
 
   // --- SERTAKAN COOKIE UNTUK INFO METADATA JUGA ---
-  let infoCmd = `yt-dlp --dump-json --no-playlist --extractor-args "youtube:player_client=default,web_embedded"`;
+  let infoCmd = `yt-dlp --dump-json --no-playlist --impersonate --extractor-args "youtube:player_client=android,ios"`;
   if (cookiePath) infoCmd += ` --cookies "${cookiePath}"`;
   infoCmd += ` "${url}"`;
 
