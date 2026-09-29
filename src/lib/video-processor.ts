@@ -48,30 +48,44 @@ export async function downloadVideo(
 ): Promise<{ filePath: string; title: string; duration: number }> {
   ensureDir(TMP_DIR);
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
-  const cmd = [
+
+  // --- SET ARGUMEN UTAMA ---
+  const cmdArgs = [
     "yt-dlp",
     "--no-playlist",
-    "--js-runtimes", "node", // <-- TAMBAHKAN BARIS INI
+    "--js-runtimes", "node",
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
     "--progress",
-    "--newline",
-    "-o", `"${outputTemplate}"`,
-    `"${url}"`,
-  ].join(" ");
+    "--newline"
+  ];
+
+  // --- HANDLE COOKIES JIKA ADA ---
+  let cookiePath = "";
+  if (process.env.YOUTUBE_COOKIES) {
+    cookiePath = path.join(TMP_DIR, "youtube-cookies.txt");
+    // Tangani jika newline menjadi literal \n saat di-paste ke Railway
+    const cookieContent = process.env.YOUTUBE_COOKIES.replace(/\\n/g, "\n");
+    fs.writeFileSync(cookiePath, cookieContent);
+    cmdArgs.push("--cookies", `"${cookiePath}"`);
+  }
+
+  cmdArgs.push("-o", `"${outputTemplate}"`, `"${url}"`);
+  const cmd = cmdArgs.join(" ");
 
   console.log(`[download] Starting: ${url}`);
-
   await execAsync(cmd, { timeout: 600000 });
-
   if (onProgress) await onProgress(50);
 
   const files = fs.readdirSync(TMP_DIR).filter((f) => f.startsWith(jobId));
   if (!files.length) throw new Error("Download selesai tapi file tidak ditemukan");
-
   const filePath = path.join(TMP_DIR, files[0]);
 
-  const infoCmd = `yt-dlp --dump-json --no-playlist "${url}"`;
+  // --- SERTAKAN COOKIE UNTUK INFO METADATA JUGA ---
+  let infoCmd = `yt-dlp --dump-json --no-playlist`;
+  if (cookiePath) infoCmd += ` --cookies "${cookiePath}"`;
+  infoCmd += ` "${url}"`;
+
   let title = "Video";
   let duration = 0;
   try {
@@ -88,7 +102,6 @@ export async function downloadVideo(
       /* ignore */
     }
   }
-
   if (onProgress) await onProgress(100);
   console.log(`[download] ✅ Done: ${filePath} (${duration}s)`);
   return { filePath, title, duration };
