@@ -51,11 +51,10 @@ export async function downloadVideo(
 ): Promise<{ filePath: string; title: string; duration: number }> {
   ensureDir(TMP_DIR);
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
-
+  
   const cmd = [
     "yt-dlp",
     "--no-playlist",
-    "--merge-output-format", "mp4",
     "--cookies", "/app/cookies.txt",
     "--force-ipv4",
     "--extractor-args", "youtube:player_client=android",
