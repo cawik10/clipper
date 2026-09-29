@@ -58,7 +58,8 @@ export async function downloadVideo(
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
     "--cookies", "/app/cookies.txt",
-    "--force-ipv4",   // <-- TAMBAHKAN BARIS INI
+    "--force-ipv4",
+    "--extractor-args", "youtube:player_client=android",  // <-- TAMBAHKAN BARIS INI
     "-o", `"${outputTemplate}"`,
     "--no-warnings",
     `"${url}"`,
