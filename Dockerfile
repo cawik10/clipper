@@ -10,7 +10,7 @@ RUN apk add --no-cache \
     ttf-dejavu
 
 # Install yt-dlp
-RUN pip3 install -U yt-dlp --break-system-packages || pip3 install -U yt-dlp
+RUN pip3 install -U "yt-dlp[default]" --break-system-packages || pip3 install -U "yt-dlp[default]"
 
 # Dependencies stage
 FROM base AS deps
