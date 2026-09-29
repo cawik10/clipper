@@ -55,7 +55,7 @@ Kirim link video untuk mulai! 🎬`,
 9. *Upload* - Langsung upload ke YouTube Studio
 
 *Format Output 9:16:*
-'• 🌀 Mode aktif bisa diubah via `ASPECT_RATIO_MODE`\n' +
+  Mode aktif bisa diubah via \`ASPECT_RATIO_MODE\`
 
 *Perintah Info Konfigurasi:*
 /clips - Info & cara ubah jumlah klip (default: 5)
@@ -66,11 +66,11 @@ Kirim link video untuk mulai! 🎬`,
 /introoutro - Info intro/outro config
 
 *Ketentuan:*
-• Durasi klip: 20-40 detik
-• Format output: Vertikal 9:16 (1080x1920)
-'• Maksimal klip: lihat /settings (default 5, ubah via `MAX_CLIPS`)\n' +
+  Durasi klip: 20-40 detik
+  Format output: Vertikal 9:16 (1080x1920)
+  Maksimal klip: lihat /settings (default 5, ubah via \`MAX_CLIPS\`)
 
-Tips: Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
+Tips: Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!\`,
 
   connecting: `🔗 *Menghubungkan YouTube Studio...*
 
