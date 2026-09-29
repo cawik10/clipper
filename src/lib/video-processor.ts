@@ -50,13 +50,12 @@ export async function downloadVideo(
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
 
   // --- SET ARGUMEN UTAMA ---
-  // --- SET ARGUMEN UTAMA ---
   const cmdArgs = [
     "yt-dlp",
     "--no-playlist",
     "--js-runtimes", "node",
-    // Tambahkan 2 baris argumen extractor di bawah ini:
-    "--extractor-args", "youtube:player_client=default,web_embedded",
+    "--impersonate", // <-- Aktifkan penyamaran browser
+    "--extractor-args", "youtube:player_client=android,ios", // <-- Paksa gunakan klien Mobile
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
     "--progress",
