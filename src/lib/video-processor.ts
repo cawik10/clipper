@@ -56,7 +56,7 @@ export async function downloadVideo(
     "yt-dlp",
     "--no-playlist",
     "--merge-output-format", "mp4",
-    "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+    "-f", '"bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
     "-o", `"${outputTemplate}"`,
     "--no-warnings",
     `"${url}"`,
