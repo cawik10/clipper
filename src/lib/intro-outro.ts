@@ -219,7 +219,7 @@ async function normalizeSegment(inputPath: string, outputPath: string): Promise<
   const cmd = [
     "ffmpeg", "-y",
     "-i", `"${inputPath}"`,
-    "-vf", `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,setsar=1`,
+    "-vf", `"scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"`,
     "-threads", "2",
     "-c:v", "libx264",
     "-crf", "23",
