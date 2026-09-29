@@ -6,7 +6,8 @@ RUN apk add --no-cache \
     python3 \
     py3-pip \
     curl \
-    ca-certificates
+    ca-certificates \
+    ttf-dejavu
 
 # Install yt-dlp
 RUN pip3 install yt-dlp --break-system-packages || pip3 install yt-dlp
