@@ -49,13 +49,13 @@ export async function downloadVideo(
   ensureDir(TMP_DIR);
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
 
-  // --- SET ARGUMEN UTAMA ---
+ // --- SET ARGUMEN UTAMA ---
   const cmdArgs = [
     "yt-dlp",
     "--no-playlist",
     "--js-runtimes", "node",
-    "--impersonate", // <-- Aktifkan penyamaran browser
-    "--extractor-args", "youtube:player_client=android,ios", // <-- Paksa gunakan klien Mobile
+    "--impersonate", "chrome", 
+    "--extractor-args", "youtube:player_client=android,ios",
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
     "--progress",
@@ -84,7 +84,7 @@ export async function downloadVideo(
   const filePath = path.join(TMP_DIR, files[0]);
 
   // --- SERTAKAN COOKIE UNTUK INFO METADATA JUGA ---
-  let infoCmd = `yt-dlp --dump-json --no-playlist --impersonate --extractor-args "youtube:player_client=android,ios"`;
+  let infoCmd = `yt-dlp --dump-json --no-playlist --impersonate chrome --extractor-args "youtube:player_client=android,ios"`;
   if (cookiePath) infoCmd += ` --cookies "${cookiePath}"`;
   infoCmd += ` "${url}"`;
 
