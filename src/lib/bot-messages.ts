@@ -1,7 +1,7 @@
 // Bot message templates in Indonesian
 
 export const messages = {
-  welcome: `🤖 *AutoClip Bot* - Video Clipper Otomatis
+  welcome: `🤖 *AutoClip Bot* — Video Clipper Otomatis
 
 Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube Shorts secara otomatis!
 
@@ -11,14 +11,24 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 3. Video akan dipotong otomatis (20-40 detik)
 4. Upload langsung ke YouTube sebagai Draft
 
+*Fitur Baru:*
+🖼 Thumbnail auto-generate
+💧 Watermark custom
+🎬 Intro/Outro otomatis
+🔍 Zoom effect pada highlight
+
 *Perintah:*
 /start - Menu utama
 /help - Panduan lengkap
-/connect - Hubungkan akun YouTube
-/status - Cek status pekerjaan
+/connect - Hubungkan YouTube
 /settings - Pengaturan bot
+/status - Cek status
 /history - Riwayat klip
-/thumbnail - Info konfigurasi thumbnail
+/watermark - Info watermark config
+/zoom - Info zoom effect config
+/introoutro - Info intro/outro config
+/thumbnail - Info thumbnail config
+/mode - Info aspect ratio
 
 Kirim link video untuk mulai! 🎬`,
 
@@ -35,33 +45,28 @@ Kirim link video untuk mulai! 🎬`,
 2. *Transkripsi* - Audio ditranskripsi ke teks
 3. *Analisis AI* - Momen viral diidentifikasi
 4. *Pemotongan* - Video dipotong (20-40 detik)
-5. *Thumbnail* - Thumbnail auto-generate dari klip
-6. *Upload* - Langsung upload ke YouTube Studio
+5. *Zoom Effect* - Auto zoom pada highlight moment ✨
+6. *Watermark* - Watermark custom ditambahkan ✨
+7. *Intro/Outro* - Ditambahkan jika aktif ✨
+8. *Thumbnail* - Thumbnail auto-generate ✨
+9. *Upload* - Langsung upload ke YouTube Studio
 
 *Format Output 9:16:*
-• 🌀 Mode aktif bisa diubah via \`ASPECT_RATIO_MODE\`
-• blur = background blur (tidak bolong, rekomendasi)
-• crop = center crop (full layar)
-• pad = black bars (mode lama)
+• 🌀 Mode aktif bisa diubah via ASPECT_RATIO_MODE
 
-*Thumbnail Config:*
-• \`THUMBNAIL_ENABLED=true\` (aktif default)
-• \`THUMBNAIL_MODE=middle\` | \`best\` | \`start\` | \`custom\`
-• \`THUMBNAIL_QUALITY=5\` (1-31, makin kecil makin bagus)
+*Perintah Info Konfigurasi:*
+/mode - Info aspect ratio mode
+/thumbnail - Info thumbnail config
+/watermark - Info watermark config
+/zoom - Info zoom effect config
+/introoutro - Info intro/outro config
 
 *Ketentuan:*
-• Durasi klip: 20-40 detik (optimal untuk Shorts)
+• Durasi klip: 20-40 detik
 • Format output: Vertikal 9:16 (1080x1920)
 • Maksimal 3 klip per video
 
-*Perintah Berguna:*
-/connect - Login YouTube Studio
-/settings - Ubah pengaturan
-/thumbnail - Info thumbnail config
-/cancel - Batalkan proses
-
-*Tips:*
-Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
+Tips: Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
 
   connecting: `🔗 *Menghubungkan YouTube Studio...*
 
@@ -73,83 +78,11 @@ Izin yang diperlukan:
 
 Setelah login, klip akan otomatis tersimpan sebagai Draft di YouTube Studio.`,
 
-  processing: (url: string, platform: string) =>
-    `⚙️ *Memproses Video...*
-
-🔗 URL: \`${url.slice(0, 50)}${url.length > 50 ? "..." : ""}\`
-📱 Platform: ${getPlatformEmoji(platform)} ${platform.toUpperCase()}
-
-Status: Menunggu dalam antrian...`,
-
-  downloading: (progress: number) =>
-    `⬇️ *Mengunduh Video...*
-
-Progress: ${createProgressBar(progress)} ${progress.toFixed(0)}%`,
-
-  analyzing: `🧠 *Menganalisis Video dengan AI...*
-
-Sedang mencari momen terbaik yang berpotensi viral...
-Ini mungkin membutuhkan waktu 1-2 menit.`,
-
-  clipping: (current: number, total: number) =>
-    `✂️ *Memotong Video...*
-
-Memproses klip ${current}/${total}
-${createProgressBar((current / total) * 100)}`,
-
-  uploading: (current: number, total: number) =>
-    `📤 *Mengupload ke YouTube Studio...*
-
-Mengupload klip ${current}/${total} sebagai Draft...`,
-
-  clipFound: (clips: number) =>
-    `🎯 *${clips} Momen Viral Ditemukan!*
-
-AI berhasil mengidentifikasi ${clips} klip terbaik.
-Sedang memotong dan memproses video...`,
-
-  noClips: `❌ *Tidak Ada Klip yang Ditemukan*
-
-Maaf, AI tidak dapat menemukan momen yang cocok.
-Coba dengan video yang memiliki lebih banyak dialog atau momen yang jelas.`,
-
-  error: (msg: string) =>
-    `❌ *Terjadi Kesalahan*
+  error: (msg: string) => `❌ *Terjadi Kesalahan*
 
 ${msg}
 
 Coba lagi atau hubungi /help untuk bantuan.`,
-
-  notConnected: `⚠️ *YouTube Belum Terhubung*
-
-Anda perlu menghubungkan akun YouTube terlebih dahulu.
-Gunakan /connect untuk login ke YouTube Studio.
-
-Klip tetap akan dibuat dan dikirim ke Telegram!`,
-
-  settings: (settings: {
-    maxClips: number;
-    minDuration: number;
-    maxDuration: number;
-    defaultPrivacy: string;
-    youtubeConnected: boolean;
-  }) =>
-    `⚙️ *Pengaturan Bot*
-
-• Maksimal Klip: ${settings.maxClips}
-• Durasi Min: ${settings.minDuration} detik
-• Durasi Max: ${settings.maxDuration} detik
-• Privacy Default: ${settings.defaultPrivacy}
-• YouTube: ${settings.youtubeConnected ? "✅ Terhubung" : "❌ Belum terhubung"}
-
-Gunakan tombol di bawah untuk mengubah pengaturan:`,
-
-  connected: `✅ *YouTube Berhasil Terhubung!*
-
-Akun YouTube Anda sudah terhubung dengan bot.
-Klip video akan otomatis diupload sebagai Draft di YouTube Studio.
-
-Kirim link video untuk mulai membuat Shorts! 🎬`,
 
   invalidUrl: `❌ *URL Tidak Valid*
 
@@ -159,13 +92,20 @@ Kirim link video yang valid dari:
 • TikTok (tiktok.com/@.../video/...)
 • Instagram (instagram.com/reel/...)`,
 
-  tooShort: (duration: number) =>
-    `⚠️ *Video Terlalu Pendek*
+  settings: (s: {
+    maxClips: number;
+    minDuration: number;
+    maxDuration: number;
+    defaultPrivacy: string;
+    youtubeConnected: boolean;
+  }) =>
+    `⚙️ *Pengaturan Bot*
 
-Durasi video: ${Math.round(duration)} detik
-Minimal durasi yang disarankan: 60 detik
-
-Video terlalu pendek untuk menghasilkan klip yang optimal.`,
+• Maksimal Klip: ${s.maxClips}
+• Durasi Min: ${s.minDuration} detik
+• Durasi Max: ${s.maxDuration} detik
+• Privacy Default: ${s.defaultPrivacy}
+• YouTube: ${s.youtubeConnected ? "✅ Terhubung" : "❌ Belum terhubung"}`,
 
   resultSummary: (
     clips: {
@@ -174,22 +114,22 @@ Video terlalu pendek untuk menghasilkan klip yang optimal.`,
       youtubeUrl?: string;
       viralScore: number;
       hasThumbnail?: boolean;
+      hasZoom?: boolean;
+      hasWatermark?: boolean;
     }[]
   ) => {
     let msg = `🎉 *Proses Selesai!*\n\n`;
     msg += `Berhasil membuat ${clips.length} klip YouTube Shorts:\n\n`;
-
     clips.forEach((clip, i) => {
       msg += `*Klip ${i + 1}:* ${clip.title.slice(0, 50)}\n`;
       msg += `⏱ Durasi: ${clip.duration}s | 🔥 Viral Score: ${clip.viralScore}/10`;
-      if (clip.hasThumbnail) msg += ` | 🖼 Thumbnail ✅`;
+      if (clip.hasThumbnail) msg += ` | 🖼✅`;
+      if (clip.hasZoom) msg += ` | 🔍✅`;
+      if (clip.hasWatermark) msg += ` | 💧✅`;
       msg += `\n`;
-      if (clip.youtubeUrl) {
-        msg += `🔗 ${clip.youtubeUrl}\n`;
-      }
+      if (clip.youtubeUrl) msg += `🔗 ${clip.youtubeUrl}\n`;
       msg += "\n";
     });
-
     msg += `📺 Cek YouTube Studio untuk melihat Draft!`;
     return msg;
   },
@@ -207,10 +147,7 @@ export function getPlatformEmoji(platform: string): string {
   return emojis[platform.toLowerCase()] || "🌐";
 }
 
-export function createProgressBar(
-  percent: number,
-  length: number = 10
-): string {
+export function createProgressBar(percent: number, length: number = 10): string {
   const filled = Math.round((percent / 100) * length);
   const empty = length - filled;
   return `[${"█".repeat(filled)}${"░".repeat(empty)}]`;

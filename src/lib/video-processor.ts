@@ -1,504 +1,352 @@
-import { exec, spawn } from "child_process";
+/**
+ * VIDEO PROCESSOR
+ * ===============
+ * Handles: download, transcription, clip processing (cut → zoom → watermark → intro/outro)
+ */
+
+import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
-import os from "os";
-import { ClipResult } from "@/db/schema";
-import type { TranscriptSegment } from "@/lib/ai-analyzer";
 import {
   getAspectRatioMode,
   buildFFmpegFilterArgs,
-  getModeLabel,
-  type AspectRatioMode,
+  TARGET_WIDTH,
+  TARGET_HEIGHT,
 } from "@/lib/video-config";
-import {
-  generateThumbnailsForClips,
-} from "@/lib/thumbnail-generator";
-
-export type { TranscriptSegment };
+import { generateThumbnail } from "@/lib/thumbnail-generator";
+import { applyWatermark } from "@/lib/watermark";
+import { applyIntroOutro } from "@/lib/intro-outro";
+import { applyZoomEffect } from "@/lib/zoom-effect";
+import type { ClipResult } from "@/db/schema";
 
 const execAsync = promisify(exec);
 
-// Use /tmp for Railway/Vercel (writable) or local temp
-function getTempDir(): string {
-  const tmpDir = process.env.TEMP_DIR || os.tmpdir();
-  const dir = path.join(tmpDir, "autoclip");
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  return dir;
+const TMP_DIR = process.env.TMP_DIR || "/tmp/autoclip";
+
+function ensureDir(dir: string) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-export function getJobDir(jobId: string): string {
-  const dir = path.join(getTempDir(), jobId);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  return dir;
-}
+// =====================================================================
+// PLATFORM DETECTION
+// =====================================================================
 
-export function cleanupJobDir(jobId: string): void {
-  const dir = path.join(getTempDir(), jobId);
-  if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-// Detect platform from URL
 export function detectPlatform(url: string): string {
   if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
   if (/facebook\.com|fb\.watch/.test(url)) return "facebook";
   if (/tiktok\.com/.test(url)) return "tiktok";
   if (/instagram\.com/.test(url)) return "instagram";
-  if (/twitter\.com|x\.com/.test(url)) return "twitter";
   return "unknown";
 }
 
-// Check if yt-dlp is available
-async function checkYtDlp(): Promise<string> {
-  const candidates = ["yt-dlp", "python3 -m yt_dlp"];
-  for (const cmd of candidates) {
-    try {
-      await execAsync(`${cmd} --version`);
-      return cmd;
-    } catch {
-      // try next
-    }
-  }
-  throw new Error("yt-dlp not found. Please install yt-dlp.");
-}
+// =====================================================================
+// DOWNLOAD
+// =====================================================================
 
-// Check if ffmpeg is available
-async function checkFFmpeg(): Promise<boolean> {
-  try {
-    await execAsync("ffmpeg -version");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// Download video using yt-dlp
 export async function downloadVideo(
   url: string,
   jobId: string,
-  onProgress?: (progress: number) => void
+  onProgress?: (pct: number) => Promise<void>
 ): Promise<{ filePath: string; title: string; duration: number }> {
-  const jobDir = getJobDir(jobId);
-  const outputTemplate = path.join(jobDir, "source.%(ext)s");
-  const ytDlp = await checkYtDlp();
-  const hasFFmpeg = await checkFFmpeg();
+  ensureDir(TMP_DIR);
+  const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
 
-  const args = [
-    url,
-    "--extractor-args",
-    "youtube:player_client=android",
-    "-o",
-    outputTemplate,
-    "--format",
-    "b",
+  const cmd = [
+    "yt-dlp",
     "--no-playlist",
-    "--restrict-filenames",
-    "--write-info-json",
+    "--merge-output-format", "mp4",
+    "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+    "-o", `"${outputTemplate}"`,
     "--no-warnings",
-    "--progress",
-  ];
+    `"${url}"`,
+  ].join(" ");
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn(
-      ytDlp.includes(" ") ? "python3" : ytDlp,
-      ytDlp.includes(" ") ? ["-m", "yt_dlp", ...args] : args
-    );
+  console.log(`[download] Starting: ${url}`);
+  await execAsync(cmd, { timeout: 600000 });
 
-    let lastProgress = 0;
+  // Find the downloaded file
+  const files = fs.readdirSync(TMP_DIR).filter((f) => f.startsWith(jobId));
+  if (!files.length) throw new Error("Download selesai tapi file tidak ditemukan");
 
-    proc.stdout.on("data", (data: Buffer) => {
-      const text = data.toString();
-      const progressMatch = text.match(/(\d+\.?\d*)%/);
-      if (progressMatch && onProgress) {
-        const progress = parseFloat(progressMatch[1]);
-        if (progress > lastProgress) {
-          lastProgress = progress;
-          onProgress(progress);
-        }
-      }
-    });
+  const filePath = path.join(TMP_DIR, files[0]);
 
-    proc.stderr.on("data", (data: Buffer) => {
-      console.error("yt-dlp stderr:", data.toString().slice(0, 200));
-    });
+  // Get video info
+  const infoCmd = `yt-dlp --dump-json --no-playlist "${url}"`;
+  let title = "Video";
+  let duration = 0;
+  try {
+    const { stdout } = await execAsync(infoCmd, { timeout: 30000 });
+    const info = JSON.parse(stdout.trim().split("\n")[0]);
+    title = info.title || "Video";
+    duration = info.duration || 0;
+  } catch {
+    // Fallback: get duration from ffprobe
+    try {
+      const probeCmd = `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${filePath}"`;
+      const { stdout } = await execAsync(probeCmd, { timeout: 15000 });
+      duration = parseFloat(stdout.trim()) || 0;
+    } catch { /* ignore */ }
+  }
 
-    proc.on("close", async (code) => {
-      if (code !== 0) {
-        reject(new Error(`yt-dlp exited with code ${code}`));
-        return;
-      }
-
-      // Find the downloaded file
-      const files = fs.readdirSync(jobDir);
-      const videoFile = files.find(
-        (f) =>
-          f.startsWith("source") &&
-          (f.endsWith(".mp4") ||
-            f.endsWith(".mkv") ||
-            f.endsWith(".webm"))
-      );
-
-      if (!videoFile) {
-        reject(new Error("Downloaded video file not found"));
-        return;
-      }
-
-      const filePath = path.join(jobDir, videoFile);
-
-      // Read info JSON for title and duration
-      const infoFile = files.find((f) => f.endsWith(".info.json"));
-      let title = "Untitled Video";
-      let duration = 0;
-
-      if (infoFile) {
-        try {
-          const info = JSON.parse(
-            fs.readFileSync(path.join(jobDir, infoFile), "utf-8")
-          );
-          title = info.title || title;
-          duration = info.duration || 0;
-        } catch {
-          // ignore
-        }
-      }
-
-      // If duration not from info, probe with ffprobe
-      if (!duration && hasFFmpeg) {
-        try {
-          const { stdout } = await execAsync(
-            `ffprobe -v quiet -print_format json -show_format "${filePath}"`
-          );
-          const probe = JSON.parse(stdout);
-          duration = parseFloat(probe.format?.duration || "0");
-        } catch {
-          // ignore
-        }
-      }
-
-      resolve({ filePath, title, duration });
-    });
-
-    proc.on("error", reject);
-  });
+  if (onProgress) await onProgress(100);
+  console.log(`[download] ✅ Done: ${filePath} (${duration}s)`);
+  return { filePath, title, duration };
 }
 
-// Transcribe audio using Whisper API or local method
-export async function transcribeAudio(
-  filePath: string,
-  language?: string
-): Promise<TranscriptSegment[]> {
-  // Extract audio first
-  const audioPath = filePath.replace(/\.[^.]+$/, ".mp3");
-  const hasFFmpeg = await checkFFmpeg();
+// =====================================================================
+// TRANSCRIPTION
+// =====================================================================
 
-  if (!hasFFmpeg) {
-    console.warn("FFmpeg not available, skipping transcription");
-    return [];
-  }
+export async function transcribeAudio(
+  videoPath: string,
+  language: string = "id"
+): Promise<{ start: number; end: number; text: string }[]> {
+  ensureDir(TMP_DIR);
+  const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
+
+  // Extract audio
+  const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
+  await execAsync(extractCmd, { timeout: 60000 });
 
   try {
-    await execAsync(
-      `ffmpeg -i "${filePath}" -vn -acodec mp3 -ab 128k -y "${audioPath}"`
-    );
-  } catch (err) {
-    console.error("Audio extraction failed:", err);
-    return [];
-  }
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const groqKey = process.env.GROQ_API_KEY;
 
-  // Try OpenAI Whisper API
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      const OpenAI = (await import("openai")).default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-      const audioStream = fs.createReadStream(audioPath);
-      const transcription = await openai.audio.transcriptions.create({
-        file: audioStream as Parameters<
-          typeof openai.audio.transcriptions.create
-        >[0]["file"],
-        model: "whisper-1",
-        response_format: "verbose_json",
-        timestamp_granularities: ["segment"],
-        language: language || undefined,
-      });
-
-      // Clean up audio file
-      if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-
-      interface WhisperSegment {
-        start: number;
-        end: number;
-        text: string;
-      }
-
-      if (transcription.segments) {
-        return transcription.segments.map((seg: WhisperSegment) => ({
-          start: seg.start,
-          end: seg.end,
-          text: seg.text.trim(),
-        }));
-      }
-    } catch (err) {
-      console.error("Whisper transcription failed:", err);
+    if (openaiKey) {
+      return await transcribeWithOpenAI(audioPath, language, openaiKey);
+    } else if (groqKey) {
+      return await transcribeWithGroq(audioPath, language, groqKey);
+    } else {
+      console.warn("[transcribe] Tidak ada API key tersedia, skip transkripsi");
+      return [];
     }
+  } finally {
+    try { if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath); } catch { /* ignore */ }
   }
+}
 
-  // Groq Whisper fallback
-  if (process.env.GROQ_API_KEY) {
-    try {
-      return await transcribeWithGroq(audioPath, language);
-    } catch (err) {
-      console.error("Groq transcription failed:", err);
-    }
-  }
+async function transcribeWithOpenAI(
+  audioPath: string,
+  language: string,
+  apiKey: string
+): Promise<{ start: number; end: number; text: string }[]> {
+  const OpenAI = (await import("openai")).default;
+  const client = new OpenAI({ apiKey });
 
-  // Clean up
-  if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-  return [];
+  const audioBuffer = fs.readFileSync(audioPath);
+  const blob = new Blob([audioBuffer], { type: "audio/mp3" });
+  const file = new File([blob], "audio.mp3", { type: "audio/mp3" });
+
+  const response = await client.audio.transcriptions.create({
+    model: "whisper-1",
+    file,
+    language: language === "id" ? "id" : language,
+    response_format: "verbose_json",
+    timestamp_granularities: ["segment"],
+  });
+
+  const data = response as unknown as {
+    segments?: { start: number; end: number; text: string }[];
+  };
+
+  return (data.segments || []).map((s) => ({
+    start: s.start,
+    end: s.end,
+    text: s.text.trim(),
+  }));
 }
 
 async function transcribeWithGroq(
   audioPath: string,
-  language?: string
-): Promise<TranscriptSegment[]> {
+  language: string,
+  apiKey: string
+): Promise<{ start: number; end: number; text: string }[]> {
   const FormData = (await import("form-data")).default;
   const axios = (await import("axios")).default;
 
   const form = new FormData();
-  form.append("file", fs.createReadStream(audioPath));
+  form.append("file", fs.createReadStream(audioPath), { filename: "audio.mp3" });
   form.append("model", "whisper-large-v3");
+  form.append("language", language);
   form.append("response_format", "verbose_json");
-  if (language) form.append("language", language);
 
   const response = await axios.post(
     "https://api.groq.com/openai/v1/audio/transcriptions",
     form,
     {
-      headers: {
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-        ...form.getHeaders(),
-      },
+      headers: { Authorization: `Bearer ${apiKey}`, ...form.getHeaders() },
+      timeout: 120000,
     }
   );
 
-  if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-
-  interface GroqSegment {
-    start: number;
-    end: number;
-    text: string;
-  }
-
-  if (response.data.segments) {
-    return response.data.segments.map((seg: GroqSegment) => ({
-      start: seg.start,
-      end: seg.end,
-      text: seg.text.trim(),
-    }));
-  }
-  return [];
+  const segments = response.data?.segments || [];
+  return segments.map((s: { start: number; end: number; text: string }) => ({
+    start: s.start,
+    end: s.end,
+    text: s.text.trim(),
+  }));
 }
 
-/**
- * Cut video clip using FFmpeg dengan mode aspect ratio yang bisa dikonfigurasi.
- */
-export async function cutVideoClip(
-  sourceFile: string,
-  startTime: number,
-  endTime: number,
-  outputPath: string,
-  makeVertical: boolean = true
-): Promise<string> {
-  const hasFFmpeg = await checkFFmpeg();
-  if (!hasFFmpeg) {
-    throw new Error("FFmpeg is required for video cutting");
-  }
+// =====================================================================
+// CLIP PROCESSING (Cut → Zoom → Watermark → Intro/Outro → Thumbnail)
+// =====================================================================
 
-  const duration = endTime - startTime;
-  const mode: AspectRatioMode = makeVertical ? getAspectRatioMode() : "none";
-
-  console.log(
-    `[video-processor] Mode 9:16: ${getModeLabel(mode)} (makeVertical=${makeVertical})`
-  );
-
-  const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
-
-  let cmd: string;
-  if (useFilterComplex) {
-    cmd = [
-      "ffmpeg",
-      "-y",
-      "-ss",
-      startTime.toString(),
-      "-i",
-      `"${sourceFile}"`,
-      "-t",
-      duration.toString(),
-      "-filter_complex",
-      `"${filterValue}"`,
-      "-map",
-      `"[out]"`,
-      "-map",
-      "0:a?",
-      "-threads",
-      "2",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "fast",
-      "-crf",
-      "23",
-      "-c:a",
-      "aac",
-      "-b:a",
-      "128k",
-      "-movflags",
-      "+faststart",
-      `"${outputPath}"`,
-    ].join(" ");
-  } else {
-    cmd = [
-      "ffmpeg",
-      "-y",
-      "-ss",
-      startTime.toString(),
-      "-i",
-      `"${sourceFile}"`,
-      "-t",
-      duration.toString(),
-      "-vf",
-      `"${filterValue}"`,
-      "-threads",
-      "2",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "fast",
-      "-crf",
-      "23",
-      "-c:a",
-      "aac",
-      "-b:a",
-      "128k",
-      "-movflags",
-      "+faststart",
-      `"${outputPath}"`,
-    ].join(" ");
-  }
-
-  try {
-    await execAsync(cmd, { timeout: 300000 });
-    return outputPath;
-  } catch (err) {
-    console.error("FFmpeg cut failed:", err);
-    // Fallback ke pad mode jika blur gagal
-    if (mode === "blur") {
-      console.warn(
-        "[video-processor] Blur mode gagal, fallback ke crop mode..."
-      );
-      return await cutVideoClip(
-        sourceFile,
-        startTime,
-        endTime,
-        outputPath + "_retry.mp4",
-        makeVertical
-      );
-    }
-    throw new Error(`Video cutting failed: ${err}`);
-  }
-}
-
-// Process all clips for a job (termasuk auto-generate thumbnail)
 export async function processClips(
-  sourceFile: string,
-  clips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[],
+  videoPath: string,
+  clips: Omit<ClipResult, "filePath" | "thumbnailPath">[],
   jobId: string,
   makeVertical: boolean = true,
-  onProgress?: (clipIndex: number, total: number) => void
+  onProgress?: (clipIndex: number, total: number) => Promise<void>
 ): Promise<ClipResult[]> {
-  const jobDir = getJobDir(jobId);
-  const results: ClipResult[] = [];
+  ensureDir(TMP_DIR);
   const mode = makeVertical ? getAspectRatioMode() : "none";
+  const results: ClipResult[] = [];
 
-  console.log(
-    `[processClips] Processing ${clips.length} clips with mode: ${getModeLabel(mode)}`
-  );
-
-  // Step 1: Potong semua klip
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
-    if (onProgress) onProgress(i, clips.length);
-
-    const outputPath = path.join(jobDir, `clip_${i}.mp4`);
+    if (onProgress) await onProgress(i, clips.length);
 
     try {
-      await cutVideoClip(
-        sourceFile,
-        clip.startTime,
-        clip.endTime,
-        outputPath,
-        makeVertical
-      );
-
+      const result = await processOneClip(videoPath, clip, jobId, mode, i);
+      results.push(result);
+    } catch (err) {
+      console.error(`[process-clips] ❌ Klip ${i} gagal:`, err);
       results.push({
         ...clip,
-        filePath: outputPath,
+        index: i,
+        filePath: undefined,
+        thumbnailPath: undefined,
       });
-    } catch (err) {
-      console.error(`Failed to process clip ${i}:`, err);
-      results.push({ ...clip });
     }
-  }
-
-  // Step 2: Generate thumbnail untuk semua klip yang berhasil
-  try {
-    const clipsWithFiles = results
-      .filter((c) => c.filePath && fs.existsSync(c.filePath))
-      .map((c) => ({
-        index: c.index,
-        filePath: c.filePath,
-        duration: c.duration,
-        startTime: c.startTime,
-        endTime: c.endTime,
-      }));
-
-    if (clipsWithFiles.length > 0) {
-      const thumbnailMap = await generateThumbnailsForClips(
-        clipsWithFiles,
-        jobDir
-      );
-
-      // Inject thumbnailPath ke setiap result
-      for (const result of results) {
-        const thumbPath = thumbnailMap.get(result.index);
-        if (thumbPath) {
-          result.thumbnailPath = thumbPath;
-        }
-      }
-    }
-  } catch (err) {
-    // Thumbnail error tidak menghentikan proses utama
-    console.error("[processClips] Thumbnail generation error (non-fatal):", err);
   }
 
   return results;
 }
 
-// Get video duration
-export async function getVideoDuration(filePath: string): Promise<number> {
-  try {
-    const { stdout } = await execAsync(
-      `ffprobe -v quiet -print_format json -show_format "${filePath}"`
-    );
-    const probe = JSON.parse(stdout);
-    return parseFloat(probe.format?.duration || "0");
-  } catch {
-    return 0;
+async function processOneClip(
+  videoPath: string,
+  clip: Omit<ClipResult, "filePath" | "thumbnailPath">,
+  jobId: string,
+  mode: ReturnType<typeof getAspectRatioMode>,
+  clipIndex: number
+): Promise<ClipResult> {
+  // Step 1: Cut + convert to 9:16
+  const cutPath = path.join(TMP_DIR, `clip_cut_${jobId}_${clipIndex}.mp4`);
+  await cutAndConvertClip(videoPath, clip.startTime, clip.endTime, cutPath, mode);
+  console.log(`[clip] ✅ Step 1/4 Cut selesai: klip ${clipIndex}`);
+
+  // Step 2: Zoom effect (pada highlight moment)
+  const zoomPath = path.join(TMP_DIR, `clip_zoom_${jobId}_${clipIndex}.mp4`);
+  const zoomResult = await applyZoomEffect(cutPath, zoomPath, clip.viralScore);
+  if (zoomResult.applied) {
+    console.log(`[clip] ✅ Step 2/4 Zoom effect: ${zoomResult.reason}`);
+    try { fs.unlinkSync(cutPath); } catch { /* ignore */ }
+  } else {
+    console.log(`[clip] ⏭ Step 2/4 Zoom skipped: ${zoomResult.reason}`);
   }
+  const afterZoom = zoomResult.applied ? zoomPath : cutPath;
+
+  // Step 3: Watermark
+  const wmPath = path.join(TMP_DIR, `clip_wm_${jobId}_${clipIndex}.mp4`);
+  const wmResult = await applyWatermark(afterZoom, wmPath);
+  if (wmResult.type !== "none") {
+    console.log(`[clip] ✅ Step 3/4 Watermark (${wmResult.type}): klip ${clipIndex}`);
+    try { if (afterZoom !== cutPath) fs.unlinkSync(afterZoom); } catch { /* ignore */ }
+  } else {
+    console.log(`[clip] ⏭ Step 3/4 Watermark skipped`);
+  }
+  const afterWm = wmResult.success && wmResult.type !== "none" ? wmPath : afterZoom;
+
+  // Step 4: Intro / Outro
+  const finalPath = path.join(TMP_DIR, `clip_final_${jobId}_${clipIndex}.mp4`);
+  const ioResult = await applyIntroOutro(afterWm, finalPath, `${jobId}_${clipIndex}`);
+  if (ioResult.introAdded || ioResult.outroAdded) {
+    console.log(`[clip] ✅ Step 4/4 Intro/Outro: intro=${ioResult.introAdded} outro=${ioResult.outroAdded}`);
+    try { if (afterWm !== cutPath) fs.unlinkSync(afterWm); } catch { /* ignore */ }
+  } else {
+    console.log(`[clip] ⏭ Step 4/4 Intro/Outro skipped`);
+  }
+  const finalFile = ioResult.success ? finalPath : afterWm;
+
+  // If no processing was done, rename cut file to final path
+  if (finalFile !== finalPath && fs.existsSync(finalFile)) {
+    if (finalFile !== finalPath) {
+      try { fs.renameSync(finalFile, finalPath); } catch {
+        fs.copyFileSync(finalFile, finalPath);
+        try { fs.unlinkSync(finalFile); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  const usedFinalPath = fs.existsSync(finalPath) ? finalPath : finalFile;
+
+  // Step 5: Thumbnail
+  let thumbnailPath: string | undefined;
+  if (fs.existsSync(usedFinalPath)) {
+    const thumbResult = await generateThumbnail(usedFinalPath, TMP_DIR, clipIndex, clip.duration);
+    if (thumbResult.success) thumbnailPath = thumbResult.thumbnailPath;
+  }
+
+  return {
+    ...clip,
+    index: clipIndex,
+    filePath: usedFinalPath,
+    thumbnailPath,
+  };
+}
+
+/**
+ * Cut video dan konversi ke format 9:16 menggunakan FFmpeg.
+ */
+async function cutAndConvertClip(
+  inputPath: string,
+  startTime: number,
+  endTime: number,
+  outputPath: string,
+  mode: ReturnType<typeof getAspectRatioMode>
+): Promise<void> {
+  const duration = endTime - startTime;
+  const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
+
+  let cmd: string;
+
+  if (useFilterComplex) {
+    cmd = [
+      "ffmpeg", "-y",
+      "-ss", startTime.toString(),
+      "-t", duration.toString(),
+      "-i", `"${inputPath}"`,
+      "-filter_complex", `"${filterValue}"`,
+      "-map", '"[out]"',
+      "-map", "0:a?",
+      "-c:v", "libx264",
+      "-crf", "23",
+      "-preset", "fast",
+      "-c:a", "aac",
+      "-ar", "44100",
+      "-ac", "2",
+      "-pix_fmt", "yuv420p",
+      `"${outputPath}"`,
+    ].join(" ");
+  } else {
+    cmd = [
+      "ffmpeg", "-y",
+      "-ss", startTime.toString(),
+      "-t", duration.toString(),
+      "-i", `"${inputPath}"`,
+      "-vf", `"${filterValue}"`,
+      "-c:v", "libx264",
+      "-crf", "23",
+      "-preset", "fast",
+      "-c:a", "aac",
+      "-ar", "44100",
+      "-ac", "2",
+      "-pix_fmt", "yuv420p",
+      `"${outputPath}"`,
+    ].join(" ");
+  }
+
+  await execAsync(cmd, { timeout: 300000 });
+  if (!fs.existsSync(outputPath)) throw new Error("Cut clip file tidak terbuat");
 }
