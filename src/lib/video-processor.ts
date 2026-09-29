@@ -311,7 +311,6 @@ async function cutAndConvertClip(
   const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
 
   let cmd: string;
-
   if (useFilterComplex) {
     cmd = [
       "ffmpeg", "-y",
@@ -321,6 +320,7 @@ async function cutAndConvertClip(
       "-filter_complex", `"${filterValue}"`,
       "-map", '"[out]"',
       "-map", "0:a?",
+      "-threads", "2",      // <-- TAMBAHKAN BARIS INI
       "-c:v", "libx264",
       "-crf", "23",
       "-preset", "fast",
@@ -337,6 +337,7 @@ async function cutAndConvertClip(
       "-t", duration.toString(),
       "-i", `"${inputPath}"`,
       "-vf", `"${filterValue}"`,
+      "-threads", "2",      // <-- TAMBAHKAN BARIS INI JUGA
       "-c:v", "libx264",
       "-crf", "23",
       "-preset", "fast",
