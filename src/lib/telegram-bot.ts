@@ -11,7 +11,7 @@ import {
   getAspectRatioMode,
   getModeLabel,
   getThumbnailConfig,
-  getThumbnailModeLabel,
+  getThumbnailModeLabel,'• Maksimal klip: lihat /settings (default 5, ubah via `MAX_CLIPS`)\n' +featureinfo
   getWatermarkConfig,
   getWatermarkPositionLabel,
   getIntroOutroConfig,
@@ -114,7 +114,7 @@ bot.command("clips", async (ctx) => {
 
   await ctx.reply(
     `✂️ *Konfigurasi Jumlah Klip AutoClip:*\n\n` +
-    `Aktif (env MAX\\_CLIPS): *${envMax} klip*\n` +
+    `Aktif (env \`MAX_CLIPS\`): *${envMax} klip*\n` +
     `Setting akunmu: *${userMax} klip*\n\n` +
     `*Cara Ubah (2 metode):*\n\n` +
     `*1️⃣ Railway Variables (global, semua user):*\n` +
@@ -393,7 +393,7 @@ async function handleVideoUrl(ctx: Context, url: string) {
 
   const featureInfo =
     `📐 Mode 9:16: *${modeLabel}*\n` +
-    `✂️ AutoClip: *${maxClips} klip* _(ubah: MAX\\_CLIPS atau /clips)_\n` +
+    `✂️ AutoClip: *${maxClips} klip* (ubah: \`MAX_CLIPS\` atau /clips)\n` +
     `💧 Watermark: *${wmCfg.enabled ? `✅ "${wmCfg.text}"` : "❌ Nonaktif"}*\n` +
     `🔍 Zoom Effect: *${zoomCfg.enabled ? `✅ ${zoomCfg.mode} (${zoomCfg.type})` : "❌ Nonaktif"}*\n` +
     `🎬 Intro/Outro: *${ioCfg.introEnabled || ioCfg.outroEnabled ? "✅ Aktif" : "❌ Nonaktif"}*`;
