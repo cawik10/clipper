@@ -51,6 +51,7 @@ export async function downloadVideo(
   const cmd = [
     "yt-dlp",
     "--no-playlist",
+    "--js-runtimes", "node", // <-- TAMBAHKAN BARIS INI
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
     "--progress",
