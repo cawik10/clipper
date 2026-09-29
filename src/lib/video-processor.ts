@@ -56,7 +56,6 @@ export async function downloadVideo(
     "yt-dlp",
     "--no-playlist",
     "--merge-output-format", "mp4",
-    "-f", "b[height<=1080]/best",  // <-- UBAH KE FORMAT INI (Paling aman)
     "--cookies", "/app/cookies.txt",
     "--force-ipv4",
     "--extractor-args", "youtube:player_client=android",
