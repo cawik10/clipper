@@ -102,37 +102,38 @@ bot.command("cancel", async (ctx) => {
   await ctx.reply("⛔ Proses tidak bisa dibatalkan secara manual. Tunggu hingga selesai atau error.");
 });
 
-// ===== /clips — INFO & CARA UBAH JUMLAH KLIP (BARU!) =====
+// ===== /clips INFO & CARA UBAH JUMLAH KLIP (BARU!) =====
 bot.command("clips", async (ctx) => {
   const envMax = getMaxClipsConfig();
   const userId = ctx.from?.id?.toString();
   let userMax = envMax;
+  
   if (userId) {
     const rows = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, userId));
     userMax = rows[0]?.maxClips ?? envMax;
   }
 
   await ctx.reply(
-    `✂️ *Konfigurasi Jumlah Klip AutoClip:*\n\n` +
+    `📊 *Konfigurasi Jumlah Klip AutoClip:*\n\n` +
     `Aktif (env \`MAX_CLIPS\`): *${envMax} klip*\n` +
     `Setting akunmu: *${userMax} klip*\n\n` +
     `*Cara Ubah (2 metode):*\n\n` +
     `*1️⃣ Railway Variables (global, semua user):*\n` +
-    `• Set variabel \`MAX\\_CLIPS\` di Railway Dashboard\n` +
-    `• Contoh: \`MAX\\_CLIPS=5\` → 5 klip per video\n` +
+    `• Set variabel \`MAX_CLIPS\` di Railway Dashboard\n` +
+    `• Contoh: \`MAX_CLIPS=5\` ➡️ 5 klip per video\n` +
     `• Rentang valid: \`1\` sampai \`10\`\n` +
-    `• Tidak perlu redeploy — langsung berlaku\n\n` +
+    `• Tidak perlu redeploy ➡️ langsung berlaku\n\n` +
     `*2️⃣ Per-akun via /settings (tombol di bawah):*\n` +
     `• Tekan tombol jumlah klip yang diinginkan\n` +
     `• Berlaku untuk akun Telegram kamu saja\n\n` +
     `📋 *Semua nilai yang tersedia:*\n` +
-    `• 1 klip — cepat, 1 momen terbaik\n` +
-    `• 2 klip — standar minimal\n` +
-    `• 3 klip — sebelumnya default\n` +
-    `• 4 klip — lebih banyak pilihan\n` +
-    `• *5 klip — default baru ⭐*\n` +
-    `• 6-10 klip — maksimal (butuh lebih lama)\n\n` +
-    `_ENV var MAX\\_CLIPS selalu override setting per-akun._`,
+    `• 1 klip ➡️ cepat, 1 momen terbaik\n` +
+    `• 2 klip ➡️ standar minimal\n` +
+    `• 3 klip ➡️ sebelumnya default\n` +
+    `• 4 klip ➡️ lebih banyak pilihan\n` +
+    `• *5 klip ➡️ default baru 🌟*\n` +
+    `• 6-10 klip ➡️ maksimal (butuh lebih lama)\n\n` +
+    `_Catatan:_ \`MAX_CLIPS\` _di env var selalu diutamakan._`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
@@ -140,7 +141,7 @@ bot.command("clips", async (ctx) => {
         .text("2️⃣", "set_clips_2")
         .text("3️⃣", "set_clips_3")
         .text("4️⃣", "set_clips_4")
-        .text("5️⃣ ⭐", "set_clips_5")
+        .text("5️⃣", "set_clips_5")
         .row()
         .text("6 klip", "set_clips_6")
         .text("7 klip", "set_clips_7")
