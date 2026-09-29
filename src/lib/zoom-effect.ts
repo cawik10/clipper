@@ -144,44 +144,29 @@ function buildZoomFilter(
   const cy = `ih/2-(ih/zoom/2)`;
 
   let zoomExpr: string;
-
   switch (type) {
     case "in":
-      // Mulai dari 1.0, zoom masuk ke maxZoom secara linear
-      zoomExpr = `min(zoom+${((maxZoom - 1) / frames).toFixed(6)},${maxZoom})`;
+      zoomExpr = `min(1+(on*${((maxZoom - 1) / frames).toFixed(6)}),${maxZoom})`;
       break;
-
     case "out":
-      // Mulai dari maxZoom, zoom keluar ke 1.0
-      zoomExpr = `max(zoom-${((maxZoom - 1) / frames).toFixed(6)},1)`;
-      // Initial zoom perlu diset ke maxZoom — kita gunakan 'if(lte(on,1),maxZoom,...)' 
-      zoomExpr = `if(lte(on,1),${maxZoom},max(zoom-${((maxZoom - 1) / frames).toFixed(6)},1))`;
+      zoomExpr = `max(${maxZoom}-(on*${((maxZoom - 1) / frames).toFixed(6)}),1)`;
       break;
-
     case "in-out": {
-      // Zoom masuk di separuh pertama, keluar di separuh kedua
       const half = Math.round(frames / 2);
-      const stepIn = ((maxZoom - 1) / half).toFixed(6);
-      const stepOut = ((maxZoom - 1) / half).toFixed(6);
-      zoomExpr = `if(lte(on,${half}),min(zoom+${stepIn},${maxZoom}),max(zoom-${stepOut},1))`;
+      const step = ((maxZoom - 1) / half).toFixed(6);
+      zoomExpr = `if(lte(on,${half}),1+(on*${step}),max(${maxZoom}-((on-${half})*${step}),1))`;
       break;
     }
-
     case "pulse": {
-      // Oscillasi: zoom naik turun 2 kali dalam durasi
-      // Menggunakan sin wave approximation dengan step
-      const stepUp = ((maxZoom - 1) / (frames / 4)).toFixed(6);
-      const stepDown = stepUp;
-      const q1 = Math.round(frames / 4);
-      const q2 = Math.round(frames / 2);
-      const q3 = Math.round(frames * 3 / 4);
-      zoomExpr = `if(lte(on,${q1}),min(zoom+${stepUp},${maxZoom}),if(lte(on,${q2}),max(zoom-${stepDown},1),if(lte(on,${q3}),min(zoom+${stepUp},${maxZoom}),max(zoom-${stepDown},1))))`;
+      const q = Math.round(frames / 4);
+      const step = ((maxZoom - 1) / q).toFixed(6);
+      zoomExpr = `if(lte(on,${q}),1+(on*${step}),if(lte(on,${q * 2}),max(${maxZoom}-((on-${q})*${step}),1),if(lte(on,${q * 3}),1+((on-${q * 2})*${step}),max(${maxZoom}-((on-${q * 3})*${step}),1))))`;
       break;
     }
-
     default:
-      zoomExpr = `min(zoom+${((maxZoom - 1) / frames).toFixed(6)},${maxZoom})`;
+      zoomExpr = `min(1+(on*${((maxZoom - 1) / frames).toFixed(6)}),${maxZoom})`;
   }
 
-  return `zoompan=z='${zoomExpr}':x='${cx}':y='${cy}':d=${frames}:fps=${fps}`;
+  // Gunakan d=1 agar tidak menduplikasi frame, dan s=1080x1920 agar resolusi tetap vertikal
+  return `zoompan=z='${zoomExpr}':x='${cx}':y='${cy}':d=1:s=1080x1920:fps=${fps}`;
 }
