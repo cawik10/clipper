@@ -11,7 +11,7 @@ import {
   getAspectRatioMode,
   getModeLabel,
   getThumbnailConfig,
-  getThumbnailModeLabel,'• Maksimal klip: lihat /settings (default 5, ubah via `MAX_CLIPS`)\n' +featureinfo
+  getThumbnailModeLabel,
   getWatermarkConfig,
   getWatermarkPositionLabel,
   getIntroOutroConfig,
