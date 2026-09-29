@@ -55,9 +55,9 @@ export async function downloadVideo(
   const cmd = [
     "yt-dlp",
     "--no-playlist",
+    "-f", "best/bestvideo+bestaudio",  // <-- GUNAKAN INI AGAR SELALU DAPAT FORMAT TERBAIK
     "--cookies", "/app/cookies.txt",
     "--force-ipv4",
-    "--extractor-args", "youtube:player_client=android",
     "-o", `"${outputTemplate}"`,
     "--no-warnings",
     `"${url}"`,
