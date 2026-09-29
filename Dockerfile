@@ -23,6 +23,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
+
+# Tambahkan 2 baris ini agar variabel terbaca saat build
+ARG DATABASE_URL
+ENV DATABASE_URL=$DATABASE_URL
+
 RUN npm run build
 
 # Production stage
