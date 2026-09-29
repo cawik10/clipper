@@ -50,10 +50,13 @@ export async function downloadVideo(
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
 
   // --- SET ARGUMEN UTAMA ---
+  // --- SET ARGUMEN UTAMA ---
   const cmdArgs = [
     "yt-dlp",
     "--no-playlist",
     "--js-runtimes", "node",
+    // Tambahkan 2 baris argumen extractor di bawah ini:
+    "--extractor-args", "youtube:player_client=default,web_embedded",
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
     "--progress",
@@ -82,7 +85,7 @@ export async function downloadVideo(
   const filePath = path.join(TMP_DIR, files[0]);
 
   // --- SERTAKAN COOKIE UNTUK INFO METADATA JUGA ---
-  let infoCmd = `yt-dlp --dump-json --no-playlist`;
+  let infoCmd = `yt-dlp --dump-json --no-playlist --extractor-args "youtube:player_client=default,web_embedded"`;
   if (cookiePath) infoCmd += ` --cookies "${cookiePath}"`;
   infoCmd += ` "${url}"`;
 
