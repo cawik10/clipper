@@ -73,6 +73,7 @@ export async function applyZoomEffect(
       "ffmpeg", "-y",
       "-i", `"${inputPath}"`,
       "-vf", `"${zoomFilter}"`,
+      "-threads", "2",
       "-c:v", "libx264",
       "-crf", "23",
       "-preset", "fast",
