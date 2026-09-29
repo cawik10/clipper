@@ -70,7 +70,7 @@ Kirim link video untuk mulai! 🎬`,
   Format output: Vertikal 9:16 (1080x1920)
   Maksimal klip: lihat /settings (default 5, ubah via \`MAX_CLIPS\`)
 
-Tips: Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!\`,
+Tips: Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
 
   connecting: `🔗 *Menghubungkan YouTube Studio...*
 
