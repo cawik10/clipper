@@ -57,7 +57,8 @@ export async function downloadVideo(
     "--no-playlist",
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
-    "--cookies", "/app/cookies.txt",  // <-- Ubah ke /app/cookies.txt
+    "--cookies", "/app/cookies.txt",
+    "--force-ipv4",   // <-- TAMBAHKAN BARIS INI
     "-o", `"${outputTemplate}"`,
     "--no-warnings",
     `"${url}"`,
