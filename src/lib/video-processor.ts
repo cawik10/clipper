@@ -3,7 +3,6 @@
  * ===============
  * Handles: download, transcription, clip processing (cut → zoom → watermark → intro/outro)
  */
-
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
@@ -31,7 +30,6 @@ function ensureDir(dir: string) {
 // =====================================================================
 // PLATFORM DETECTION
 // =====================================================================
-
 export function detectPlatform(url: string): string {
   if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
   if (/facebook\.com|fb\.watch/.test(url)) return "facebook";
@@ -43,7 +41,6 @@ export function detectPlatform(url: string): string {
 // =====================================================================
 // DOWNLOAD
 // =====================================================================
-
 export async function downloadVideo(
   url: string,
   jobId: string,
@@ -51,30 +48,28 @@ export async function downloadVideo(
 ): Promise<{ filePath: string; title: string; duration: number }> {
   ensureDir(TMP_DIR);
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
-  
   const cmd = [
     "yt-dlp",
     "--no-playlist",
-    "-f", "best/bestvideo+bestaudio",
-    "--cookies", "/app/cookies.txt",
-    "--force-ipv4",
-    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "--extractor-args", "youtube:player_client=web",
+    "--merge-output-format", "mp4",
+    "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
+    "--progress",
+    "--newline",
     "-o", `"${outputTemplate}"`,
-    "--no-warnings",
     `"${url}"`,
   ].join(" ");
 
   console.log(`[download] Starting: ${url}`);
+
   await execAsync(cmd, { timeout: 600000 });
 
-  // Find the downloaded file
+  if (onProgress) await onProgress(50);
+
   const files = fs.readdirSync(TMP_DIR).filter((f) => f.startsWith(jobId));
   if (!files.length) throw new Error("Download selesai tapi file tidak ditemukan");
 
   const filePath = path.join(TMP_DIR, files[0]);
 
-  // Get video info
   const infoCmd = `yt-dlp --dump-json --no-playlist "${url}"`;
   let title = "Video";
   let duration = 0;
@@ -84,12 +79,13 @@ export async function downloadVideo(
     title = info.title || "Video";
     duration = info.duration || 0;
   } catch {
-    // Fallback: get duration from ffprobe
     try {
       const probeCmd = `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${filePath}"`;
       const { stdout } = await execAsync(probeCmd, { timeout: 15000 });
       duration = parseFloat(stdout.trim()) || 0;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   if (onProgress) await onProgress(100);
@@ -100,15 +96,12 @@ export async function downloadVideo(
 // =====================================================================
 // TRANSCRIPTION
 // =====================================================================
-
 export async function transcribeAudio(
   videoPath: string,
   language: string = "id"
 ): Promise<{ start: number; end: number; text: string }[]> {
   ensureDir(TMP_DIR);
   const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
-
-  // Extract audio
   const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
   await execAsync(extractCmd, { timeout: 60000 });
 
@@ -125,7 +118,11 @@ export async function transcribeAudio(
       return [];
     }
   } finally {
-    try { if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath); } catch { /* ignore */ }
+    try {
+      if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -136,11 +133,9 @@ async function transcribeWithOpenAI(
 ): Promise<{ start: number; end: number; text: string }[]> {
   const OpenAI = (await import("openai")).default;
   const client = new OpenAI({ apiKey });
-
   const audioBuffer = fs.readFileSync(audioPath);
   const blob = new Blob([audioBuffer], { type: "audio/mp3" });
   const file = new File([blob], "audio.mp3", { type: "audio/mp3" });
-
   const response = await client.audio.transcriptions.create({
     model: "whisper-1",
     file,
@@ -148,11 +143,9 @@ async function transcribeWithOpenAI(
     response_format: "verbose_json",
     timestamp_granularities: ["segment"],
   });
-
   const data = response as unknown as {
     segments?: { start: number; end: number; text: string }[];
   };
-
   return (data.segments || []).map((s) => ({
     start: s.start,
     end: s.end,
@@ -167,7 +160,6 @@ async function transcribeWithGroq(
 ): Promise<{ start: number; end: number; text: string }[]> {
   const FormData = (await import("form-data")).default;
   const axios = (await import("axios")).default;
-
   const form = new FormData();
   form.append("file", fs.createReadStream(audioPath), { filename: "audio.mp3" });
   form.append("model", "whisper-large-v3");
@@ -182,7 +174,6 @@ async function transcribeWithGroq(
       timeout: 120000,
     }
   );
-
   const segments = response.data?.segments || [];
   return segments.map((s: { start: number; end: number; text: string }) => ({
     start: s.start,
@@ -194,10 +185,9 @@ async function transcribeWithGroq(
 // =====================================================================
 // CLIP PROCESSING (Cut → Zoom → Watermark → Intro/Outro → Thumbnail)
 // =====================================================================
-
 export async function processClips(
   videoPath: string,
-  clips: Omit<ClipResult, "filePath" | "thumbnailPath">[],
+  clips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[],
   jobId: string,
   makeVertical: boolean = true,
   onProgress?: (clipIndex: number, total: number) => Promise<void>
@@ -207,16 +197,14 @@ export async function processClips(
   const results: ClipResult[] = [];
 
   for (let i = 0; i < clips.length; i++) {
-    const clip = clips[i];
     if (onProgress) await onProgress(i, clips.length);
-
     try {
-      const result = await processOneClip(videoPath, clip, jobId, mode, i);
+      const result = await processSingleClip(videoPath, clips[i], mode, jobId, i);
       results.push(result);
     } catch (err) {
-      console.error(`[process-clips] ❌ Klip ${i} gagal:`, err);
+      console.error(`[clip] ❌ Klip ${i} gagal:`, err);
       results.push({
-        ...clip,
+        ...clips[i],
         index: i,
         filePath: undefined,
         thumbnailPath: undefined,
@@ -227,11 +215,11 @@ export async function processClips(
   return results;
 }
 
-async function processOneClip(
+async function processSingleClip(
   videoPath: string,
-  clip: Omit<ClipResult, "filePath" | "thumbnailPath">,
-  jobId: string,
+  clip: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">,
   mode: ReturnType<typeof getAspectRatioMode>,
+  jobId: string,
   clipIndex: number
 ): Promise<ClipResult> {
   // Step 1: Cut + convert to 9:16
@@ -239,7 +227,7 @@ async function processOneClip(
   await cutAndConvertClip(videoPath, clip.startTime, clip.endTime, cutPath, mode);
   console.log(`[clip] ✅ Step 1/4 Cut selesai: klip ${clipIndex}`);
 
-  // Step 2: Zoom effect (pada highlight moment)
+  // Step 2: Zoom effect
   const zoomPath = path.join(TMP_DIR, `clip_zoom_${jobId}_${clipIndex}.mp4`);
   const zoomResult = await applyZoomEffect(cutPath, zoomPath, clip.viralScore);
   if (zoomResult.applied) {
@@ -265,20 +253,22 @@ async function processOneClip(
   const finalPath = path.join(TMP_DIR, `clip_final_${jobId}_${clipIndex}.mp4`);
   const ioResult = await applyIntroOutro(afterWm, finalPath, `${jobId}_${clipIndex}`);
   if (ioResult.introAdded || ioResult.outroAdded) {
-    console.log(`[clip] ✅ Step 4/4 Intro/Outro: intro=${ioResult.introAdded} outro=${ioResult.outroAdded}`);
+    console.log(
+      `[clip] ✅ Step 4/4 Intro/Outro: intro=${ioResult.introAdded} outro=${ioResult.outroAdded}`
+    );
     try { if (afterWm !== cutPath) fs.unlinkSync(afterWm); } catch { /* ignore */ }
   } else {
     console.log(`[clip] ⏭ Step 4/4 Intro/Outro skipped`);
   }
+
   const finalFile = ioResult.success ? finalPath : afterWm;
 
-  // If no processing was done, rename cut file to final path
   if (finalFile !== finalPath && fs.existsSync(finalFile)) {
-    if (finalFile !== finalPath) {
-      try { fs.renameSync(finalFile, finalPath); } catch {
-        fs.copyFileSync(finalFile, finalPath);
-        try { fs.unlinkSync(finalFile); } catch { /* ignore */ }
-      }
+    try {
+      fs.renameSync(finalFile, finalPath);
+    } catch {
+      fs.copyFileSync(finalFile, finalPath);
+      try { fs.unlinkSync(finalFile); } catch { /* ignore */ }
     }
   }
 
@@ -299,9 +289,6 @@ async function processOneClip(
   };
 }
 
-/**
- * Cut video dan konversi ke format 9:16 menggunakan FFmpeg.
- */
 async function cutAndConvertClip(
   inputPath: string,
   startTime: number,
@@ -315,14 +302,15 @@ async function cutAndConvertClip(
   let cmd: string;
   if (useFilterComplex) {
     cmd = [
-      "ffmpeg", "-y",
+      "ffmpeg",
+      "-y",
       "-ss", startTime.toString(),
       "-t", duration.toString(),
       "-i", `"${inputPath}"`,
       "-filter_complex", `"${filterValue}"`,
       "-map", '"[out]"',
       "-map", "0:a?",
-      "-threads", "2",      // <-- TAMBAHKAN BARIS INI
+      "-threads", "2",
       "-c:v", "libx264",
       "-crf", "23",
       "-preset", "fast",
@@ -334,12 +322,13 @@ async function cutAndConvertClip(
     ].join(" ");
   } else {
     cmd = [
-      "ffmpeg", "-y",
+      "ffmpeg",
+      "-y",
       "-ss", startTime.toString(),
       "-t", duration.toString(),
       "-i", `"${inputPath}"`,
       "-vf", `"${filterValue}"`,
-      "-threads", "2",      // <-- TAMBAHKAN BARIS INI JUGA
+      "-threads", "2",
       "-c:v", "libx264",
       "-crf", "23",
       "-preset", "fast",

@@ -38,16 +38,14 @@ export async function uploadClipsToYouTube(
     }
 
     try {
-      const fileSize = fs.statSync(clip.filePath).size;
       const response = await youtube.videos.insert({
         part: ["snippet", "status"],
         requestBody: {
           snippet: {
             title: clip.title.slice(0, 100),
-            description: `${clip.description}\n\n#Shorts #Viral\n\nDibuat dengan AutoClip Bot`,
-            tags: [...(clip.tags || []), "shorts", "viral"],
+            description: clip.description || "",
+            tags: clip.tags || [],
             categoryId: "22",
-            defaultLanguage: "id",
           },
           status: {
             privacyStatus,
@@ -55,24 +53,25 @@ export async function uploadClipsToYouTube(
           },
         },
         media: {
-          mimeType: "video/mp4",
           body: fs.createReadStream(clip.filePath),
         },
       });
 
       const videoId = response.data.id!;
-      const result: UploadResult = {
-        videoId,
-        videoUrl: `https://youtu.be/${videoId}`,
-        clipIndex: i,
-      };
+      const videoUrl = `https://youtu.be/${videoId}`;
+      const result: UploadResult = { videoId, videoUrl, clipIndex: i };
       results.push(result);
       if (onUpload) await onUpload(i, result);
+
+      // Small delay between uploads
+      if (i < clips.length - 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[youtube-upload] Klip ${i} gagal:`, msg);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[youtube] Upload klip ${i} gagal:`, err);
       results.push(null);
-      if (onUpload) await onUpload(i, undefined, msg);
+      if (onUpload) await onUpload(i, undefined, errorMsg);
     }
   }
 

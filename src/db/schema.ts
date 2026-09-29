@@ -62,7 +62,8 @@ export const userSettings = pgTable("user_settings", {
   telegramUserId: text("telegram_user_id").notNull().unique(),
   youtubeConnected: boolean("youtube_connected").default(false),
   defaultPrivacy: text("default_privacy").default("private"),
-  maxClips: integer("max_clips").default(3),
+  // Default changed to 5 — can also be overridden by MAX_CLIPS env var
+  maxClips: integer("max_clips").default(5),
   minDuration: integer("min_duration").default(20),
   maxDuration: integer("max_duration").default(40),
   language: text("language").default("id"),

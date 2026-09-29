@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
       }),
     });
 
-    const result = await response.json();
+    const result = await response.json() as { ok: boolean; description?: string };
 
     if (result.ok) {
       return NextResponse.json({ success: true, message: `Webhook set to: ${webhookUrl}`, result });
@@ -52,7 +52,9 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "TELEGRAM_BOT_TOKEN not set" }, { status: 500 });
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`, { method: "POST" });
+  const response = await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`, {
+    method: "POST",
+  });
   const result = await response.json();
   return NextResponse.json(result);
 }

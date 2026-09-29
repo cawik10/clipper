@@ -1,4 +1,5 @@
 // Bot message templates in Indonesian
+import { getMaxClipsConfig } from "@/lib/video-config";
 
 export const messages = {
   welcome: `🤖 *AutoClip Bot* — Video Clipper Otomatis
@@ -11,7 +12,8 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 3. Video akan dipotong otomatis (20-40 detik)
 4. Upload langsung ke YouTube sebagai Draft
 
-*Fitur Baru:*
+*Fitur Unggulan:*
+✂️ AutoClip — hingga 5 klip per video (mudah diubah)
 🖼 Thumbnail auto-generate
 💧 Watermark custom
 🎬 Intro/Outro otomatis
@@ -24,6 +26,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 /settings - Pengaturan bot
 /status - Cek status
 /history - Riwayat klip
+/clips - Info & cara ubah jumlah klip
 /watermark - Info watermark config
 /zoom - Info zoom effect config
 /introoutro - Info intro/outro config
@@ -55,6 +58,7 @@ Kirim link video untuk mulai! 🎬`,
 • 🌀 Mode aktif bisa diubah via ASPECT_RATIO_MODE
 
 *Perintah Info Konfigurasi:*
+/clips - Info & cara ubah jumlah klip (default: 5)
 /mode - Info aspect ratio mode
 /thumbnail - Info thumbnail config
 /watermark - Info watermark config
@@ -64,7 +68,7 @@ Kirim link video untuk mulai! 🎬`,
 *Ketentuan:*
 • Durasi klip: 20-40 detik
 • Format output: Vertikal 9:16 (1080x1920)
-• Maksimal 3 klip per video
+• Maksimal klip: lihat /settings (default 5, ubah via MAX_CLIPS)
 
 Tips: Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
 
@@ -78,7 +82,8 @@ Izin yang diperlukan:
 
 Setelah login, klip akan otomatis tersimpan sebagai Draft di YouTube Studio.`,
 
-  error: (msg: string) => `❌ *Terjadi Kesalahan*
+  error: (msg: string) =>
+    `❌ *Terjadi Kesalahan*
 
 ${msg}
 
@@ -101,7 +106,7 @@ Kirim link video yang valid dari:
   }) =>
     `⚙️ *Pengaturan Bot*
 
-• Maksimal Klip: ${s.maxClips}
+• Maksimal Klip: ${s.maxClips} _(ubah dengan tombol di bawah, atau set MAX\\_CLIPS di Railway)_
 • Durasi Min: ${s.minDuration} detik
 • Durasi Max: ${s.maxDuration} detik
 • Privacy Default: ${s.defaultPrivacy}
@@ -159,3 +164,6 @@ export function formatDuration(seconds: number): string {
   if (m === 0) return `${s}s`;
   return `${m}m ${s}s`;
 }
+
+// Export for use in other modules
+export { getMaxClipsConfig };

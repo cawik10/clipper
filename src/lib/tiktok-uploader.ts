@@ -1,26 +1,10 @@
 /**
  * TikTok Content Posting API – video uploader
- *
- * Supports two modes:
- *   1. INBOX (Creator Post) – sends video to TikTok inbox; user taps "Post" in-app.
- *      Does NOT require publishing scope approval from TikTok.
- *      Endpoint: /v2/post/publish/inbox/video/init/
- *
- *   2. DIRECT (Direct Post) – publishes immediately to the user's profile.
- *      Requires video.publish scope approval from TikTok developer portal.
- *      Endpoint: /v2/post/publish/video/init/
- *
- * We default to INBOX mode because it is available without extra review approval.
- * Switch UPLOAD_MODE to "direct" once your TikTok app is approved.
- *
- * Docs: https://developers.tiktok.com/doc/content-posting-api-reference-upload-video
  */
-
 import fs from "fs";
+import { ClipResult } from "@/db/schema";
 
 const TIKTOK_API_BASE = "https://open.tiktokapis.com";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type TikTokPrivacy =
   | "PUBLIC_TO_EVERYONE"
@@ -29,21 +13,18 @@ export type TikTokPrivacy =
 
 export interface TikTokUploadOptions {
   filePath: string;
-  title: string;           // caption / description (max 2200 chars)
+  title: string;
   privacyLevel?: TikTokPrivacy;
   disableDuet?: boolean;
   disableComment?: boolean;
   disableStitch?: boolean;
-  mode?: "inbox" | "direct"; // default: "inbox"
+  mode?: "inbox" | "direct";
 }
 
 export interface TikTokUploadResult {
   publishId: string;
-  /** URL only available for "direct" mode once video is processed */
   videoUrl?: string;
 }
-
-// ── Upload ────────────────────────────────────────────────────────────────────
 
 export async function uploadToTikTok(
   options: TikTokUploadOptions,
@@ -64,8 +45,6 @@ export async function uploadToTikTok(
   }
 
   const fileSize = fs.statSync(filePath).size;
-
-  // Chunk size: 10 MB (TikTok min 5 MB, max 64 MB per chunk)
   const CHUNK_SIZE = 10 * 1024 * 1024;
   const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
 
@@ -73,7 +52,6 @@ export async function uploadToTikTok(
     `[TikTok] Uploading "${title}" – mode=${mode}, size=${Math.round(fileSize / 1024 / 1024)}MB, chunks=${totalChunks}`
   );
 
-  // ── Step 1: Init upload ──────────────────────────────────────────────────
   const initEndpoint =
     mode === "direct"
       ? `${TIKTOK_API_BASE}/v2/post/publish/video/init/`
@@ -88,7 +66,6 @@ export async function uploadToTikTok(
     },
   };
 
-  // Direct mode needs post_info
   if (mode === "direct") {
     initBody.post_info = {
       title: title.slice(0, 2200),
@@ -109,7 +86,10 @@ export async function uploadToTikTok(
     body: JSON.stringify(initBody),
   });
 
-  const initData = await initRes.json();
+  const initData = await initRes.json() as {
+    error?: { code: string; message: string };
+    data?: { publish_id: string; upload_url: string };
+  };
 
   if (!initRes.ok || initData.error?.code !== "ok") {
     const code = initData.error?.code ?? initRes.status;
@@ -117,15 +97,13 @@ export async function uploadToTikTok(
     throw new Error(`TikTok init upload failed [${code}]: ${msg}`);
   }
 
-  const { publish_id: publishId, upload_url: uploadUrl } = initData.data;
-
+  const { publish_id: publishId, upload_url: uploadUrl } = initData.data!;
   if (!uploadUrl) {
     throw new Error("TikTok did not return upload_url");
   }
 
   console.log(`[TikTok] publish_id=${publishId}, upload_url obtained`);
 
-  // ── Step 2: Upload chunks ────────────────────────────────────────────────
   const fileBuffer = fs.readFileSync(filePath);
   let offset = 0;
   let chunkIndex = 0;
@@ -133,74 +111,47 @@ export async function uploadToTikTok(
   while (offset < fileSize) {
     const end = Math.min(offset + CHUNK_SIZE, fileSize);
     const chunk = fileBuffer.slice(offset, end);
-
     const chunkRes = await fetch(uploadUrl, {
       method: "PUT",
       headers: {
         "Content-Type": "video/mp4",
+        "Content-Length": chunk.length.toString(),
         "Content-Range": `bytes ${offset}-${end - 1}/${fileSize}`,
-        "Content-Length": String(chunk.length),
       },
       body: chunk,
     });
-
     if (!chunkRes.ok && chunkRes.status !== 206) {
-      throw new Error(
-        `TikTok chunk upload failed [chunk ${chunkIndex + 1}/${totalChunks}]: HTTP ${chunkRes.status}`
-      );
+      throw new Error(`TikTok chunk ${chunkIndex} upload failed: HTTP ${chunkRes.status}`);
     }
-
-    console.log(
-      `[TikTok] Chunk ${chunkIndex + 1}/${totalChunks} uploaded (${Math.round((end / fileSize) * 100)}%)`
-    );
-
+    console.log(`[TikTok] Chunk ${chunkIndex + 1}/${totalChunks} uploaded`);
     offset = end;
     chunkIndex++;
   }
 
-  console.log(`[TikTok] All chunks uploaded for publish_id=${publishId}`);
-
   return { publishId };
 }
 
-// ── Check publish status ──────────────────────────────────────────────────────
-
-export interface TikTokPublishStatus {
-  status: "PROCESSING_UPLOAD" | "PUBLISH_COMPLETE" | "FAILED" | string;
-  publicationId?: string;
-}
-
-export async function checkPublishStatus(
+export async function checkTikTokUploadStatus(
   publishId: string,
   accessToken: string
-): Promise<TikTokPublishStatus> {
-  const res = await fetch(
-    `${TIKTOK_API_BASE}/v2/post/publish/status/fetch/`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json; charset=UTF-8",
-      },
-      body: JSON.stringify({ publish_id: publishId }),
-    }
-  );
-
-  const data = await res.json();
-
+): Promise<{ status: string; publicationId?: string }> {
+  const res = await fetch(`${TIKTOK_API_BASE}/v2/post/publish/status/fetch/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=UTF-8",
+    },
+    body: JSON.stringify({ publish_id: publishId }),
+  });
+  const data = await res.json() as { data?: { status: string; publicationId?: string } };
   if (!res.ok) {
     return { status: "FAILED" };
   }
-
   return {
     status: data.data?.status ?? "UNKNOWN",
     publicationId: data.data?.publicationId,
   };
 }
-
-// ── Upload multiple clips ─────────────────────────────────────────────────────
-
-import { ClipResult } from "@/db/schema";
 
 export interface TikTokClipUploadResult {
   publishId: string;
@@ -222,36 +173,25 @@ export async function uploadClipsToTikTok(
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
-    if (!clip.filePath) {
+    if (!clip.filePath || !fs.existsSync(clip.filePath)) {
       results.push(null);
-      if (onProgress) await onProgress(i, null, "No file path");
+      if (onProgress) await onProgress(i, null, "File tidak ditemukan");
       continue;
     }
 
     try {
-      // Build caption: title + hashtags (max 2200 chars)
       const hashtags = (clip.tags || [])
         .map((t) => `#${t.replace(/\s+/g, "")}`)
         .join(" ");
-      const caption = `${clip.title}\n\n${hashtags}\n\n#TikTok #Viral #Shorts`.slice(
-        0,
-        2200
-      );
+      const caption = `${clip.title}\n\n${hashtags}\n\n#TikTok #Viral #Shorts`.slice(0, 2200);
 
       const result = await uploadToTikTok(
-        {
-          filePath: clip.filePath,
-          title: caption,
-          privacyLevel,
-          mode,
-        },
+        { filePath: clip.filePath, title: caption, privacyLevel, mode },
         accessToken
       );
-
       results.push(result);
       if (onProgress) await onProgress(i, result);
 
-      // Delay between uploads to avoid rate limiting
       if (i < clips.length - 1) {
         await new Promise((r) => setTimeout(r, 3000));
       }

@@ -3,6 +3,7 @@ import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
+import { getMaxClipsConfig } from "@/lib/video-config";
 import {
   uploadClipsToYouTube,
   isTokenExpired,
@@ -25,14 +26,20 @@ export async function processJob(
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, job.telegramUserId));
+
+  // Use env var MAX_CLIPS as the source of truth; fall back to user DB setting, then default 5
+  const envMaxClips = getMaxClipsConfig();
   const settings = settingsRows[0] || {
-    maxClips: 3,
+    maxClips: envMaxClips,
     minDuration: 20,
     maxDuration: 40,
     defaultPrivacy: "private",
     language: "id",
     youtubeConnected: false,
   };
+
+  // ENV var takes priority over per-user setting
+  const effectiveMaxClips = envMaxClips;
 
   try {
     // === STEP 1: DOWNLOAD ===
@@ -78,9 +85,9 @@ export async function processJob(
     }
 
     // === STEP 3: ANALYZE ===
-    await update("analyzing", "🧠 Menganalisis momen viral dengan AI...");
+    await update("analyzing", `🧠 Menganalisis momen viral dengan AI... (target: ${effectiveMaxClips} klip)`);
 
-    let analysisClips: Omit<ClipResult, "filePath" | "thumbnailPath">[];
+    let analysisClips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[];
     try {
       analysisClips = await analyzeVideoForClips(
         {
@@ -90,7 +97,7 @@ export async function processJob(
           platform: job.platform,
           language: settings.language || "id",
         },
-        settings.maxClips || 3,
+        effectiveMaxClips,
         settings.minDuration || 20,
         settings.maxDuration || 40
       );
@@ -116,7 +123,10 @@ export async function processJob(
       jobId,
       true,
       async (clipIndex, total) => {
-        await update("clipping", `✂️ Memproses klip ${clipIndex + 1}/${total}... (Zoom + Watermark + Intro/Outro)`);
+        await update(
+          "clipping",
+          `✂️ Memproses klip ${clipIndex + 1}/${total}... (Zoom + Watermark + Intro/Outro)`
+        );
       }
     );
 
@@ -149,7 +159,11 @@ export async function processJob(
           accessToken = newTokens.accessToken;
           await db
             .update(youtubeTokens)
-            .set({ accessToken: newTokens.accessToken, expiresAt: newTokens.expiresAt, updatedAt: new Date() })
+            .set({
+              accessToken: newTokens.accessToken,
+              expiresAt: newTokens.expiresAt,
+              updatedAt: new Date(),
+            })
             .where(eq(youtubeTokens.telegramUserId, job.telegramUserId));
         } catch (err) {
           console.error("Token refresh failed:", err);
@@ -195,7 +209,9 @@ export async function processJob(
     try {
       const { unlinkSync, existsSync } = await import("fs");
       if (existsSync(downloadResult.filePath)) unlinkSync(downloadResult.filePath);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error(`Job ${jobId} failed:`, err);

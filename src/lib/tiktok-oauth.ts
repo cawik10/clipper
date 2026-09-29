@@ -1,14 +1,6 @@
 /**
  * TikTok OAuth 2.0 helpers (Content Posting API)
- *
- * Scopes needed:
- *   video.upload   – upload video to inbox (requires TikTok app review)
- *   video.publish  – direct publish (requires TikTok app review)
- *   user.info.basic – display name / avatar
- *
- * Docs: https://developers.tiktok.com/doc/oauth-user-access-token-management
  */
-
 const TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/";
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 
@@ -17,9 +9,7 @@ export function getTikTokAuthUrl(state: string): string {
   const redirectUri = process.env.TIKTOK_REDIRECT_URI;
 
   if (!clientKey || !redirectUri) {
-    throw new Error(
-      "Missing TikTok OAuth credentials: TIKTOK_CLIENT_KEY, TIKTOK_REDIRECT_URI"
-    );
+    throw new Error("Missing TikTok OAuth credentials: TIKTOK_CLIENT_KEY, TIKTOK_REDIRECT_URI");
   }
 
   const params = new URLSearchParams({
@@ -37,14 +27,12 @@ export interface TikTokTokenResponse {
   accessToken: string;
   refreshToken: string;
   openId: string;
-  expiresAt: Date;         // access token expiry
-  refreshExpiresAt: Date;  // refresh token expiry
+  expiresAt: Date;
+  refreshExpiresAt: Date;
   scope: string;
 }
 
-export async function exchangeCodeForTokens(
-  code: string
-): Promise<TikTokTokenResponse> {
+export async function exchangeCodeForTokens(code: string): Promise<TikTokTokenResponse> {
   const clientKey = process.env.TIKTOK_CLIENT_KEY;
   const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
   const redirectUri = process.env.TIKTOK_REDIRECT_URI;
@@ -67,12 +55,19 @@ export async function exchangeCodeForTokens(
     body: body.toString(),
   });
 
-  const data = await res.json();
+  const data = await res.json() as {
+    error?: string;
+    error_description?: string;
+    access_token: string;
+    refresh_token: string;
+    open_id: string;
+    expires_in: number;
+    refresh_expires_in: number;
+    scope: string;
+  };
 
   if (!res.ok || data.error) {
-    throw new Error(
-      `TikTok token exchange failed: ${data.error_description || JSON.stringify(data)}`
-    );
+    throw new Error(`TikTok token exchange failed: ${data.error_description || JSON.stringify(data)}`);
   }
 
   const now = Date.now();
@@ -88,7 +83,7 @@ export async function exchangeCodeForTokens(
 
 export async function refreshAccessToken(
   refreshToken: string
-): Promise<Omit<TikTokTokenResponse, "scope" | "openId" | "refreshExpiresAt">> {
+): Promise<Pick<TikTokTokenResponse, "accessToken" | "refreshToken" | "expiresAt">> {
   const clientKey = process.env.TIKTOK_CLIENT_KEY;
   const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
 
@@ -109,12 +104,16 @@ export async function refreshAccessToken(
     body: body.toString(),
   });
 
-  const data = await res.json();
+  const data = await res.json() as {
+    error?: string;
+    error_description?: string;
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+  };
 
   if (!res.ok || data.error) {
-    throw new Error(
-      `TikTok token refresh failed: ${data.error_description || JSON.stringify(data)}`
-    );
+    throw new Error(`TikTok token refresh failed: ${data.error_description || JSON.stringify(data)}`);
   }
 
   const now = Date.now();
@@ -126,6 +125,5 @@ export async function refreshAccessToken(
 }
 
 export function isTokenExpired(expiresAt: Date): boolean {
-  // 5-minute buffer
   return new Date() >= new Date(expiresAt.getTime() - 5 * 60 * 1000);
 }

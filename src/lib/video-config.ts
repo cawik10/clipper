@@ -5,6 +5,12 @@
  * Mudah diubah dari Railway Dashboard → Variables tanpa perlu redeploy kode.
  *
  * =====================================================================
+ * MAX CLIPS (BARU! — sebelumnya hardcoded 3)
+ * =====================================================================
+ * MAX_CLIPS=5          ← Jumlah klip hasil autoclip (default: 5)
+ *                         Bisa diubah ke 1–10 sesuai kebutuhan
+ *
+ * =====================================================================
  * ASPECT RATIO MODE
  * =====================================================================
  * ASPECT_RATIO_MODE=blur     ← REKOMENDASI: background blur, tidak bolong
@@ -24,21 +30,21 @@
  * THUMBNAIL_HEIGHT=720            ← Tinggi output (0=auto)
  *
  * =====================================================================
- * WATERMARK CONFIGURATION (BARU!)
+ * WATERMARK CONFIGURATION
  * =====================================================================
  * WATERMARK_ENABLED=true          ← Aktifkan watermark (default: true)
  * WATERMARK_TEXT=@YourChannel     ← Teks watermark
- * WATERMARK_POSITION=bottomright ← topleft | topright | bottomleft | bottomright | center
+ * WATERMARK_POSITION=bottomright  ← topleft | topright | bottomleft | bottomright | center
  * WATERMARK_FONT_SIZE=32          ← Ukuran font (default: 32)
  * WATERMARK_COLOR=white           ← Warna teks (default: white)
  * WATERMARK_OPACITY=0.85          ← Transparansi 0.0-1.0 (default: 0.85)
  * WATERMARK_BOX=true              ← Tambah kotak background (default: true)
- * WATERMARK_BOX_COLOR=black@0.4   ← Warna kotak (default: black@0.4)
+ * WATERMARK_BOX_COLOR=black@0.4  ← Warna kotak (default: black@0.4)
  * WATERMARK_IMAGE_PATH=           ← Path ke file gambar watermark (opsional)
  * WATERMARK_IMAGE_SCALE=0.15      ← Skala gambar watermark (default: 0.15)
  *
  * =====================================================================
- * INTRO / OUTRO CONFIGURATION (BARU!)
+ * INTRO / OUTRO CONFIGURATION
  * =====================================================================
  * INTRO_ENABLED=false             ← Aktifkan intro (default: false)
  * INTRO_VIDEO_PATH=               ← Path ke file video intro
@@ -52,7 +58,7 @@
  * OUTRO_COLOR=#000000             ← Warna background outro
  *
  * =====================================================================
- * ZOOM EFFECT ON HIGHLIGHT (BARU!)
+ * ZOOM EFFECT ON HIGHLIGHT
  * =====================================================================
  * ZOOM_EFFECT_ENABLED=true        ← Aktifkan zoom effect (default: true)
  * ZOOM_EFFECT_MODE=auto           ← auto | always | never
@@ -73,8 +79,27 @@ export type WatermarkPosition =
 export type ZoomEffectMode = "auto" | "always" | "never";
 export type ZoomEffectType = "in" | "out" | "in-out" | "pulse";
 
-// ===== ASPECT RATIO =====
+// =====================================================================
+// MAX CLIPS CONFIG (NEW!)
+// =====================================================================
 
+/**
+ * Jumlah klip maksimum per video.
+ * Default: 5 (sebelumnya 3).
+ * Ubah via Railway Variables: MAX_CLIPS=5
+ * Rentang valid: 1–10
+ */
+export function getMaxClipsConfig(): number {
+  const raw = process.env.MAX_CLIPS;
+  if (raw) {
+    const parsed = parseInt(raw.trim(), 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= 10) return parsed;
+    console.warn(`[video-config] MAX_CLIPS="${raw}" tidak valid (harus 1-10). Menggunakan 5.`);
+  }
+  return 5;
+}
+
+// ===== ASPECT RATIO =====
 export function getAspectRatioMode(): AspectRatioMode {
   const mode = (process.env.ASPECT_RATIO_MODE || "blur").toLowerCase().trim();
   const valid: AspectRatioMode[] = ["blur", "crop", "pad", "stretch", "none"];
@@ -99,6 +124,7 @@ export function buildFFmpegFilterArgs(mode: AspectRatioMode): {
     ].join(";");
     return { useFilterComplex: true, filterValue: filterComplex };
   }
+
   let vf = "";
   switch (mode) {
     case "crop":
@@ -131,7 +157,6 @@ export function getModeLabel(mode: AspectRatioMode): string {
 }
 
 // ===== THUMBNAIL CONFIG =====
-
 export interface ThumbnailConfig {
   enabled: boolean;
   mode: ThumbnailMode;
@@ -142,8 +167,7 @@ export interface ThumbnailConfig {
 }
 
 export function getThumbnailConfig(): ThumbnailConfig {
-  const enabled =
-    (process.env.THUMBNAIL_ENABLED || "true").toLowerCase().trim() !== "false";
+  const enabled = (process.env.THUMBNAIL_ENABLED || "true").toLowerCase().trim() !== "false";
   const rawMode = (process.env.THUMBNAIL_MODE || "middle").toLowerCase().trim();
   const validModes: ThumbnailMode[] = ["middle", "best", "start", "custom"];
   const mode: ThumbnailMode = validModes.includes(rawMode as ThumbnailMode)
@@ -166,8 +190,7 @@ export function getThumbnailModeLabel(mode: ThumbnailMode): string {
   return labels[mode] || mode;
 }
 
-// ===== WATERMARK CONFIG (BARU!) =====
-
+// ===== WATERMARK CONFIG =====
 export interface WatermarkConfig {
   enabled: boolean;
   text: string;
@@ -182,23 +205,32 @@ export interface WatermarkConfig {
 }
 
 export function getWatermarkConfig(): WatermarkConfig {
-  const enabled =
-    (process.env.WATERMARK_ENABLED || "true").toLowerCase().trim() !== "false";
+  const enabled = (process.env.WATERMARK_ENABLED || "true").toLowerCase().trim() !== "false";
   const text = process.env.WATERMARK_TEXT || "@AutoClipBot";
   const rawPos = (process.env.WATERMARK_POSITION || "bottomright").toLowerCase().trim();
   const validPositions: WatermarkPosition[] = [
-    "topleft", "topright", "bottomleft", "bottomright", "center",
+    "topleft",
+    "topright",
+    "bottomleft",
+    "bottomright",
+    "center",
   ];
   const position: WatermarkPosition = validPositions.includes(rawPos as WatermarkPosition)
     ? (rawPos as WatermarkPosition)
     : "bottomright";
   const fontSize = Math.max(8, Math.min(200, parseInt(process.env.WATERMARK_FONT_SIZE || "32") || 32));
   const color = process.env.WATERMARK_COLOR || "white";
-  const opacity = Math.max(0, Math.min(1, parseFloat(process.env.WATERMARK_OPACITY || "0.85") || 0.85));
+  const opacity = Math.max(
+    0,
+    Math.min(1, parseFloat(process.env.WATERMARK_OPACITY || "0.85") || 0.85)
+  );
   const box = (process.env.WATERMARK_BOX || "true").toLowerCase().trim() !== "false";
   const boxColor = process.env.WATERMARK_BOX_COLOR || "black@0.4";
   const imagePath = process.env.WATERMARK_IMAGE_PATH || "";
-  const imageScale = Math.max(0.01, Math.min(1, parseFloat(process.env.WATERMARK_IMAGE_SCALE || "0.15") || 0.15));
+  const imageScale = Math.max(
+    0.01,
+    Math.min(1, parseFloat(process.env.WATERMARK_IMAGE_SCALE || "0.15") || 0.15)
+  );
   return { enabled, text, position, fontSize, color, opacity, box, boxColor, imagePath, imageScale };
 }
 
@@ -213,8 +245,7 @@ export function getWatermarkPositionLabel(pos: WatermarkPosition): string {
   return labels[pos] || pos;
 }
 
-// ===== INTRO / OUTRO CONFIG (BARU!) =====
-
+// ===== INTRO / OUTRO CONFIG =====
 export interface IntroOutroConfig {
   introEnabled: boolean;
   introVideoPath: string;
@@ -229,26 +260,31 @@ export interface IntroOutroConfig {
 }
 
 export function getIntroOutroConfig(): IntroOutroConfig {
-  const introEnabled =
-    (process.env.INTRO_ENABLED || "false").toLowerCase().trim() === "true";
+  const introEnabled = (process.env.INTRO_ENABLED || "false").toLowerCase().trim() === "true";
   const introVideoPath = process.env.INTRO_VIDEO_PATH || "";
   const introDuration = Math.max(1, Math.min(30, parseFloat(process.env.INTRO_DURATION || "3") || 3));
   const introText = process.env.INTRO_TEXT || "AutoClip Bot";
   const introColor = process.env.INTRO_COLOR || "#000000";
-  const outroEnabled =
-    (process.env.OUTRO_ENABLED || "false").toLowerCase().trim() === "true";
+  const outroEnabled = (process.env.OUTRO_ENABLED || "false").toLowerCase().trim() === "true";
   const outroVideoPath = process.env.OUTRO_VIDEO_PATH || "";
   const outroDuration = Math.max(1, Math.min(30, parseFloat(process.env.OUTRO_DURATION || "3") || 3));
   const outroText = process.env.OUTRO_TEXT || "Subscribe! 🔔";
   const outroColor = process.env.OUTRO_COLOR || "#000000";
   return {
-    introEnabled, introVideoPath, introDuration, introText, introColor,
-    outroEnabled, outroVideoPath, outroDuration, outroText, outroColor,
+    introEnabled,
+    introVideoPath,
+    introDuration,
+    introText,
+    introColor,
+    outroEnabled,
+    outroVideoPath,
+    outroDuration,
+    outroText,
+    outroColor,
   };
 }
 
-// ===== ZOOM EFFECT CONFIG (BARU!) =====
-
+// ===== ZOOM EFFECT CONFIG =====
 export interface ZoomEffectConfig {
   enabled: boolean;
   mode: ZoomEffectMode;
@@ -259,16 +295,24 @@ export interface ZoomEffectConfig {
 }
 
 export function getZoomEffectConfig(): ZoomEffectConfig {
-  const enabled =
-    (process.env.ZOOM_EFFECT_ENABLED || "true").toLowerCase().trim() !== "false";
+  const enabled = (process.env.ZOOM_EFFECT_ENABLED || "true").toLowerCase().trim() !== "false";
   const rawMode = (process.env.ZOOM_EFFECT_MODE || "auto").toLowerCase().trim();
   const validModes: ZoomEffectMode[] = ["auto", "always", "never"];
   const mode: ZoomEffectMode = validModes.includes(rawMode as ZoomEffectMode)
     ? (rawMode as ZoomEffectMode)
     : "auto";
-  const intensity = Math.max(1.0, Math.min(1.5, parseFloat(process.env.ZOOM_EFFECT_INTENSITY || "1.05") || 1.05));
-  const duration = Math.max(0.5, Math.min(10, parseFloat(process.env.ZOOM_EFFECT_DURATION || "2.0") || 2.0));
-  const minScore = Math.max(1, Math.min(10, parseInt(process.env.ZOOM_EFFECT_MIN_SCORE || "7") || 7));
+  const intensity = Math.max(
+    1.0,
+    Math.min(1.5, parseFloat(process.env.ZOOM_EFFECT_INTENSITY || "1.05") || 1.05)
+  );
+  const duration = Math.max(
+    0.5,
+    Math.min(10, parseFloat(process.env.ZOOM_EFFECT_DURATION || "2.0") || 2.0)
+  );
+  const minScore = Math.max(
+    1,
+    Math.min(10, parseInt(process.env.ZOOM_EFFECT_MIN_SCORE || "7") || 7)
+  );
   const rawType = (process.env.ZOOM_EFFECT_TYPE || "in").toLowerCase().trim();
   const validTypes: ZoomEffectType[] = ["in", "out", "in-out", "pulse"];
   const type: ZoomEffectType = validTypes.includes(rawType as ZoomEffectType)
