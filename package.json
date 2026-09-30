@@ -5,12 +5,12 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "drizzle-kit push && next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
-  },
+  "dev": "next dev",
+  "build": "next build",
+  "start": "drizzle-kit push && next start",
+  "lint": "eslint .",
+  "typecheck": "tsc --noEmit"
+},
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@types/form-data": "^2.2.1",
