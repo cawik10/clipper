@@ -54,9 +54,9 @@ export function resolveAspectRatioMode(userValue: string | null | undefined): As
 
 export function getModeLabel(mode: AspectRatioMode): string {
   const labels: Record<AspectRatioMode, string> = {
-    blur: "Blur Background (9:16 Full)",
-    crop: "Center Crop (9:16 Full)",
-    pad: "Black Bars (Letterbox)",
+    blur: "Blur Background \\(9:16 Full\\)",
+    crop: "Center Crop \\(9:16 Full\\)",
+    pad: "Black Bars \\(Letterbox\\)",
     stretch: "Stretch to Fill",
     none: "Original Ratio",
   };
