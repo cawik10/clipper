@@ -7,7 +7,7 @@
   "scripts": {
   "dev": "next dev",
   "build": "next build",
-  "start": "drizzle-kit push && next start",
+  "start": "npx drizzle-kit push --accept-data-loss && node .next/standalone/server.js",
   "lint": "eslint .",
   "typecheck": "tsc --noEmit"
 },
