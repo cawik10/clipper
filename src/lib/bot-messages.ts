@@ -50,7 +50,7 @@ Kirim link video untuk mulai\\! 🎬`,
 
 *Semua setting bisa diatur via /settings per akun Telegram\\!*`,
 
-  connecting: `🔗 *Menghubungkan YouTube Studio...*
+  connecting: `🔗 *Menghubungkan YouTube Studio\\.\\.\\.*\n\n` +
 
 Klik tombol di bawah untuk login ke akun Google/YouTube Anda\\.
 
