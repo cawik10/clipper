@@ -1,6 +1,11 @@
 // Bot message templates in Indonesian
 import { getMaxClipsConfig } from "@/lib/video-config";
 
+export function escapeMd(text: string): string {
+  if (!text) return "";
+  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+}
+
 export const messages = {
   welcome: `🤖 *AutoClip Bot* — Video Clipper Otomatis
 
@@ -90,7 +95,7 @@ Kirim link video yang valid dari:
     `• Durasi: ${s.minDuration}\\-${s.maxDuration} detik\n` +
     `• Privacy Default: *${s.defaultPrivacy}*\n\n` +
     `📐 *Mode Aspect Ratio:* ${s.aspectRatioMode}\n` +
-    `💧 *Watermark:* ${s.watermarkEnabled ? `✅ "${s.watermarkText}"` : "❌ Nonaktif"}\n` +
+    `💧 *Watermark:* ${s.watermarkEnabled ? `✅ "${escapeMd(s.watermarkText)}"` : "❌ Nonaktif"}\n`
     `🔍 *Zoom Effect:* ${s.zoomEnabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
     `🎬 *Intro:* ${s.introEnabled ? "✅" : "❌"} | *Outro:* ${s.outroEnabled ? "✅" : "❌"}\n` +
     `📺 *YouTube:* ${s.youtubeConnected ? "✅ Terhubung" : "❌ Belum terhubung"}`,
