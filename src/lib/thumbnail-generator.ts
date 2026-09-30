@@ -1,13 +1,15 @@
 /**
  * THUMBNAIL AUTO-GENERATOR
  * ========================
- * Generate thumbnail otomatis untuk setiap klip menggunakan FFmpeg.
+ * Supports per-user config override via ProcessClipsUserConfig.
  */
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
-import { getThumbnailConfig, type ThumbnailMode } from "@/lib/video-config";
+import { resolveThumbnailEnabled, resolveThumbnailMode, getThumbnailConfig, type ThumbnailMode } from "@/lib/video-config";
+import type { ProcessClipsUserConfig } from "@/lib/video-processor";
+import type { ClipResult } from "@/db/schema";
 
 const execAsync = promisify(exec);
 
@@ -23,9 +25,15 @@ export async function generateThumbnail(
   videoPath: string,
   outputDir: string,
   clipIndex: number,
-  clipDuration: number
+  clipDuration: number,
+  userConfig?: ProcessClipsUserConfig
 ): Promise<ThumbnailResult> {
-  const config = getThumbnailConfig();
+  const globalCfg = getThumbnailConfig();
+  const enabled = resolveThumbnailEnabled(userConfig?.thumbnailEnabled);
+  const mode = resolveThumbnailMode(userConfig?.thumbnailMode);
+  const quality = userConfig?.thumbnailQuality ?? globalCfg.quality;
+
+  const config = { ...globalCfg, enabled, mode, quality };
 
   if (!config.enabled) {
     return { success: false, error: "Thumbnail disabled", mode: config.mode, offsetUsed: 0 };
@@ -50,9 +58,7 @@ export async function generateThumbnail(
       try {
         const fallbackOffset = Math.min(clipDuration / 2, clipDuration - 1);
         return await generateFrameAtOffset(videoPath, thumbnailPath, fallbackOffset, config, clipIndex);
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
     }
     return { success: false, error: `Thumbnail failed: ${errorMsg}`, mode: config.mode, offsetUsed: offsetSeconds };
   }
@@ -60,14 +66,10 @@ export async function generateThumbnail(
 
 function calculateOffset(mode: ThumbnailMode, clipDuration: number, customOffset: number): number {
   switch (mode) {
-    case "start":
-      return Math.min(1, clipDuration * 0.05);
-    case "middle":
-      return clipDuration / 2;
-    case "custom":
-      return Math.min(customOffset, clipDuration - 0.5);
-    default:
-      return clipDuration / 2;
+    case "start": return Math.min(1, clipDuration * 0.05);
+    case "middle": return clipDuration / 2;
+    case "custom": return Math.min(customOffset, clipDuration - 0.5);
+    default: return clipDuration / 2;
   }
 }
 
@@ -78,14 +80,12 @@ async function generateFrameAtOffset(
   config: ReturnType<typeof getThumbnailConfig>,
   clipIndex: number
 ): Promise<ThumbnailResult> {
-  const scaleFilter =
-    config.height === 0
-      ? `scale=${config.width}:-2`
-      : `scale=${config.width}:${config.height}:force_original_aspect_ratio=decrease,pad=${config.width}:${config.height}:(ow-iw)/2:(oh-ih)/2:black`;
+  const scaleFilter = config.height === 0
+    ? `scale=${config.width}:-2`
+    : `scale=${config.width}:${config.height}:force_original_aspect_ratio=decrease,pad=${config.width}:${config.height}:(ow-iw)/2:(oh-ih)/2:black`;
 
   const cmd = [
-    "ffmpeg",
-    "-y",
+    "ffmpeg", "-y",
     "-ss", offsetSeconds.toFixed(3),
     "-i", `"${videoPath}"`,
     "-vframes", "1",
@@ -96,10 +96,9 @@ async function generateFrameAtOffset(
   ].join(" ");
 
   await execAsync(cmd, { timeout: 30000 });
-
   if (!fs.existsSync(thumbnailPath)) throw new Error("Thumbnail file not created");
 
-  console.log(`[thumbnail] ✅ Klip ${clipIndex} thumbnail ok (offset: ${offsetSeconds.toFixed(1)}s)`);
+  console.log(`[thumbnail] ✅ Klip ${clipIndex} ok (offset: ${offsetSeconds.toFixed(1)}s)`);
   return { success: true, thumbnailPath, mode: config.mode, offsetUsed: offsetSeconds };
 }
 
@@ -110,16 +109,13 @@ async function generateBestFrameThumbnail(
   config: ReturnType<typeof getThumbnailConfig>,
   clipIndex: number
 ): Promise<ThumbnailResult> {
-  const scaleFilter =
-    config.height === 0
-      ? `scale=${config.width}:-2`
-      : `scale=${config.width}:${config.height}:force_original_aspect_ratio=decrease,pad=${config.width}:${config.height}:(ow-iw)/2:(oh-ih)/2:black`;
+  const scaleFilter = config.height === 0
+    ? `scale=${config.width}:-2`
+    : `scale=${config.width}:${config.height}:force_original_aspect_ratio=decrease,pad=${config.width}:${config.height}:(ow-iw)/2:(oh-ih)/2:black`;
 
   const scanFrames = Math.min(100, Math.max(10, Math.round(clipDuration * 2)));
-
   const cmd = [
-    "ffmpeg",
-    "-y",
+    "ffmpeg", "-y",
     "-i", `"${videoPath}"`,
     "-vf", `"thumbnail=${scanFrames},${scaleFilter}"`,
     "-frames:v", "1",
@@ -129,7 +125,6 @@ async function generateBestFrameThumbnail(
   ].join(" ");
 
   await execAsync(cmd, { timeout: 60000 });
-
   if (!fs.existsSync(thumbnailPath)) throw new Error("Best frame thumbnail not created");
 
   console.log(`[thumbnail] ✅ Best frame klip ${clipIndex} ok (scan ${scanFrames} frames)`);
@@ -137,12 +132,11 @@ async function generateBestFrameThumbnail(
 }
 
 export async function generateThumbnailsForClips(
-  clips: Array<{ filePath?: string; index: number; duration: number }>,
+  clips: Array<ClipResult>,
   outputDir: string
 ): Promise<Map<number, string>> {
   const config = getThumbnailConfig();
   const thumbnailMap = new Map<number, string>();
-
   if (!config.enabled) return thumbnailMap;
 
   for (const clip of clips) {
@@ -152,16 +146,11 @@ export async function generateThumbnailsForClips(
       thumbnailMap.set(clip.index, result.thumbnailPath);
     }
   }
-
   return thumbnailMap;
 }
 
 export function cleanupThumbnails(thumbnailPaths: string[]): void {
   for (const p of thumbnailPaths) {
-    try {
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    } catch {
-      /* ignore */
-    }
+    try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* ignore */ }
   }
 }

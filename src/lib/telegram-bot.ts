@@ -7,17 +7,22 @@ import { detectPlatform } from "@/lib/video-processor";
 import { getAuthUrl } from "@/lib/youtube-oauth";
 import { messages, getPlatformEmoji, formatDuration } from "@/lib/bot-messages";
 import { processJob } from "@/lib/job-processor";
+import { getOrCreateUserSettings, patchUserSettings } from "@/lib/user-settings";
 import {
-  getAspectRatioMode,
+  resolveMaxClips,
+  resolveAspectRatioMode,
+  resolveWatermarkConfig,
+  resolveZoomEffectConfig,
+  resolveIntroOutroConfig,
   getModeLabel,
-  getThumbnailConfig,
-  getThumbnailModeLabel,
-  getWatermarkConfig,
   getWatermarkPositionLabel,
-  getIntroOutroConfig,
-  getZoomEffectConfig,
   getZoomEffectLabel,
   getMaxClipsConfig,
+  getAspectRatioMode,
+  getWatermarkConfig,
+  getZoomEffectConfig,
+  getIntroOutroConfig,
+  getThumbnailConfig,
 } from "@/lib/video-config";
 import fs from "fs";
 
@@ -27,22 +32,32 @@ export const bot = new Bot(token);
 const URL_REGEX =
   /https?:\/\/(www\.)?(youtube\.com\/watch|youtu\.be|youtube\.com\/shorts|facebook\.com\/(watch|video)|fb\.watch|tiktok\.com\/@[^/]+\/video|instagram\.com\/(reel|p|tv))[^\s]*/i;
 
-// ===== COMMANDS =====
+// ═══════════════════════════════════════════════════════════════════════════
+// COMMANDS
+// ═══════════════════════════════════════════════════════════════════════════
+
 bot.command("start", async (ctx) => {
-  await ensureUserSettings(ctx.from?.id?.toString() || "");
-  await ctx.reply(messages.welcome, {
-    parse_mode: "Markdown",
-    reply_markup: new InlineKeyboard()
-      .text("🎬 Cara Pakai", "help")
-      .text("🔗 Hubungkan YouTube", "connect")
-      .row()
-      .text("⚙️ Pengaturan", "settings")
-      .text("📋 Riwayat", "history"),
+  const userId = ctx.from?.id?.toString() || "";
+  await getOrCreateUserSettings(userId, {
+    username: ctx.from?.username,
+    firstName: ctx.from?.first_name,
   });
+  await ctx.reply(
+    `🤖 *AutoClip Bot* — Video Clipper Otomatis\n\nHalo ${ctx.from?.first_name || ""}\\! Saya bisa memotong video panjang menjadi klip viral untuk YouTube Shorts secara otomatis\\!\n\nKirim link video untuk mulai\\! 🎬\n\nAtau ketik /settings untuk mengatur preferensi Anda\\.`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard()
+        .text("⚙️ Pengaturan", "settings")
+        .text("🔗 Hubungkan YouTube", "connect")
+        .row()
+        .text("📚 Panduan", "help")
+        .text("📋 Riwayat", "history"),
+    }
+  );
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(messages.help, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help, { parse_mode: "MarkdownV2" });
 });
 
 bot.command("connect", async (ctx) => {
@@ -53,10 +68,7 @@ bot.command("disconnect", async (ctx) => {
   const userId = ctx.from?.id?.toString();
   if (!userId) return;
   await db.delete(youtubeTokens).where(eq(youtubeTokens.telegramUserId, userId));
-  await db
-    .update(userSettings)
-    .set({ youtubeConnected: false, updatedAt: new Date() })
-    .where(eq(userSettings.telegramUserId, userId));
+  await patchUserSettings(userId, { youtubeConnected: false });
   await ctx.reply("✅ Akun YouTube berhasil diputus.");
 });
 
@@ -102,174 +114,10 @@ bot.command("cancel", async (ctx) => {
   await ctx.reply("⛔ Proses tidak bisa dibatalkan secara manual. Tunggu hingga selesai atau error.");
 });
 
-// ===== /clips INFO & CARA UBAH JUMLAH KLIP (BARU!) =====
-bot.command("clips", async (ctx) => {
-  const envMax = getMaxClipsConfig();
-  const userId = ctx.from?.id?.toString();
-  let userMax = envMax;
-  
-  if (userId) {
-    const rows = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, userId));
-    userMax = rows[0]?.maxClips ?? envMax;
-  }
+// ═══════════════════════════════════════════════════════════════════════════
+// MESSAGE HANDLER
+// ═══════════════════════════════════════════════════════════════════════════
 
-  await ctx.reply(
-    `📊 *Konfigurasi Jumlah Klip AutoClip:*\n\n` +
-    `Aktif (env \`MAX_CLIPS\`): *${envMax} klip*\n` +
-    `Setting akunmu: *${userMax} klip*\n\n` +
-    `*Cara Ubah (2 metode):*\n\n` +
-    `*1️⃣ Railway Variables (global, semua user):*\n` +
-    `• Set variabel \`MAX_CLIPS\` di Railway Dashboard\n` +
-    `• Contoh: \`MAX_CLIPS=5\` ➡️ 5 klip per video\n` +
-    `• Rentang valid: \`1\` sampai \`10\`\n` +
-    `• Tidak perlu redeploy ➡️ langsung berlaku\n\n` +
-    `*2️⃣ Per-akun via /settings (tombol di bawah):*\n` +
-    `• Tekan tombol jumlah klip yang diinginkan\n` +
-    `• Berlaku untuk akun Telegram kamu saja\n\n` +
-    `📋 *Semua nilai yang tersedia:*\n` +
-    `• 1 klip ➡️ cepat, 1 momen terbaik\n` +
-    `• 2 klip ➡️ standar minimal\n` +
-    `• 3 klip ➡️ sebelumnya default\n` +
-    `• 4 klip ➡️ lebih banyak pilihan\n` +
-    `• *5 klip ➡️ default baru 🌟*\n` +
-    `• 6-10 klip ➡️ maksimal (butuh lebih lama)\n\n` +
-    `_Catatan:_ \`MAX_CLIPS\` _di env var selalu diutamakan._`,
-    {
-      parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard()
-        .text("1️⃣", "set_clips_1")
-        .text("2️⃣", "set_clips_2")
-        .text("3️⃣", "set_clips_3")
-        .text("4️⃣", "set_clips_4")
-        .text("5️⃣", "set_clips_5")
-        .row()
-        .text("6 klip", "set_clips_6")
-        .text("7 klip", "set_clips_7")
-        .text("8 klip", "set_clips_8")
-        .text("9 klip", "set_clips_9")
-        .text("10 klip", "set_clips_10"),
-    }
-  );
-});
-
-// ===== INFO COMMANDS =====
-bot.command("mode", async (ctx) => {
-  const currentMode = getAspectRatioMode();
-  const modeLabel = getModeLabel(currentMode);
-  await ctx.reply(
-    `📐 *Mode Aspect Ratio 9:16 Aktif:*\n\n` +
-    `Mode: *${modeLabel}* (\`${currentMode}\`)\n\n` +
-    `*Semua Mode:*\n` +
-    `• \`blur\` → 🌀 Background blur (REKOMENDASI)\n` +
-    `• \`crop\` → ✂️ Center crop\n` +
-    `• \`pad\` → ⬛ Black bars\n` +
-    `• \`stretch\` → ↔️ Stretch paksa\n` +
-    `• \`none\` → 📐 Original ratio\n\n` +
-    `Ubah: set \`ASPECT_RATIO_MODE=blur\` di Railway Variables`,
-    { parse_mode: "Markdown" }
-  );
-});
-
-bot.command("thumbnail", async (ctx) => {
-  const cfg = getThumbnailConfig();
-  const modeLabel = getThumbnailModeLabel(cfg.mode);
-  await ctx.reply(
-    `🖼 *Konfigurasi Thumbnail:*\n\n` +
-    `Status: ${cfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
-    `Mode: *${modeLabel}* (\`${cfg.mode}\`)\n` +
-    `Kualitas: ${cfg.quality}/31\n` +
-    `Resolusi: ${cfg.width}×${cfg.height === 0 ? "auto" : cfg.height}\n\n` +
-    `*Cara Ubah (Railway Variables):*\n` +
-    `• \`THUMBNAIL_ENABLED\` = \`true\` / \`false\`\n` +
-    `• \`THUMBNAIL_MODE\` = \`middle\` | \`best\` | \`start\` | \`custom\`\n` +
-    `• \`THUMBNAIL_QUALITY\` = \`1\` sampai \`31\`\n` +
-    `• \`THUMBNAIL_WIDTH\` = lebar (default: 1280)\n` +
-    `• \`THUMBNAIL_HEIGHT\` = tinggi (default: 720)\n` +
-    `• \`THUMBNAIL_OFFSET_SECONDS\` = detik (untuk mode custom)`,
-    { parse_mode: "Markdown" }
-  );
-});
-
-bot.command("watermark", async (ctx) => {
-  const cfg = getWatermarkConfig();
-  const posLabel = getWatermarkPositionLabel(cfg.position);
-  await ctx.reply(
-    `💧 *Konfigurasi Watermark:*\n\n` +
-    `Status: ${cfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
-    `Teks: \`${cfg.text}\`\n` +
-    `Posisi: *${posLabel}* (\`${cfg.position}\`)\n` +
-    `Font Size: ${cfg.fontSize}px\n` +
-    `Warna: ${cfg.color} (opacity: ${cfg.opacity})\n` +
-    `Kotak: ${cfg.box ? "✅ Ada" : "❌ Tidak"}\n` +
-    (cfg.imagePath ? `Gambar: \`${cfg.imagePath}\`\n` : "") +
-    `\n*Cara Ubah (Railway Variables):*\n` +
-    `• \`WATERMARK_ENABLED\` = \`true\` / \`false\`\n` +
-    `• \`WATERMARK_TEXT\` = \`@NamaChannel\` ← *teks watermark Anda*\n` +
-    `• \`WATERMARK_POSITION\` = \`topleft\` | \`topright\` | \`bottomleft\` | \`bottomright\` | \`center\`\n` +
-    `• \`WATERMARK_FONT_SIZE\` = ukuran font (default: 32)\n` +
-    `• \`WATERMARK_COLOR\` = \`white\` / \`yellow\` / \`#FF0000\`\n` +
-    `• \`WATERMARK_OPACITY\` = \`0.0\` sampai \`1.0\` (default: 0.85)\n` +
-    `• \`WATERMARK_BOX\` = \`true\` / \`false\` (kotak background)\n` +
-    `• \`WATERMARK_BOX_COLOR\` = \`black@0.4\` (transparansi kotak)\n` +
-    `• \`WATERMARK_IMAGE_PATH\` = path ke file logo PNG (opsional)\n` +
-    `• \`WATERMARK_IMAGE_SCALE\` = \`0.15\` (skala gambar, 0.01-1.0)`,
-    { parse_mode: "Markdown" }
-  );
-});
-
-bot.command("zoom", async (ctx) => {
-  const cfg = getZoomEffectConfig();
-  const typeLabel = getZoomEffectLabel(cfg.type);
-  await ctx.reply(
-    `🔍 *Konfigurasi Zoom Effect pada Highlight:*\n\n` +
-    `Status: ${cfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
-    `Mode: \`${cfg.mode}\` (auto/always/never)\n` +
-    `Tipe: *${typeLabel}* (\`${cfg.type}\`)\n` +
-    `Intensitas: ${cfg.intensity}× (1.0 = tidak zoom, 1.3 = kuat)\n` +
-    `Durasi: ${cfg.duration} detik\n` +
-    `Min Score (auto): ${cfg.minScore}/10\n\n` +
-    `*Cara Ubah (Railway Variables):*\n` +
-    `• \`ZOOM_EFFECT_ENABLED\` = \`true\` / \`false\`\n` +
-    `• \`ZOOM_EFFECT_MODE\` = \`auto\` | \`always\` | \`never\`\n` +
-    `• \`ZOOM_EFFECT_TYPE\` = \`in\` | \`out\` | \`in-out\` | \`pulse\`\n` +
-    `• \`ZOOM_EFFECT_INTENSITY\` = \`1.05\` (subtle) sampai \`1.3\` (strong)\n` +
-    `• \`ZOOM_EFFECT_DURATION\` = durasi dalam detik (default: 2.0)\n` +
-    `• \`ZOOM_EFFECT_MIN_SCORE\` = min viral score 1-10 (default: 7)`,
-    { parse_mode: "Markdown" }
-  );
-});
-
-bot.command("introoutro", async (ctx) => {
-  const cfg = getIntroOutroConfig();
-  await ctx.reply(
-    `🎬 *Konfigurasi Intro / Outro Otomatis:*\n\n` +
-    `*INTRO:*\n` +
-    `Status: ${cfg.introEnabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
-    (cfg.introVideoPath ? `File: \`${cfg.introVideoPath}\`\n` : `Mode: Auto-generate (${cfg.introDuration}s)\n`) +
-    `Teks: \`${cfg.introText}\`\n` +
-    `Warna BG: \`${cfg.introColor}\`\n\n` +
-    `*OUTRO:*\n` +
-    `Status: ${cfg.outroEnabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
-    (cfg.outroVideoPath ? `File: \`${cfg.outroVideoPath}\`\n` : `Mode: Auto-generate (${cfg.outroDuration}s)\n`) +
-    `Teks: \`${cfg.outroText}\`\n` +
-    `Warna BG: \`${cfg.outroColor}\`\n\n` +
-    `*Cara Ubah (Railway Variables):*\n` +
-    `• \`INTRO_ENABLED\` = \`true\` / \`false\`\n` +
-    `• \`INTRO_VIDEO_PATH\` = path ke file intro.mp4 (opsional)\n` +
-    `• \`INTRO_DURATION\` = durasi intro otomatis dalam detik (default: 3)\n` +
-    `• \`INTRO_TEXT\` = teks pada intro otomatis\n` +
-    `• \`INTRO_COLOR\` = warna background (\`#000000\` = hitam)\n` +
-    `• \`OUTRO_ENABLED\` = \`true\` / \`false\`\n` +
-    `• \`OUTRO_VIDEO_PATH\` = path ke file outro.mp4 (opsional)\n` +
-    `• \`OUTRO_DURATION\` = durasi outro otomatis dalam detik (default: 3)\n` +
-    `• \`OUTRO_TEXT\` = teks pada outro (misal: \`Subscribe! 🔔\`)\n` +
-    `• \`OUTRO_COLOR\` = warna background outro\n\n` +
-    `💡 *Tips:* Jika tidak ada file video, intro/outro akan di-generate otomatis menggunakan FFmpeg dengan teks yang Anda set.`,
-    { parse_mode: "Markdown" }
-  );
-});
-
-// ===== MESSAGE HANDLER =====
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
   const urlMatch = text.match(URL_REGEX);
@@ -280,7 +128,7 @@ bot.on("message:text", async (ctx) => {
       {
         reply_markup: new InlineKeyboard()
           .text("📚 Panduan", "help")
-          .text("🔗 Hubungkan YouTube", "connect"),
+          .text("⚙️ Pengaturan", "settings"),
       }
     );
     return;
@@ -288,10 +136,13 @@ bot.on("message:text", async (ctx) => {
   await handleVideoUrl(ctx, urlMatch[0]);
 });
 
-// ===== CALLBACK HANDLERS =====
+// ═══════════════════════════════════════════════════════════════════════════
+// CALLBACK HANDLERS — SETTINGS MENU
+// ═══════════════════════════════════════════════════════════════════════════
+
 bot.callbackQuery("help", async (ctx) => {
   await ctx.answerCallbackQuery();
-  await ctx.reply(messages.help, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help, { parse_mode: "MarkdownV2" });
 });
 
 bot.callbackQuery("connect", async (ctx) => {
@@ -309,7 +160,202 @@ bot.callbackQuery("history", async (ctx) => {
   await handleHistory(ctx);
 });
 
-// Updated: support 1–10 clips
+// ─── SETTINGS SUBMENUS ────────────────────────────────────────────────────
+
+bot.callbackQuery("settings_clips", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const current = resolveMaxClips(s.maxClips);
+  const envDefault = getMaxClipsConfig();
+
+  await ctx.editMessageText(
+    `✂️ *Jumlah Klip per Video*\n\nSetting kamu: *${current} klip*\nDefault env \\(Railway\\): *${envDefault} klip*\n\nPilih jumlah klip:`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard()
+        .text(current === 1 ? "✅1" : "1", "set_clips_1")
+        .text(current === 2 ? "✅2" : "2", "set_clips_2")
+        .text(current === 3 ? "✅3" : "3", "set_clips_3")
+        .text(current === 4 ? "✅4" : "4", "set_clips_4")
+        .text(current === 5 ? "✅5⭐" : "5⭐", "set_clips_5")
+        .row()
+        .text(current === 6 ? "✅6" : "6", "set_clips_6")
+        .text(current === 7 ? "✅7" : "7", "set_clips_7")
+        .text(current === 8 ? "✅8" : "8", "set_clips_8")
+        .text(current === 9 ? "✅9" : "9", "set_clips_9")
+        .text(current === 10 ? "✅10" : "10", "set_clips_10")
+        .row()
+        .text("« Kembali", "settings"),
+    }
+  );
+});
+
+bot.callbackQuery("settings_privacy", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const current = s.defaultPrivacy || "private";
+
+  await ctx.editMessageText(
+    `🔒 *Privacy Default Upload YouTube*\n\nSetting kamu: *${current}*\n\nPilih privacy:`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard()
+        .text(current === "private" ? "✅ 🔒 Private" : "🔒 Private", "set_privacy_private")
+        .row()
+        .text(current === "unlisted" ? "✅ 🔗 Unlisted" : "🔗 Unlisted", "set_privacy_unlisted")
+        .row()
+        .text(current === "public" ? "✅ 🌐 Public" : "🌐 Public", "set_privacy_public")
+        .row()
+        .text("« Kembali", "settings"),
+    }
+  );
+});
+
+bot.callbackQuery("settings_aspect", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const current = resolveAspectRatioMode(s.aspectRatioMode);
+  const globalDefault = getAspectRatioMode();
+
+  const modeList = [
+    { key: "blur", label: "🌀 Blur Background (REKOMENDASI)" },
+    { key: "crop", label: "✂️ Center Crop" },
+    { key: "pad", label: "⬛ Black Bars" },
+    { key: "stretch", label: "↔️ Stretch" },
+    { key: "none", label: "📐 Original Ratio" },
+  ];
+
+  const kb = new InlineKeyboard();
+  modeList.forEach((m) => {
+    kb.text(current === m.key ? `✅ ${m.label}` : m.label, `set_aspect_${m.key}`).row();
+  });
+  kb.text("🔄 Reset ke Default Env", "reset_aspect").row();
+  kb.text("« Kembali", "settings");
+
+  await ctx.editMessageText(
+    `📐 *Mode Aspect Ratio 9:16*\n\nSetting kamu: *${getModeLabel(current)}*\nDefault env: *${getModeLabel(globalDefault)}*\n\nPilih mode:`,
+    { parse_mode: "MarkdownV2", reply_markup: kb }
+  );
+});
+
+bot.callbackQuery("settings_watermark", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const wmCfg = resolveWatermarkConfig({
+    watermarkEnabled: s.watermarkEnabled,
+    watermarkText: s.watermarkText,
+    watermarkPosition: s.watermarkPosition,
+    watermarkFontSize: s.watermarkFontSize,
+    watermarkColor: s.watermarkColor,
+    watermarkOpacity: s.watermarkOpacity,
+    watermarkBox: s.watermarkBox,
+  });
+  const globalWm = getWatermarkConfig();
+
+  await ctx.editMessageText(
+    `💧 *Pengaturan Watermark*\n\nStatus: ${wmCfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+    `Teks: \`${wmCfg.text}\`\n` +
+    `Posisi: ${getWatermarkPositionLabel(wmCfg.position)}\n\n` +
+    `*Default env:* "${globalWm.text}" @ ${globalWm.position}\n\n` +
+    `Gunakan tombol di bawah untuk mengubah:\\n\n` +
+    `_Untuk mengubah teks watermark, kirim:_\n\`/setwm TeksBaru\``,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard()
+        .text(wmCfg.enabled ? "✅ Nonaktifkan" : "❌ Aktifkan", "toggle_watermark")
+        .row()
+        .text("Posisi: Kiri Atas", "set_wm_pos_topleft")
+        .text("Posisi: Kanan Atas", "set_wm_pos_topright")
+        .row()
+        .text("Posisi: Kiri Bawah", "set_wm_pos_bottomleft")
+        .text("Posisi: Kanan Bawah ⭐", "set_wm_pos_bottomright")
+        .row()
+        .text("🔄 Reset ke Default Env", "reset_watermark")
+        .row()
+        .text("« Kembali", "settings"),
+    }
+  );
+});
+
+bot.callbackQuery("settings_zoom", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const zoomCfg = resolveZoomEffectConfig({
+    zoomEnabled: s.zoomEnabled,
+    zoomMode: s.zoomMode,
+    zoomType: s.zoomType,
+    zoomIntensity: s.zoomIntensity,
+    zoomMinScore: s.zoomMinScore,
+  });
+
+  const types = [
+    { key: "in", label: "🔍 Zoom In" },
+    { key: "out", label: "🔎 Zoom Out" },
+    { key: "in-out", label: "↕️ In\\-Out" },
+    { key: "pulse", label: "💫 Pulse" },
+  ];
+
+  const kb = new InlineKeyboard();
+  kb.text(zoomCfg.enabled ? "✅ Nonaktifkan Zoom" : "❌ Aktifkan Zoom", "toggle_zoom").row();
+  types.forEach((t) => {
+    kb.text(zoomCfg.type === t.key ? `✅ ${t.label}` : t.label, `set_zoom_type_${t.key}`);
+  });
+  kb.row();
+  kb.text("Mode: Auto", "set_zoom_mode_auto")
+    .text("Mode: Always", "set_zoom_mode_always")
+    .text("Mode: Never", "set_zoom_mode_never")
+    .row();
+  kb.text("🔄 Reset ke Default Env", "reset_zoom").row();
+  kb.text("« Kembali", "settings");
+
+  await ctx.editMessageText(
+    `🔍 *Pengaturan Zoom Effect*\n\nStatus: ${zoomCfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+    `Tipe: *${getZoomEffectLabel(zoomCfg.type)}*\nMode: ${zoomCfg.mode}\nIntensitas: ${zoomCfg.intensity}×\nMin Score: ${zoomCfg.minScore}/10`,
+    { parse_mode: "MarkdownV2", reply_markup: kb }
+  );
+});
+
+bot.callbackQuery("settings_introoutro", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const ioCfg = resolveIntroOutroConfig({
+    introEnabled: s.introEnabled,
+    introText: s.introText,
+    introDuration: s.introDuration,
+    outroEnabled: s.outroEnabled,
+    outroText: s.outroText,
+    outroDuration: s.outroDuration,
+  });
+
+  await ctx.editMessageText(
+    `🎬 *Pengaturan Intro / Outro*\n\n` +
+    `*Intro:* ${ioCfg.introEnabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+    `Teks: "${ioCfg.introText}" \\(${ioCfg.introDuration}s\\)\n\n` +
+    `*Outro:* ${ioCfg.outroEnabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+    `Teks: "${ioCfg.outroText}" \\(${ioCfg.outroDuration}s\\)\n\n` +
+    `_Untuk mengubah teks, kirim:_\n\`/setintro TeksIntro\`\n\`/setoutro TeksOutro\``,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard()
+        .text(ioCfg.introEnabled ? "✅ Nonaktifkan Intro" : "❌ Aktifkan Intro", "toggle_intro")
+        .row()
+        .text(ioCfg.outroEnabled ? "✅ Nonaktifkan Outro" : "❌ Aktifkan Outro", "toggle_outro")
+        .row()
+        .text("🔄 Reset ke Default Env", "reset_introoutro")
+        .row()
+        .text("« Kembali", "settings"),
+    }
+  );
+});
+
+// ─── SET CLIPS ─────────────────────────────────────────────────────────────
+
 bot.callbackQuery(/^set_clips_(\d+)$/, async (ctx) => {
   const userId = ctx.from.id.toString();
   const maxClips = parseInt(ctx.match[1]);
@@ -317,119 +363,259 @@ bot.callbackQuery(/^set_clips_(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery("❌ Nilai tidak valid (1-10)");
     return;
   }
+  await patchUserSettings(userId, { maxClips });
   await ctx.answerCallbackQuery(`✅ Maksimal klip diset ke ${maxClips}`);
-  await db
-    .update(userSettings)
-    .set({ maxClips, updatedAt: new Date() })
-    .where(eq(userSettings.telegramUserId, userId));
-  const envMax = getMaxClipsConfig();
   await ctx.editMessageText(
-    `✅ Setting akun: Maksimal *${maxClips} klip* per video.\n\n` +
-    `_Catatan: env var MAX\\_CLIPS=${envMax} selalu override setting ini._`,
-    { parse_mode: "Markdown" }
+    `✅ *Setting disimpan\\!*\n\nMaksimal *${maxClips} klip* per video untuk akun kamu\\.`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
   );
 });
+
+// ─── SET PRIVACY ────────────────────────────────────────────────────────────
 
 bot.callbackQuery(/^set_privacy_(private|unlisted|public)$/, async (ctx) => {
   const userId = ctx.from.id.toString();
   const privacy = ctx.match[1];
+  await patchUserSettings(userId, { defaultPrivacy: privacy });
   await ctx.answerCallbackQuery(`✅ Privacy diset ke ${privacy}`);
-  await db
-    .update(userSettings)
-    .set({ defaultPrivacy: privacy, updatedAt: new Date() })
-    .where(eq(userSettings.telegramUserId, userId));
-  await ctx.editMessageText(`✅ Privacy video diset ke: *${privacy}*`, { parse_mode: "Markdown" });
+  await ctx.editMessageText(
+    `✅ *Setting disimpan\\!*\n\nPrivacy default: *${privacy}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
 });
 
-bot.callbackQuery(/^retry_job_(.+)$/, async (ctx) => {
-  const jobId = ctx.match[1];
-  await ctx.answerCallbackQuery("🔄 Mencoba ulang...");
-  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
-  if (!jobs.length) {
-    await ctx.reply("❌ Job tidak ditemukan.");
-    return;
-  }
-  await db
-    .update(clipJobs)
-    .set({ status: "queued", errorMessage: null, updatedAt: new Date() })
-    .where(eq(clipJobs.jobId, jobId));
-  await processJobWithUpdates(ctx, jobId);
+// ─── SET ASPECT RATIO ────────────────────────────────────────────────────────
+
+bot.callbackQuery(/^set_aspect_(blur|crop|pad|stretch|none)$/, async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const mode = ctx.match[1];
+  await patchUserSettings(userId, { aspectRatioMode: mode });
+  await ctx.answerCallbackQuery(`✅ Aspect ratio diset ke ${mode}`);
+  await ctx.editMessageText(
+    `✅ *Setting disimpan\\!*\n\nAspect ratio: *${getModeLabel(mode as "blur")}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
 });
 
-// ===== HANDLER FUNCTIONS =====
-async function handleVideoUrl(ctx: Context, url: string) {
-  const userId = ctx.from?.id?.toString();
-  const chatId = ctx.chat?.id?.toString();
-  const messageId = ctx.message?.message_id;
+bot.callbackQuery("reset_aspect", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  await patchUserSettings(userId, { aspectRatioMode: null });
+  await ctx.answerCallbackQuery("✅ Reset ke default env");
+  await ctx.editMessageText(
+    `✅ Aspect ratio direset ke default env: *${getModeLabel(getAspectRatioMode())}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali", "settings"),
+    }
+  );
+});
 
-  if (!userId || !chatId) return;
+// ─── TOGGLE WATERMARK ────────────────────────────────────────────────────────
 
-  await ensureUserSettings(userId);
+bot.callbackQuery("toggle_watermark", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const current = s.watermarkEnabled ?? getWatermarkConfig().enabled;
+  await patchUserSettings(userId, { watermarkEnabled: !current });
+  await ctx.answerCallbackQuery(`✅ Watermark ${!current ? "diaktifkan" : "dinonaktifkan"}`);
+  await ctx.editMessageText(
+    `✅ Watermark: *${!current ? "✅ Aktif" : "❌ Nonaktif"}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
+});
 
-  const platform = detectPlatform(url);
-  if (platform === "unknown") {
-    await ctx.reply(messages.invalidUrl, { parse_mode: "Markdown" });
-    return;
-  }
+bot.callbackQuery(/^set_wm_pos_(topleft|topright|bottomleft|bottomright|center)$/, async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const pos = ctx.match[1];
+  await patchUserSettings(userId, { watermarkPosition: pos });
+  await ctx.answerCallbackQuery(`✅ Posisi watermark: ${getWatermarkPositionLabel(pos as "topleft")}`);
+  await ctx.editMessageText(
+    `✅ *Setting disimpan\\!*\n\nPosisi watermark: *${getWatermarkPositionLabel(pos as "topleft")}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
+});
 
-  const jobId = uuidv4();
-  await db.insert(clipJobs).values({
-    jobId,
-    telegramUserId: userId,
-    telegramChatId: chatId,
-    telegramMessageId: messageId,
-    sourceUrl: url,
-    platform,
-    status: "queued",
+bot.callbackQuery("reset_watermark", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  await patchUserSettings(userId, {
+    watermarkEnabled: null, watermarkText: null, watermarkPosition: null,
+    watermarkFontSize: null, watermarkColor: null, watermarkOpacity: null, watermarkBox: null,
   });
+  await ctx.answerCallbackQuery("✅ Watermark direset ke default env");
+  await ctx.editMessageText(
+    `✅ Watermark direset ke default env`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali", "settings"),
+    }
+  );
+});
 
-  const tokens = await db.select().from(youtubeTokens).where(eq(youtubeTokens.telegramUserId, userId));
-  const isConnected = tokens.length > 0;
-  const currentMode = getAspectRatioMode();
-  const modeLabel = getModeLabel(currentMode);
-  const wmCfg = getWatermarkConfig();
-  const zoomCfg = getZoomEffectConfig();
-  const ioCfg = getIntroOutroConfig();
-  const maxClips = getMaxClipsConfig();
+// ─── TOGGLE ZOOM ────────────────────────────────────────────────────────────
 
-  const featureInfo =
-    `📐 Mode 9:16: *${modeLabel}*\n` +
-    `✂️ AutoClip: *${maxClips} klip* (ubah: \`MAX_CLIPS\` atau /clips)\n` +
-    `💧 Watermark: *${wmCfg.enabled ? `✅ "${wmCfg.text}"` : "❌ Nonaktif"}*\n` +
-    `🔍 Zoom Effect: *${zoomCfg.enabled ? `✅ ${zoomCfg.mode} (${zoomCfg.type})` : "❌ Nonaktif"}*\n` +
-    `🎬 Intro/Outro: *${ioCfg.introEnabled || ioCfg.outroEnabled ? "✅ Aktif" : "❌ Nonaktif"}*`;
+bot.callbackQuery("toggle_zoom", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const current = s.zoomEnabled ?? getZoomEffectConfig().enabled;
+  await patchUserSettings(userId, { zoomEnabled: !current });
+  await ctx.answerCallbackQuery(`✅ Zoom ${!current ? "diaktifkan" : "dinonaktifkan"}`);
+  await ctx.editMessageText(
+    `✅ Zoom Effect: *${!current ? "✅ Aktif" : "❌ Nonaktif"}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
+});
 
-  if (!isConnected) {
-    await ctx.reply(
-      `${getPlatformEmoji(platform)} *Video terdeteksi!*\n\n` +
-      `⚠️ YouTube belum terhubung. Klip akan dikirim ke Telegram saja.\n\n` +
-      `${featureInfo}\n\n` +
-      `Hubungkan YouTube untuk auto-upload ke YouTube Studio!`,
-      {
-        parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard()
-          .url("🔗 Hubungkan YouTube", await getConnectUrl(userId))
-          .row()
-          .text("▶️ Proses Tanpa YouTube", `process_${jobId}`),
-      }
-    );
-  } else {
-    await ctx.reply(
-      `${getPlatformEmoji(platform)} *Video terdeteksi!*\n\n` +
-      `Platform: ${platform.toUpperCase()}\n` +
-      `URL: \`${url.slice(0, 50)}${url.length > 50 ? "..." : ""}\`\n\n` +
-      `${featureInfo}\n\n` +
-      `Pilih format output:`,
-      {
-        parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard()
-          .text(`📱 Vertikal 9:16 (${modeLabel})`, `process_v_${jobId}`)
-          .row()
-          .text("🎬 Original (Keep Ratio)", `process_o_${jobId}`),
-      }
-    );
+bot.callbackQuery(/^set_zoom_type_(in|out|in-out|pulse)$/, async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const type = ctx.match[1];
+  await patchUserSettings(userId, { zoomType: type });
+  await ctx.answerCallbackQuery(`✅ Zoom type: ${getZoomEffectLabel(type as "in")}`);
+  await ctx.editMessageText(
+    `✅ *Setting disimpan\\!*\n\nZoom type: *${getZoomEffectLabel(type as "in")}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
+});
+
+bot.callbackQuery(/^set_zoom_mode_(auto|always|never)$/, async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const mode = ctx.match[1];
+  await patchUserSettings(userId, { zoomMode: mode });
+  await ctx.answerCallbackQuery(`✅ Zoom mode: ${mode}`);
+  await ctx.editMessageText(
+    `✅ *Setting disimpan\\!*\n\nZoom mode: *${mode}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
+});
+
+bot.callbackQuery("reset_zoom", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  await patchUserSettings(userId, {
+    zoomEnabled: null, zoomMode: null, zoomType: null, zoomIntensity: null, zoomMinScore: null,
+  });
+  await ctx.answerCallbackQuery("✅ Zoom direset ke default env");
+  await ctx.editMessageText(
+    `✅ Zoom Effect direset ke default env`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali", "settings"),
+    }
+  );
+});
+
+// ─── TOGGLE INTRO/OUTRO ───────────────────────────────────────────────────
+
+bot.callbackQuery("toggle_intro", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const current = s.introEnabled ?? getIntroOutroConfig().introEnabled;
+  await patchUserSettings(userId, { introEnabled: !current });
+  await ctx.answerCallbackQuery(`✅ Intro ${!current ? "diaktifkan" : "dinonaktifkan"}`);
+  await ctx.editMessageText(
+    `✅ Intro: *${!current ? "✅ Aktif" : "❌ Nonaktif"}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
+});
+
+bot.callbackQuery("toggle_outro", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const s = await getOrCreateUserSettings(userId);
+  const current = s.outroEnabled ?? getIntroOutroConfig().outroEnabled;
+  await patchUserSettings(userId, { outroEnabled: !current });
+  await ctx.answerCallbackQuery(`✅ Outro ${!current ? "diaktifkan" : "dinonaktifkan"}`);
+  await ctx.editMessageText(
+    `✅ Outro: *${!current ? "✅ Aktif" : "❌ Nonaktif"}*`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali ke Pengaturan", "settings"),
+    }
+  );
+});
+
+bot.callbackQuery("reset_introoutro", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  await patchUserSettings(userId, {
+    introEnabled: null, introText: null, introDuration: null,
+    outroEnabled: null, outroText: null, outroDuration: null,
+  });
+  await ctx.answerCallbackQuery("✅ Intro/Outro direset ke default env");
+  await ctx.editMessageText(
+    `✅ Intro/Outro direset ke default env`,
+    {
+      parse_mode: "MarkdownV2",
+      reply_markup: new InlineKeyboard().text("« Kembali", "settings"),
+    }
+  );
+});
+
+// ─── TEXT COMMANDS FOR SETTING VALUES ────────────────────────────────────────
+
+// /setwm TeksBaru — set watermark text
+bot.command("setwm", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const text = ctx.message?.text?.replace("/setwm", "").trim();
+  if (!text) {
+    await ctx.reply("Gunakan: /setwm TeksWatermarkBaru\nContoh: /setwm @NamaChannel");
+    return;
   }
-}
+  await patchUserSettings(userId, { watermarkText: text });
+  await ctx.reply(`✅ Teks watermark diset ke: "${text}"\n\nAktif untuk akun kamu saja.`);
+});
+
+// /setintro TeksIntro
+bot.command("setintro", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const text = ctx.message?.text?.replace("/setintro", "").trim();
+  if (!text) {
+    await ctx.reply("Gunakan: /setintro TeksIntromu\nContoh: /setintro AutoClip Bot");
+    return;
+  }
+  await patchUserSettings(userId, { introText: text, introEnabled: true });
+  await ctx.reply(`✅ Teks intro diset ke: "${text}" (dan intro diaktifkan)`);
+});
+
+// /setoutro TeksOutro
+bot.command("setoutro", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const text = ctx.message?.text?.replace("/setoutro", "").trim();
+  if (!text) {
+    await ctx.reply("Gunakan: /setoutro TeksOutromu\nContoh: /setoutro Subscribe! 🔔");
+    return;
+  }
+  await patchUserSettings(userId, { outroText: text, outroEnabled: true });
+  await ctx.reply(`✅ Teks outro diset ke: "${text}" (dan outro diaktifkan)`);
+});
+
+// ─── PROCESS CALLBACKS ────────────────────────────────────────────────────
 
 bot.callbackQuery(/^process_v_(.+)$/, async (ctx) => {
   const jobId = ctx.match[1];
@@ -454,10 +640,125 @@ bot.callbackQuery(/^process_(.+)$/, async (ctx) => {
   await processJobWithUpdates(ctx, jobId, true);
 });
 
+bot.callbackQuery(/^retry_job_(.+)$/, async (ctx) => {
+  const jobId = ctx.match[1];
+  await ctx.answerCallbackQuery("🔄 Mencoba ulang...");
+  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  if (!jobs.length) { await ctx.reply("❌ Job tidak ditemukan."); return; }
+  await db.update(clipJobs).set({ status: "queued", errorMessage: null, updatedAt: new Date() }).where(eq(clipJobs.jobId, jobId));
+  await processJobWithUpdates(ctx, jobId);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HANDLER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function handleVideoUrl(ctx: Context, url: string) {
+  const userId = ctx.from?.id?.toString();
+  const chatId = ctx.chat?.id?.toString();
+  const messageId = ctx.message?.message_id;
+  if (!userId || !chatId) return;
+
+  const userSetting = await getOrCreateUserSettings(userId, {
+    username: ctx.from?.username,
+    firstName: ctx.from?.first_name,
+  });
+
+  const platform = detectPlatform(url);
+  if (platform === "unknown") {
+    await ctx.reply(
+      "❌ URL tidak dikenali. Kirim link dari YouTube, Facebook, TikTok, atau Instagram.",
+      { reply_markup: new InlineKeyboard().text("📚 Panduan", "help") }
+    );
+    return;
+  }
+
+  const jobId = uuidv4();
+  await db.insert(clipJobs).values({
+    jobId,
+    telegramUserId: userId,
+    telegramChatId: chatId,
+    telegramMessageId: messageId,
+    sourceUrl: url,
+    platform,
+    status: "queued",
+  });
+
+  const tokens = await db.select().from(youtubeTokens).where(eq(youtubeTokens.telegramUserId, userId));
+  const isConnected = tokens.length > 0;
+
+  // Build feature summary from resolved per-user settings
+  const effectiveMaxClips = resolveMaxClips(userSetting.maxClips);
+  const effectiveMode = resolveAspectRatioMode(userSetting.aspectRatioMode);
+  const effectiveWm = resolveWatermarkConfig({
+    watermarkEnabled: userSetting.watermarkEnabled,
+    watermarkText: userSetting.watermarkText,
+    watermarkPosition: userSetting.watermarkPosition,
+    watermarkFontSize: userSetting.watermarkFontSize,
+    watermarkColor: userSetting.watermarkColor,
+    watermarkOpacity: userSetting.watermarkOpacity,
+    watermarkBox: userSetting.watermarkBox,
+  });
+  const effectiveZoom = resolveZoomEffectConfig({
+    zoomEnabled: userSetting.zoomEnabled,
+    zoomMode: userSetting.zoomMode,
+    zoomType: userSetting.zoomType,
+    zoomIntensity: userSetting.zoomIntensity,
+    zoomMinScore: userSetting.zoomMinScore,
+  });
+  const effectiveIo = resolveIntroOutroConfig({
+    introEnabled: userSetting.introEnabled,
+    introText: userSetting.introText,
+    introDuration: userSetting.introDuration,
+    outroEnabled: userSetting.outroEnabled,
+    outroText: userSetting.outroText,
+    outroDuration: userSetting.outroDuration,
+  });
+
+  const featureInfo =
+    `📐 Mode 9:16: *${getModeLabel(effectiveMode)}*\n` +
+    `✂️ AutoClip: *${effectiveMaxClips} klip*\n` +
+    `💧 Watermark: *${effectiveWm.enabled ? `✅ "${effectiveWm.text}"` : "❌ Nonaktif"}*\n` +
+    `🔍 Zoom: *${effectiveZoom.enabled ? `✅ ${effectiveZoom.type}` : "❌ Nonaktif"}*\n` +
+    `🎬 Intro/Outro: *${effectiveIo.introEnabled || effectiveIo.outroEnabled ? "✅" : "❌"}*\n` +
+    `_(Ubah via /settings)_`;
+
+  if (!isConnected) {
+    await ctx.reply(
+      `${getPlatformEmoji(platform)} *Video terdeteksi!*\n\n` +
+        `⚠️ YouTube belum terhubung. Klip akan dikirim ke Telegram saja.\n\n` +
+        featureInfo +
+        `\n\nHubungkan YouTube untuk auto-upload!`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard()
+          .url("🔗 Hubungkan YouTube", await getConnectUrl(userId))
+          .row()
+          .text("▶️ Proses Tanpa YouTube", `process_${jobId}`),
+      }
+    );
+  } else {
+    await ctx.reply(
+      `${getPlatformEmoji(platform)} *Video terdeteksi!*\n\n` +
+        `Platform: ${platform.toUpperCase()}\n` +
+        `URL: \`${url.slice(0, 50)}${url.length > 50 ? "..." : ""}\`\n\n` +
+        featureInfo +
+        `\n\nPilih format output:`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard()
+          .text(`📱 Vertikal 9:16 (${getModeLabel(effectiveMode)})`, `process_v_${jobId}`)
+          .row()
+          .text("🎬 Original (Keep Ratio)", `process_o_${jobId}`),
+      }
+    );
+  }
+}
+
 async function processJobWithUpdates(
   ctx: Context,
   jobId: string,
-  makeVertical: boolean = true
+  makeVertical = true
 ) {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
@@ -472,9 +773,7 @@ async function processJobWithUpdates(
       await ctx.api.editMessageText(chatId, statusMessageId, `*${message}*`, {
         parse_mode: "Markdown",
       });
-    } catch {
-      /* ignore unchanged message errors */
-    }
+    } catch { /* ignore */ }
   };
 
   try {
@@ -490,58 +789,45 @@ async function processJobWithUpdates(
       await ctx.api.editMessageText(
         chatId,
         statusMessageId,
-        `✅ *Selesai! ${successClips.length} klip berhasil dibuat!*`,
-        { parse_mode: "Markdown" }
+        `✅ *Selesai\\! ${successClips.length} klip berhasil dibuat\\!*`,
+        { parse_mode: "MarkdownV2" }
       );
 
       for (let i = 0; i < successClips.length; i++) {
         const clip = successClips[i];
-        if (!clip.filePath || !fs.existsSync(clip.filePath)) continue;
-
-        const caption = [
-          `━━ Klip ${i + 1}/${successClips.length} ━━ `,
-          ``,
-          `📝 ${clip.title}`,
-          ``,
-          `⏱ Durasi: ${clip.duration}s`,
-          `🔥 Viral Score: ${clip.viralScore}/10`,
-          `💡 ${clip.reason}`,
-          clip.thumbnailPath ? `🖼 Thumbnail: ✅` : ``,
-          clip.youtubeUrl ? `\n🔗 YouTube: ${clip.youtubeUrl}` : ``,
-          clip.youtubeUrl ? ` (Tersimpan sebagai Draft di YouTube Studio) ` : ``,
-        ]
-          .join("\n")
-          .trim();
-
         try {
           if (clip.thumbnailPath && fs.existsSync(clip.thumbnailPath)) {
             await ctx.api.sendPhoto(chatId, new InputFile(clip.thumbnailPath), {
-              caption: `🖼 Thumbnail Klip ${i + 1}`,
-              parse_mode: "HTML",
+              caption:
+                `🎬 *Klip ${i + 1}/${successClips.length}*\n\n` +
+                `📌 ${clip.title.slice(0, 80)}\n` +
+                `⏱ ${clip.duration}s | 🔥 Score: ${clip.viralScore}/10\n` +
+                (clip.youtubeUrl ? `🔗 ${clip.youtubeUrl}` : "📤 Dikirim ke Telegram"),
+              parse_mode: "Markdown",
             });
           }
-          await ctx.api.sendVideo(chatId, new InputFile(clip.filePath!), {
-            caption,
-            parse_mode: "HTML",
-          });
-        } catch (err) {
-          console.error(`Failed to send clip ${i + 1}:`, err);
-          await ctx.api.sendMessage(
-            chatId,
-            `✅ Klip ${i + 1}: *${clip.title}*${clip.youtubeUrl ? `\n🔗 ${clip.youtubeUrl}` : ""}`,
-            { parse_mode: "Markdown" }
-          );
+
+          if (clip.filePath && fs.existsSync(clip.filePath)) {
+            await ctx.api.sendVideo(chatId, new InputFile(clip.filePath), {
+              caption:
+                `*${clip.title.slice(0, 80)}*\n` +
+                (clip.youtubeUrl ? `🔗 ${clip.youtubeUrl}` : ""),
+              parse_mode: "Markdown",
+              width: 1080,
+              height: 1920,
+            });
+          }
+        } catch (e) {
+          console.error(`Failed to send clip ${i}:`, e);
         }
       }
 
       const hasYoutube = successClips.some((c) => c.youtubeUrl);
       const summaryKeyboard = new InlineKeyboard();
       if (hasYoutube) {
-        summaryKeyboard
-          .url("📺 Buka YouTube Studio", "https://studio.youtube.com/channel/videos/upload")
-          .row();
+        summaryKeyboard.url("📺 Buka YouTube Studio", "https://studio.youtube.com/channel/videos/upload").row();
       }
-      summaryKeyboard.text("🎬 Proses Video Lain", "help");
+      summaryKeyboard.text("⚙️ Pengaturan", "settings").text("📚 Panduan", "help");
 
       await ctx.api.sendMessage(
         chatId,
@@ -554,10 +840,9 @@ async function processJobWithUpdates(
             hasThumbnail: !!(c.thumbnailPath && fs.existsSync(c.thumbnailPath)),
           }))
         ),
-        { parse_mode: "Markdown", reply_markup: summaryKeyboard }
+        { parse_mode: "MarkdownV2", reply_markup: summaryKeyboard }
       );
 
-      // Cleanup after 30s
       setTimeout(() => {
         successClips.forEach((c) => {
           if (c.filePath && fs.existsSync(c.filePath)) {
@@ -581,12 +866,15 @@ async function processJobWithUpdates(
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await ctx.api
-      .editMessageText(chatId, statusMessageId, messages.error(errorMsg), {
+    await ctx.api.editMessageText(
+      chatId,
+      statusMessageId,
+      messages.error(errorMsg),
+      {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
-      })
-      .catch(() => {});
+      }
+    ).catch(() => {});
   }
 }
 
@@ -595,7 +883,7 @@ async function handleConnect(ctx: Context) {
   if (!userId) return;
   const connectUrl = await getConnectUrl(userId);
   await ctx.reply(messages.connecting, {
-    parse_mode: "Markdown",
+    parse_mode: "MarkdownV2",
     reply_markup: new InlineKeyboard()
       .url("🔗 Login ke YouTube Studio", connectUrl)
       .row()
@@ -604,69 +892,67 @@ async function handleConnect(ctx: Context) {
 }
 
 async function getConnectUrl(userId: string): Promise<string> {
-  try {
-    return getAuthUrl(userId);
-  } catch {
-    return "https://accounts.google.com";
-  }
+  try { return getAuthUrl(userId); } catch { return "https://accounts.google.com"; }
 }
 
 async function handleSettings(ctx: Context) {
   const userId = ctx.from?.id?.toString();
   if (!userId) return;
-  await ensureUserSettings(userId);
 
-  const settingsRows = await db
-    .select()
-    .from(userSettings)
-    .where(eq(userSettings.telegramUserId, userId));
-  const settings = settingsRows[0];
+  const s = await getOrCreateUserSettings(userId, {
+    username: ctx.from?.username,
+    firstName: ctx.from?.first_name,
+  });
 
-  const tokens = await db
-    .select()
-    .from(youtubeTokens)
-    .where(eq(youtubeTokens.telegramUserId, userId));
+  const tokens = await db.select().from(youtubeTokens).where(eq(youtubeTokens.telegramUserId, userId));
 
-  const currentMode = getAspectRatioMode();
-  const modeLabel = getModeLabel(currentMode);
-  const wmCfg = getWatermarkConfig();
-  const zoomCfg = getZoomEffectConfig();
-  const ioCfg = getIntroOutroConfig();
-  const envMaxClips = getMaxClipsConfig();
+  const effectiveMaxClips = resolveMaxClips(s.maxClips);
+  const effectiveMode = resolveAspectRatioMode(s.aspectRatioMode);
+  const effectiveWm = resolveWatermarkConfig({
+    watermarkEnabled: s.watermarkEnabled, watermarkText: s.watermarkText,
+    watermarkPosition: s.watermarkPosition, watermarkFontSize: s.watermarkFontSize,
+    watermarkColor: s.watermarkColor, watermarkOpacity: s.watermarkOpacity, watermarkBox: s.watermarkBox,
+  });
+  const effectiveZoom = resolveZoomEffectConfig({
+    zoomEnabled: s.zoomEnabled, zoomMode: s.zoomMode, zoomType: s.zoomType,
+    zoomIntensity: s.zoomIntensity, zoomMinScore: s.zoomMinScore,
+  });
+  const effectiveIo = resolveIntroOutroConfig({
+    introEnabled: s.introEnabled, introText: s.introText, introDuration: s.introDuration,
+    outroEnabled: s.outroEnabled, outroText: s.outroText, outroDuration: s.outroDuration,
+  });
 
-  const extraInfo =
-    `\n\n*Fitur Aktif:*\n` +
-    `• Mode 9:16: *${modeLabel}*\n` +
-    `• AutoClip: *${envMaxClips} klip* (env MAX\\_CLIPS — /clips untuk ubah)\n` +
-    `• Watermark: *${wmCfg.enabled ? `"${wmCfg.text}" @ ${wmCfg.position}` : "Nonaktif"}*\n` +
-    `• Zoom Effect: *${zoomCfg.enabled ? `${zoomCfg.mode} (${zoomCfg.type})` : "Nonaktif"}*\n` +
-    `• Intro: *${ioCfg.introEnabled ? `✅ "${ioCfg.introText}"` : "❌"}* | Outro: *${ioCfg.outroEnabled ? `✅ "${ioCfg.outroText}"` : "❌"}*\n\n` +
-    `_Gunakan /clips /watermark /zoom /introoutro /thumbnail /mode untuk info detail_`;
+  const text = messages.settings({
+    maxClips: effectiveMaxClips,
+    minDuration: s.minDuration ?? 20,
+    maxDuration: s.maxDuration ?? 40,
+    defaultPrivacy: s.defaultPrivacy ?? "private",
+    youtubeConnected: tokens.length > 0,
+    watermarkText: effectiveWm.text,
+    watermarkEnabled: effectiveWm.enabled,
+    aspectRatioMode: getModeLabel(effectiveMode),
+    zoomEnabled: effectiveZoom.enabled,
+    introEnabled: effectiveIo.introEnabled,
+    outroEnabled: effectiveIo.outroEnabled,
+  });
 
-  await ctx.reply(
-    messages.settings({
-      maxClips: settings.maxClips || envMaxClips,
-      minDuration: settings.minDuration || 20,
-      maxDuration: settings.maxDuration || 40,
-      defaultPrivacy: settings.defaultPrivacy || "private",
-      youtubeConnected: tokens.length > 0,
-    }) + extraInfo,
-    {
-      parse_mode: "Markdown",
-      reply_markup: new InlineKeyboard()
-        .text("1️⃣ Klip", "set_clips_1")
-        .text("2️⃣ Klip", "set_clips_2")
-        .text("3️⃣ Klip", "set_clips_3")
-        .text("4️⃣ Klip", "set_clips_4")
-        .text("5️⃣ Klip ⭐", "set_clips_5")
-        .row()
-        .text("🔒 Private", "set_privacy_private")
-        .text("🔗 Unlisted", "set_privacy_unlisted")
-        .text("🌐 Public", "set_privacy_public")
-        .row()
-        .text("🔗 Hubungkan YouTube", "connect"),
-    }
-  );
+  const kb = new InlineKeyboard()
+    .text("✂️ Jumlah Klip", "settings_clips")
+    .text("🔒 Privacy", "settings_privacy")
+    .row()
+    .text("📐 Aspect Ratio", "settings_aspect")
+    .text("💧 Watermark", "settings_watermark")
+    .row()
+    .text("🔍 Zoom Effect", "settings_zoom")
+    .text("🎬 Intro/Outro", "settings_introoutro")
+    .row()
+    .text("🔗 Hubungkan YouTube", "connect");
+
+  try {
+    await ctx.editMessageText(text, { parse_mode: "MarkdownV2", reply_markup: kb });
+  } catch {
+    await ctx.reply(text, { parse_mode: "MarkdownV2", reply_markup: kb });
+  }
 }
 
 async function handleHistory(ctx: Context) {
@@ -704,27 +990,7 @@ async function handleHistory(ctx: Context) {
     }
     msg += `\n`;
   });
-
   await ctx.reply(msg, { parse_mode: "Markdown" });
-}
-
-async function ensureUserSettings(userId: string): Promise<void> {
-  if (!userId) return;
-  const existing = await db
-    .select()
-    .from(userSettings)
-    .where(eq(userSettings.telegramUserId, userId));
-  if (!existing.length) {
-    const envMaxClips = getMaxClipsConfig();
-    await db.insert(userSettings).values({
-      telegramUserId: userId,
-      maxClips: envMaxClips, // Use env var as default for new users
-      minDuration: 20,
-      maxDuration: 40,
-      defaultPrivacy: "private",
-      language: "id",
-    });
-  }
 }
 
 bot.catch((err) => {

@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
       }),
     });
 
-    const result = await response.json() as { ok: boolean; description?: string };
+    const result = (await response.json()) as { ok: boolean; description?: string };
 
     if (result.ok) {
       return NextResponse.json({ success: true, message: `Webhook set to: ${webhookUrl}`, result });

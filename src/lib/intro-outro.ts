@@ -1,15 +1,19 @@
 /**
  * INTRO / OUTRO PROCESSOR
  * =======================
- * Menggabungkan intro dan/atau outro ke setiap klip video secara otomatis.
+ * Supports per-user config override via ProcessClipsUserConfig.
  */
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
-import { getIntroOutroConfig, TARGET_WIDTH, TARGET_HEIGHT } from "@/lib/video-config";
+import { resolveIntroOutroConfig } from "@/lib/video-config";
+import type { ProcessClipsUserConfig } from "@/lib/video-processor";
 
 const execAsync = promisify(exec);
+
+export const TARGET_WIDTH = 1080;
+export const TARGET_HEIGHT = 1920;
 
 export interface IntroOutroResult {
   success: boolean;
@@ -22,9 +26,17 @@ export interface IntroOutroResult {
 export async function applyIntroOutro(
   inputPath: string,
   outputPath: string,
-  jobId: string
+  jobId: string,
+  userConfig?: ProcessClipsUserConfig
 ): Promise<IntroOutroResult> {
-  const cfg = getIntroOutroConfig();
+  const cfg = resolveIntroOutroConfig({
+    introEnabled: userConfig?.introEnabled,
+    introText: userConfig?.introText,
+    introDuration: userConfig?.introDuration,
+    outroEnabled: userConfig?.outroEnabled,
+    outroText: userConfig?.outroText,
+    outroDuration: userConfig?.outroDuration,
+  });
 
   if (!cfg.introEnabled && !cfg.outroEnabled) {
     fs.copyFileSync(inputPath, outputPath);
@@ -33,11 +45,8 @@ export async function applyIntroOutro(
 
   if (!fs.existsSync(inputPath)) {
     return {
-      success: false,
-      outputPath: inputPath,
-      error: "Input tidak ditemukan",
-      introAdded: false,
-      outroAdded: false,
+      success: false, outputPath: inputPath,
+      error: "Input tidak ditemukan", introAdded: false, outroAdded: false,
     };
   }
 
@@ -48,11 +57,9 @@ export async function applyIntroOutro(
     if (cfg.introEnabled) {
       if (cfg.introVideoPath && fs.existsSync(cfg.introVideoPath)) {
         introPath = cfg.introVideoPath;
-        console.log(`[intro-outro] Menggunakan file intro: ${introPath}`);
       } else {
         introPath = path.join(tmpDir, `intro_${jobId}.mp4`);
         await generateSlateVideo(introPath, cfg.introDuration, cfg.introText, cfg.introColor);
-        console.log(`[intro-outro] ✅ Intro otomatis dibuat: ${introPath}`);
       }
     }
 
@@ -60,11 +67,9 @@ export async function applyIntroOutro(
     if (cfg.outroEnabled) {
       if (cfg.outroVideoPath && fs.existsSync(cfg.outroVideoPath)) {
         outroPath = cfg.outroVideoPath;
-        console.log(`[intro-outro] Menggunakan file outro: ${outroPath}`);
       } else {
         outroPath = path.join(tmpDir, `outro_${jobId}.mp4`);
         await generateSlateVideo(outroPath, cfg.outroDuration, cfg.outroText, cfg.outroColor);
-        console.log(`[intro-outro] ✅ Outro otomatis dibuat: ${outroPath}`);
       }
     }
 
@@ -87,14 +92,11 @@ export async function applyIntroOutro(
     }
 
     const concatList = path.join(tmpDir, `concat_${jobId}.txt`);
-    const concatContent = segments.map((s) => `file '${s}'`).join("\n");
-    fs.writeFileSync(concatList, concatContent);
+    fs.writeFileSync(concatList, segments.map((s) => `file '${s}'`).join("\n"));
 
     const concatCmd = [
-      "ffmpeg",
-      "-y",
-      "-f", "concat",
-      "-safe", "0",
+      "ffmpeg", "-y",
+      "-f", "concat", "-safe", "0",
       "-i", `"${concatList}"`,
       "-c", "copy",
       `"${outputPath}"`,
@@ -102,33 +104,25 @@ export async function applyIntroOutro(
 
     await execAsync(concatCmd, { timeout: 180000 });
 
-    if (!fs.existsSync(outputPath)) {
-      throw new Error("Output file tidak terbuat setelah concat");
-    }
+    if (!fs.existsSync(outputPath)) throw new Error("Output tidak terbuat setelah concat");
 
     setTimeout(() => {
-      const toDelete = [concatList, normMain, ...segments.filter((s) => s !== normMain)];
-      if (introPath && !cfg.introVideoPath) toDelete.push(introPath);
-      if (outroPath && !cfg.outroVideoPath) toDelete.push(outroPath);
-      toDelete.forEach((f) => {
-        try {
-          if (fs.existsSync(f)) fs.unlinkSync(f);
-        } catch {
-          /* ignore */
-        }
+      [concatList, normMain, ...segments.filter((s) => s !== normMain)].forEach((f) => {
+        try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch { /* ignore */ }
       });
+      if (introPath && !cfg.introVideoPath) {
+        try { if (fs.existsSync(introPath)) fs.unlinkSync(introPath); } catch { /* ignore */ }
+      }
+      if (outroPath && !cfg.outroVideoPath) {
+        try { if (fs.existsSync(outroPath)) fs.unlinkSync(outroPath); } catch { /* ignore */ }
+      }
     }, 5000);
 
-    console.log(`[intro-outro] ✅ Intro/Outro berhasil ditambahkan: ${path.basename(outputPath)}`);
     return { success: true, outputPath, introAdded: !!introPath, outroAdded: !!outroPath };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[intro-outro] ❌ Gagal:", msg);
-    try {
-      fs.copyFileSync(inputPath, outputPath);
-    } catch {
-      /* ignore */
-    }
+    try { fs.copyFileSync(inputPath, outputPath); } catch { /* ignore */ }
     return { success: false, outputPath: inputPath, error: msg, introAdded: false, outroAdded: false };
   }
 }
@@ -145,9 +139,7 @@ async function generateSlateVideo(
     .replace(/:/g, "\\:");
   const ffmpegColor = bgColor.startsWith("#") ? `0x${bgColor.slice(1)}` : bgColor;
   const fontSize = Math.round(TARGET_WIDTH * 0.05);
-  const fontY = `(h-th)/2`;
-  const fontX = `(w-tw)/2`;
-  const drawtextFilter = `drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=white@0.9:x=${fontX}:y=${fontY}:box=1:boxcolor=black@0.3:boxborderw=12:font='DejaVu Sans'`;
+  const drawtextFilter = `drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=white@0.9:x=(w-tw)/2:y=(h-th)/2:box=1:boxcolor=black@0.3:boxborderw=12:font='DejaVu Sans'`;
   const vfWithFade = [
     `fade=t=in:st=0:d=0.5`,
     `fade=t=out:st=${Math.max(0, duration - 0.5)}:d=0.5`,
@@ -155,45 +147,35 @@ async function generateSlateVideo(
   ].join(",");
 
   const cmd = [
-    "ffmpeg",
-    "-y",
+    "ffmpeg", "-y",
     "-f", "lavfi",
     "-i", `color=c=${ffmpegColor}:size=${TARGET_WIDTH}x${TARGET_HEIGHT}:duration=${duration}:rate=30`,
     "-f", "lavfi",
     "-i", `anullsrc=channel_layout=stereo:sample_rate=44100`,
     "-vf", `"${vfWithFade}"`,
     "-threads", "2",
-    "-c:v", "libx264",
-    "-c:a", "aac",
+    "-c:v", "libx264", "-c:a", "aac",
     "-t", duration.toString(),
-    "-shortest",
-    "-pix_fmt", "yuv420p",
+    "-shortest", "-pix_fmt", "yuv420p",
     `"${outputPath}"`,
   ].join(" ");
 
   await execAsync(cmd, { timeout: 60000 });
-
   if (!fs.existsSync(outputPath)) throw new Error("Slate video tidak terbuat");
 }
 
 async function normalizeSegment(inputPath: string, outputPath: string): Promise<void> {
   const cmd = [
-    "ffmpeg",
-    "-y",
+    "ffmpeg", "-y",
     "-i", `"${inputPath}"`,
     "-vf", `"scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"`,
     "-threads", "2",
-    "-c:v", "libx264",
-    "-crf", "23",
-    "-preset", "fast",
-    "-c:a", "aac",
-    "-ar", "44100",
-    "-ac", "2",
+    "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+    "-c:a", "aac", "-ar", "44100", "-ac", "2",
     "-pix_fmt", "yuv420p",
     `"${outputPath}"`,
   ].join(" ");
 
   await execAsync(cmd, { timeout: 120000 });
-
   if (!fs.existsSync(outputPath)) throw new Error(`Normalize gagal: ${outputPath}`);
 }

@@ -38,14 +38,16 @@ export async function uploadClipsToYouTube(
     }
 
     try {
+      const fileSize = fs.statSync(clip.filePath).size;
       const response = await youtube.videos.insert({
         part: ["snippet", "status"],
         requestBody: {
           snippet: {
             title: clip.title.slice(0, 100),
-            description: clip.description || "",
-            tags: clip.tags || [],
+            description: `${clip.description}\n\n#Shorts\n\nViral Score: ${clip.viralScore}/10`,
+            tags: [...(clip.tags || []), "Shorts", "AutoClip"],
             categoryId: "22",
+            defaultLanguage: "id",
           },
           status: {
             privacyStatus,
@@ -54,16 +56,24 @@ export async function uploadClipsToYouTube(
         },
         media: {
           body: fs.createReadStream(clip.filePath),
+          mimeType: "video/mp4",
+        },
+      }, {
+        onUploadProgress: (evt: { bytesRead: number }) => {
+          const pct = Math.round((evt.bytesRead / fileSize) * 100);
+          if (pct % 25 === 0) {
+            console.log(`[youtube] Upload klip ${i}: ${pct}%`);
+          }
         },
       });
 
       const videoId = response.data.id!;
-      const videoUrl = `https://youtu.be/${videoId}`;
-      const result: UploadResult = { videoId, videoUrl, clipIndex: i };
-      results.push(result);
-      if (onUpload) await onUpload(i, result);
+      const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      const uploadResult: UploadResult = { videoId, videoUrl, clipIndex: i };
+      results.push(uploadResult);
 
-      // Small delay between uploads
+      if (onUpload) await onUpload(i, uploadResult);
+
       if (i < clips.length - 1) {
         await new Promise((r) => setTimeout(r, 2000));
       }
@@ -82,10 +92,9 @@ export function isTokenExpired(expiresAt: Date): boolean {
   return new Date() >= new Date(expiresAt.getTime() - 5 * 60 * 1000);
 }
 
-export async function refreshAccessToken(refreshToken: string): Promise<{
-  accessToken: string;
-  expiresAt: Date;
-}> {
+export async function refreshAccessToken(
+  refreshToken: string
+): Promise<{ accessToken: string; expiresAt: Date }> {
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,

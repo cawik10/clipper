@@ -1,12 +1,13 @@
 /**
  * ZOOM EFFECT PROCESSOR
  * =====================
- * Menambahkan efek zoom otomatis pada momen highlight (viral score tinggi).
+ * Supports per-user config override via ProcessClipsUserConfig.
  */
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
-import { getZoomEffectConfig, type ZoomEffectType } from "@/lib/video-config";
+import { resolveZoomEffectConfig, type ZoomEffectType } from "@/lib/video-config";
+import type { ProcessClipsUserConfig } from "@/lib/video-processor";
 
 const execAsync = promisify(exec);
 
@@ -21,107 +22,84 @@ export interface ZoomEffectResult {
 export async function applyZoomEffect(
   inputPath: string,
   outputPath: string,
-  viralScore: number = 5
+  viralScore = 5,
+  userConfig?: ProcessClipsUserConfig
 ): Promise<ZoomEffectResult> {
-  const cfg = getZoomEffectConfig();
+  const cfg = resolveZoomEffectConfig({
+    zoomEnabled: userConfig?.zoomEnabled,
+    zoomMode: userConfig?.zoomMode,
+    zoomType: userConfig?.zoomType,
+    zoomIntensity: userConfig?.zoomIntensity,
+    zoomMinScore: userConfig?.zoomMinScore,
+  });
 
   const shouldApply = determineIfShouldApply(cfg.mode, viralScore, cfg.minScore);
 
   if (!cfg.enabled || !shouldApply) {
     const reason = !cfg.enabled
-      ? "Zoom effect dimatikan (ZOOM_EFFECT_ENABLED=false)"
+      ? "Zoom effect dimatikan"
       : cfg.mode === "never"
       ? "Zoom mode=never"
-      : `Viral score ${viralScore} < minScore ${cfg.minScore} (mode auto)`;
+      : `Viral score ${viralScore} < minScore ${cfg.minScore}`;
     fs.copyFileSync(inputPath, outputPath);
-    return { success: true, outputPath: inputPath, applied: false, reason };
+    return { success: true, outputPath, applied: false, reason };
   }
 
   if (!fs.existsSync(inputPath)) {
     return {
-      success: false,
-      outputPath: inputPath,
-      error: "Input file tidak ditemukan",
-      applied: false,
-      reason: "File tidak ada",
+      success: false, outputPath: inputPath,
+      error: "Input tidak ditemukan", applied: false, reason: "File not found",
     };
   }
 
   try {
     const zoomFilter = buildZoomFilter(cfg.type, cfg.intensity, cfg.duration);
     const cmd = [
-      "ffmpeg",
-      "-y",
+      "ffmpeg", "-y",
       "-i", `"${inputPath}"`,
       "-vf", `"${zoomFilter}"`,
       "-c:a", "copy",
       "-threads", "2",
-      "-c:v", "libx264",
-      "-crf", "23",
-      "-preset", "fast",
+      "-c:v", "libx264", "-crf", "23", "-preset", "fast",
       "-pix_fmt", "yuv420p",
       `"${outputPath}"`,
     ].join(" ");
 
-    console.log(
-      `[zoom] Applying zoom effect: type=${cfg.type}, intensity=${cfg.intensity}x, score=${viralScore}`
-    );
     await execAsync(cmd, { timeout: 180000 });
 
-    if (!fs.existsSync(outputPath)) {
-      throw new Error("Zoom output file tidak terbuat");
-    }
+    if (!fs.existsSync(outputPath)) throw new Error("Output tidak terbuat");
 
-    console.log(`[zoom] ✅ Zoom effect berhasil`);
     return {
-      success: true,
-      outputPath,
-      applied: true,
-      reason: `Zoom ${cfg.type} diterapkan (score=${viralScore}, intensity=${cfg.intensity}x)`,
+      success: true, outputPath, applied: true,
+      reason: `Zoom ${cfg.type} applied (score: ${viralScore}, intensity: ${cfg.intensity}×)`,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[zoom] ❌ Zoom effect gagal:", msg);
-    try {
-      fs.copyFileSync(inputPath, outputPath);
-    } catch {
-      /* ignore */
-    }
-    return {
-      success: false,
-      outputPath: inputPath,
-      error: msg,
-      applied: false,
-      reason: `Zoom gagal: ${msg}`,
-    };
+    console.error("[zoom] ❌ Gagal:", msg);
+    try { fs.copyFileSync(inputPath, outputPath); } catch { /* ignore */ }
+    return { success: false, outputPath, error: msg, applied: false, reason: `Failed: ${msg}` };
   }
 }
 
 function determineIfShouldApply(
-  mode: string,
-  viralScore: number,
-  minScore: number
+  mode: string, viralScore: number, minScore: number
 ): boolean {
   switch (mode) {
     case "always": return true;
-    case "never":  return false;
-    case "auto":   return viralScore >= minScore;
-    default:       return viralScore >= minScore;
+    case "never": return false;
+    case "auto":
+    default: return viralScore >= minScore;
   }
 }
 
-function buildZoomFilter(
-  type: ZoomEffectType,
-  intensity: number,
-  durationSec: number
-): string {
+function buildZoomFilter(type: ZoomEffectType, intensity: number, durationSec: number): string {
   const fps = 30;
   const frames = Math.round(fps * durationSec);
   const maxZoom = intensity;
   const cx = `iw/2-(iw/zoom/2)`;
   const cy = `ih/2-(ih/zoom/2)`;
-
   let zoomExpr: string;
+
   switch (type) {
     case "in":
       zoomExpr = `min(1+(on*${((maxZoom - 1) / frames).toFixed(6)}),${maxZoom})`;

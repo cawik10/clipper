@@ -1,71 +1,10 @@
 /**
  * VIDEO CONFIGURATION
  * ===================
- * Semua konfigurasi video dikontrol via environment variables.
- * Mudah diubah dari Railway Dashboard → Variables tanpa perlu redeploy kode.
+ * All settings can be set per-user via Telegram /settings command.
+ * Railway/env vars act as GLOBAL DEFAULTS when no per-user value is set.
  *
- * =====================================================================
- * MAX CLIPS (BARU! — sebelumnya hardcoded 3)
- * =====================================================================
- * MAX_CLIPS=5          ← Jumlah klip hasil autoclip (default: 5)
- *                         Bisa diubah ke 1–10 sesuai kebutuhan
- *
- * =====================================================================
- * ASPECT RATIO MODE
- * =====================================================================
- * ASPECT_RATIO_MODE=blur     ← REKOMENDASI: background blur, tidak bolong
- * ASPECT_RATIO_MODE=crop     ← Crop tengah, full layar
- * ASPECT_RATIO_MODE=pad      ← Black bars (letterbox)
- * ASPECT_RATIO_MODE=stretch  ← Stretch paksa
- * ASPECT_RATIO_MODE=none     ← Tidak konversi, keep original
- *
- * =====================================================================
- * THUMBNAIL AUTO-GENERATION
- * =====================================================================
- * THUMBNAIL_ENABLED=true          ← Aktifkan thumbnail (default: true)
- * THUMBNAIL_MODE=middle           ← middle | best | start | custom
- * THUMBNAIL_OFFSET_SECONDS=5      ← Offset untuk mode custom
- * THUMBNAIL_QUALITY=5             ← 1-31 (makin kecil makin bagus)
- * THUMBNAIL_WIDTH=1280            ← Lebar output
- * THUMBNAIL_HEIGHT=720            ← Tinggi output (0=auto)
- *
- * =====================================================================
- * WATERMARK CONFIGURATION
- * =====================================================================
- * WATERMARK_ENABLED=true          ← Aktifkan watermark (default: true)
- * WATERMARK_TEXT=@YourChannel     ← Teks watermark
- * WATERMARK_POSITION=bottomright  ← topleft | topright | bottomleft | bottomright | center
- * WATERMARK_FONT_SIZE=32          ← Ukuran font (default: 32)
- * WATERMARK_COLOR=white           ← Warna teks (default: white)
- * WATERMARK_OPACITY=0.85          ← Transparansi 0.0-1.0 (default: 0.85)
- * WATERMARK_BOX=true              ← Tambah kotak background (default: true)
- * WATERMARK_BOX_COLOR=black@0.4  ← Warna kotak (default: black@0.4)
- * WATERMARK_IMAGE_PATH=           ← Path ke file gambar watermark (opsional)
- * WATERMARK_IMAGE_SCALE=0.15      ← Skala gambar watermark (default: 0.15)
- *
- * =====================================================================
- * INTRO / OUTRO CONFIGURATION
- * =====================================================================
- * INTRO_ENABLED=false             ← Aktifkan intro (default: false)
- * INTRO_VIDEO_PATH=               ← Path ke file video intro
- * INTRO_DURATION=3                ← Durasi intro dalam detik (jika generate otomatis)
- * INTRO_TEXT=AutoClip Bot         ← Teks pada intro otomatis
- * INTRO_COLOR=#000000             ← Warna background intro (default: hitam)
- * OUTRO_ENABLED=false             ← Aktifkan outro (default: false)
- * OUTRO_VIDEO_PATH=               ← Path ke file video outro
- * OUTRO_DURATION=3                ← Durasi outro dalam detik
- * OUTRO_TEXT=Subscribe! 🔔        ← Teks pada outro otomatis
- * OUTRO_COLOR=#000000             ← Warna background outro
- *
- * =====================================================================
- * ZOOM EFFECT ON HIGHLIGHT
- * =====================================================================
- * ZOOM_EFFECT_ENABLED=true        ← Aktifkan zoom effect (default: true)
- * ZOOM_EFFECT_MODE=auto           ← auto | always | never
- * ZOOM_EFFECT_INTENSITY=1.05      ← Skala zoom 1.0-1.3 (default: 1.05 = subtle)
- * ZOOM_EFFECT_DURATION=2.0        ← Durasi zoom dalam detik (default: 2.0)
- * ZOOM_EFFECT_MIN_SCORE=7         ← Viral score minimum untuk auto zoom (default: 7)
- * ZOOM_EFFECT_TYPE=in             ← in | out | in-out | pulse (default: in)
+ * Priority: Per-user DB setting > ENV VAR default > Hardcoded fallback
  */
 
 export type AspectRatioMode = "blur" | "crop" | "pad" | "stretch" | "none";
@@ -79,70 +18,38 @@ export type WatermarkPosition =
 export type ZoomEffectMode = "auto" | "always" | "never";
 export type ZoomEffectType = "in" | "out" | "in-out" | "pulse";
 
-// =====================================================================
-// MAX CLIPS CONFIG (NEW!)
-// =====================================================================
+// ─── MAX CLIPS ────────────────────────────────────────────────────────────
 
-/**
- * Jumlah klip maksimum per video.
- * Default: 5 (sebelumnya 3).
- * Ubah via Railway Variables: MAX_CLIPS=5
- * Rentang valid: 1–10
- */
+/** Global default from env var (Railway Variables). Fallback: 5 */
 export function getMaxClipsConfig(): number {
   const raw = process.env.MAX_CLIPS;
   if (raw) {
     const parsed = parseInt(raw.trim(), 10);
     if (!isNaN(parsed) && parsed >= 1 && parsed <= 10) return parsed;
-    console.warn(`[video-config] MAX_CLIPS="${raw}" tidak valid (harus 1-10). Menggunakan 5.`);
   }
   return 5;
 }
 
-// ===== ASPECT RATIO =====
-export function getAspectRatioMode(): AspectRatioMode {
-  const mode = (process.env.ASPECT_RATIO_MODE || "blur").toLowerCase().trim();
-  const valid: AspectRatioMode[] = ["blur", "crop", "pad", "stretch", "none"];
-  if (valid.includes(mode as AspectRatioMode)) return mode as AspectRatioMode;
-  console.warn(`[video-config] ASPECT_RATIO_MODE="${mode}" tidak valid. Menggunakan "blur".`);
-  return "blur";
+/** Effective max clips for a user. Per-user > env default. */
+export function resolveMaxClips(userValue: number | null | undefined): number {
+  if (userValue != null && userValue >= 1 && userValue <= 10) return userValue;
+  return getMaxClipsConfig();
 }
 
-export const TARGET_WIDTH = 1080;
-export const TARGET_HEIGHT = 1920;
+// ─── ASPECT RATIO ────────────────────────────────────────────────────────
 
-export function buildFFmpegFilterArgs(mode: AspectRatioMode): {
-  useFilterComplex: boolean;
-  filterValue: string;
-} {
-  if (mode === "blur") {
-    const filterComplex = [
-      `[0:v]split=2[main][bg]`,
-      `[bg]scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},boxblur=20:5[blurred]`,
-      `[main]scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black@0[fg]`,
-      `[blurred][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[out]`,
-    ].join(";");
-    return { useFilterComplex: true, filterValue: filterComplex };
-  }
+export function getAspectRatioMode(): AspectRatioMode {
+  const raw = (process.env.ASPECT_RATIO_MODE || "blur").toLowerCase().trim();
+  const valid: AspectRatioMode[] = ["blur", "crop", "pad", "stretch", "none"];
+  return valid.includes(raw as AspectRatioMode) ? (raw as AspectRatioMode) : "blur";
+}
 
-  let vf = "";
-  switch (mode) {
-    case "crop":
-      vf = `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},setsar=1`;
-      break;
-    case "pad":
-      vf = `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,setsar=1`;
-      break;
-    case "stretch":
-      vf = `scale=${TARGET_WIDTH}:${TARGET_HEIGHT},setsar=1`;
-      break;
-    case "none":
-      vf = `scale=trunc(iw/2)*2:trunc(ih/2)*2`;
-      break;
-    default:
-      vf = `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},setsar=1`;
+export function resolveAspectRatioMode(userValue: string | null | undefined): AspectRatioMode {
+  if (userValue) {
+    const valid: AspectRatioMode[] = ["blur", "crop", "pad", "stretch", "none"];
+    if (valid.includes(userValue as AspectRatioMode)) return userValue as AspectRatioMode;
   }
-  return { useFilterComplex: false, filterValue: vf };
+  return getAspectRatioMode();
 }
 
 export function getModeLabel(mode: AspectRatioMode): string {
@@ -156,7 +63,8 @@ export function getModeLabel(mode: AspectRatioMode): string {
   return labels[mode] || mode;
 }
 
-// ===== THUMBNAIL CONFIG =====
+// ─── THUMBNAIL ────────────────────────────────────────────────────────────
+
 export interface ThumbnailConfig {
   enabled: boolean;
   mode: ThumbnailMode;
@@ -180,6 +88,19 @@ export function getThumbnailConfig(): ThumbnailConfig {
   return { enabled, mode, offsetSeconds, quality, width, height };
 }
 
+export function resolveThumbnailEnabled(userValue: boolean | null | undefined): boolean {
+  if (userValue != null) return userValue;
+  return getThumbnailConfig().enabled;
+}
+
+export function resolveThumbnailMode(userValue: string | null | undefined): ThumbnailMode {
+  if (userValue) {
+    const valid: ThumbnailMode[] = ["middle", "best", "start", "custom"];
+    if (valid.includes(userValue as ThumbnailMode)) return userValue as ThumbnailMode;
+  }
+  return getThumbnailConfig().mode;
+}
+
 export function getThumbnailModeLabel(mode: ThumbnailMode): string {
   const labels: Record<ThumbnailMode, string> = {
     middle: "Tengah Klip (Middle Frame)",
@@ -190,7 +111,8 @@ export function getThumbnailModeLabel(mode: ThumbnailMode): string {
   return labels[mode] || mode;
 }
 
-// ===== WATERMARK CONFIG =====
+// ─── WATERMARK ────────────────────────────────────────────────────────────
+
 export interface WatermarkConfig {
   enabled: boolean;
   text: string;
@@ -209,29 +131,45 @@ export function getWatermarkConfig(): WatermarkConfig {
   const text = process.env.WATERMARK_TEXT || "@AutoClipBot";
   const rawPos = (process.env.WATERMARK_POSITION || "bottomright").toLowerCase().trim();
   const validPositions: WatermarkPosition[] = [
-    "topleft",
-    "topright",
-    "bottomleft",
-    "bottomright",
-    "center",
+    "topleft", "topright", "bottomleft", "bottomright", "center",
   ];
   const position: WatermarkPosition = validPositions.includes(rawPos as WatermarkPosition)
     ? (rawPos as WatermarkPosition)
     : "bottomright";
   const fontSize = Math.max(8, Math.min(200, parseInt(process.env.WATERMARK_FONT_SIZE || "32") || 32));
   const color = process.env.WATERMARK_COLOR || "white";
-  const opacity = Math.max(
-    0,
-    Math.min(1, parseFloat(process.env.WATERMARK_OPACITY || "0.85") || 0.85)
-  );
+  const opacity = Math.max(0, Math.min(1, parseFloat(process.env.WATERMARK_OPACITY || "0.85") || 0.85));
   const box = (process.env.WATERMARK_BOX || "true").toLowerCase().trim() !== "false";
   const boxColor = process.env.WATERMARK_BOX_COLOR || "black@0.4";
   const imagePath = process.env.WATERMARK_IMAGE_PATH || "";
-  const imageScale = Math.max(
-    0.01,
-    Math.min(1, parseFloat(process.env.WATERMARK_IMAGE_SCALE || "0.15") || 0.15)
-  );
+  const imageScale = Math.max(0.01, Math.min(1, parseFloat(process.env.WATERMARK_IMAGE_SCALE || "0.15") || 0.15));
   return { enabled, text, position, fontSize, color, opacity, box, boxColor, imagePath, imageScale };
+}
+
+/** Merge env defaults with per-user overrides */
+export function resolveWatermarkConfig(user: {
+  watermarkEnabled?: boolean | null;
+  watermarkText?: string | null;
+  watermarkPosition?: string | null;
+  watermarkFontSize?: number | null;
+  watermarkColor?: string | null;
+  watermarkOpacity?: number | null;
+  watermarkBox?: boolean | null;
+}): WatermarkConfig {
+  const global = getWatermarkConfig();
+  const validPositions: WatermarkPosition[] = ["topleft", "topright", "bottomleft", "bottomright", "center"];
+  return {
+    ...global,
+    enabled: user.watermarkEnabled ?? global.enabled,
+    text: user.watermarkText ?? global.text,
+    position: (user.watermarkPosition && validPositions.includes(user.watermarkPosition as WatermarkPosition))
+      ? (user.watermarkPosition as WatermarkPosition)
+      : global.position,
+    fontSize: user.watermarkFontSize ?? global.fontSize,
+    color: user.watermarkColor ?? global.color,
+    opacity: user.watermarkOpacity ?? global.opacity,
+    box: user.watermarkBox ?? global.box,
+  };
 }
 
 export function getWatermarkPositionLabel(pos: WatermarkPosition): string {
@@ -245,7 +183,8 @@ export function getWatermarkPositionLabel(pos: WatermarkPosition): string {
   return labels[pos] || pos;
 }
 
-// ===== INTRO / OUTRO CONFIG =====
+// ─── INTRO / OUTRO ────────────────────────────────────────────────────────
+
 export interface IntroOutroConfig {
   introEnabled: boolean;
   introVideoPath: string;
@@ -271,20 +210,33 @@ export function getIntroOutroConfig(): IntroOutroConfig {
   const outroText = process.env.OUTRO_TEXT || "Subscribe! 🔔";
   const outroColor = process.env.OUTRO_COLOR || "#000000";
   return {
-    introEnabled,
-    introVideoPath,
-    introDuration,
-    introText,
-    introColor,
-    outroEnabled,
-    outroVideoPath,
-    outroDuration,
-    outroText,
-    outroColor,
+    introEnabled, introVideoPath, introDuration, introText, introColor,
+    outroEnabled, outroVideoPath, outroDuration, outroText, outroColor,
   };
 }
 
-// ===== ZOOM EFFECT CONFIG =====
+export function resolveIntroOutroConfig(user: {
+  introEnabled?: boolean | null;
+  introText?: string | null;
+  introDuration?: number | null;
+  outroEnabled?: boolean | null;
+  outroText?: string | null;
+  outroDuration?: number | null;
+}): IntroOutroConfig {
+  const global = getIntroOutroConfig();
+  return {
+    ...global,
+    introEnabled: user.introEnabled ?? global.introEnabled,
+    introText: user.introText ?? global.introText,
+    introDuration: user.introDuration ?? global.introDuration,
+    outroEnabled: user.outroEnabled ?? global.outroEnabled,
+    outroText: user.outroText ?? global.outroText,
+    outroDuration: user.outroDuration ?? global.outroDuration,
+  };
+}
+
+// ─── ZOOM EFFECT ─────────────────────────────────────────────────────────
+
 export interface ZoomEffectConfig {
   enabled: boolean;
   mode: ZoomEffectMode;
@@ -301,24 +253,39 @@ export function getZoomEffectConfig(): ZoomEffectConfig {
   const mode: ZoomEffectMode = validModes.includes(rawMode as ZoomEffectMode)
     ? (rawMode as ZoomEffectMode)
     : "auto";
-  const intensity = Math.max(
-    1.0,
-    Math.min(1.5, parseFloat(process.env.ZOOM_EFFECT_INTENSITY || "1.05") || 1.05)
-  );
-  const duration = Math.max(
-    0.5,
-    Math.min(10, parseFloat(process.env.ZOOM_EFFECT_DURATION || "2.0") || 2.0)
-  );
-  const minScore = Math.max(
-    1,
-    Math.min(10, parseInt(process.env.ZOOM_EFFECT_MIN_SCORE || "7") || 7)
-  );
+  const intensity = Math.max(1.0, Math.min(1.5, parseFloat(process.env.ZOOM_EFFECT_INTENSITY || "1.05") || 1.05));
+  const duration = Math.max(0.5, Math.min(10, parseFloat(process.env.ZOOM_EFFECT_DURATION || "2.0") || 2.0));
+  const minScore = Math.max(1, Math.min(10, parseInt(process.env.ZOOM_EFFECT_MIN_SCORE || "7") || 7));
   const rawType = (process.env.ZOOM_EFFECT_TYPE || "in").toLowerCase().trim();
   const validTypes: ZoomEffectType[] = ["in", "out", "in-out", "pulse"];
   const type: ZoomEffectType = validTypes.includes(rawType as ZoomEffectType)
     ? (rawType as ZoomEffectType)
     : "in";
   return { enabled, mode, intensity, duration, minScore, type };
+}
+
+export function resolveZoomEffectConfig(user: {
+  zoomEnabled?: boolean | null;
+  zoomMode?: string | null;
+  zoomType?: string | null;
+  zoomIntensity?: number | null;
+  zoomMinScore?: number | null;
+}): ZoomEffectConfig {
+  const global = getZoomEffectConfig();
+  const validModes: ZoomEffectMode[] = ["auto", "always", "never"];
+  const validTypes: ZoomEffectType[] = ["in", "out", "in-out", "pulse"];
+  return {
+    ...global,
+    enabled: user.zoomEnabled ?? global.enabled,
+    mode: (user.zoomMode && validModes.includes(user.zoomMode as ZoomEffectMode))
+      ? (user.zoomMode as ZoomEffectMode)
+      : global.mode,
+    type: (user.zoomType && validTypes.includes(user.zoomType as ZoomEffectType))
+      ? (user.zoomType as ZoomEffectType)
+      : global.type,
+    intensity: user.zoomIntensity ?? global.intensity,
+    minScore: user.zoomMinScore ?? global.minScore,
+  };
 }
 
 export function getZoomEffectLabel(type: ZoomEffectType): string {
