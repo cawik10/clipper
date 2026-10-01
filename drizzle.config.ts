@@ -1,4 +1,5 @@
 import { defineConfig } from "drizzle-kit";
+import "dotenv/config"; // Wajib ditambahkan agar membaca file .env di Codespace
 
 export default defineConfig({
   dialect: "postgresql",
