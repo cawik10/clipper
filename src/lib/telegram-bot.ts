@@ -393,7 +393,7 @@ async function handleVideoUrl(ctx: Context, url: string) {
 
   const featureInfo =
     `📐 Mode 9:16: *${modeLabel}*\n` +
-    `✂️ AutoClip: *${maxClips} klip* _(ubah: \`MAX_CLIPS\` atau /clips)\n` +
+    `✂️ AutoClip: *${maxClips} klip* (ubah: \`MAX_CLIPS\` atau /clips)\n` +
     `💧 Watermark: *${wmCfg.enabled ? `✅ "${wmCfg.text}"` : "❌ Nonaktif"}*\n` +
     `🔍 Zoom Effect: *${zoomCfg.enabled ? `✅ ${zoomCfg.mode} (${zoomCfg.type})` : "❌ Nonaktif"}*\n` +
     `🎬 Intro/Outro: *${ioCfg.introEnabled || ioCfg.outroEnabled ? "✅ Aktif" : "❌ Nonaktif"}*`;
