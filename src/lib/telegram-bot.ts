@@ -19,6 +19,15 @@ import {
   getZoomEffectLabel,
   getMaxClipsConfig,
 } from "@/lib/video-config";
+import {
+  getDriveAuthUrl,
+  getDriveStatus,
+  setDriveAutoUpload,
+  setDriveFolder,
+  resetDriveFolder,
+  disconnectDrive,
+  isDriveConfigured,
+} from "@/lib/drive-uploader";
 import fs from "fs";
 
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
@@ -37,12 +46,14 @@ bot.command("start", async (ctx) => {
       .text("🔗 Hubungkan YouTube", "connect")
       .row()
       .text("⚙️ Pengaturan", "settings")
-      .text("📋 Riwayat", "history"),
+      .text("📋 Riwayat", "history")
+      .row()
+      .text("☁️ Google Drive", "drive_menu"),
   });
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(messages.help, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help + DRIVE_HELP, { parse_mode: "Markdown" });
 });
 
 bot.command("connect", async (ctx) => {
@@ -268,6 +279,174 @@ bot.command("introoutro", async (ctx) => {
   );
 });
 
+// ===== GOOGLE DRIVE =====
+const DRIVE_HELP =
+  `\n\n☁️ *Google Drive (auto-upload)*\n` +
+  `/drive — status & hubungkan akun\n` +
+  `/drivefolder <link> — ganti folder tujuan\n` +
+  `/driveon /driveoff — nyalakan/matikan auto-upload`;
+
+function mdEscape(text: string): string {
+  return text.replace(/([_*`\[\]])/g, "\\$1");
+}
+
+async function sendDriveMenu(ctx: Context) {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+
+  if (!isDriveConfigured()) {
+    await ctx.reply(
+      `☁️ *Google Drive belum dikonfigurasi di server.*\n\n` +
+        `Set variabel berikut di Railway:\n` +
+        `• \`GOOGLE_CLIENT_ID\`\n• \`GOOGLE_CLIENT_SECRET\`\n• \`GOOGLE_REDIRECT_URI\`\n\n` +
+        `Lalu aktifkan *Google Drive API* di Google Cloud Console.`,
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+
+  const st = await getDriveStatus(userId);
+  const kb = new InlineKeyboard();
+
+  let text = `☁️ *Google Drive Auto-Upload*\n\n`;
+  if (!st.globallyEnabled) {
+    text += `⛔ Fitur dimatikan oleh admin (\`GOOGLE_DRIVE_ENABLED=false\`).\n\n`;
+  }
+
+  if (!st.connected) {
+    text +=
+      `Status: ❌ Belum terhubung\n\n` +
+      `Hubungkan akun Google agar setiap klip hasil AutoClip otomatis tersimpan di Drive-mu.`;
+    kb.url("🔗 Hubungkan Google Drive", getDriveAuthUrl(userId));
+  } else {
+    text +=
+      `Status: ✅ Terhubung${st.email ? ` (\`${mdEscape(st.email)}\`)` : ""}\n` +
+      `Auto-upload: *${st.autoUpload ? "✅ Aktif" : "❌ Nonaktif"}*\n` +
+      `📁 Folder: *${mdEscape(st.folderLabel)}*\n` +
+      `🗂 Subfolder per video: *${st.subfolderPerJob ? "Ya" : "Tidak"}*\n` +
+      `🔗 Link: *${st.share === "anyone" ? "Siapa saja yang punya link" : "Privat"}*\n\n` +
+      `*Ganti folder tujuan:*\n` +
+      `\`/drivefolder https://drive.google.com/drive/folders/XXXX\`\n` +
+      `\`/drivefolder reset\` → kembali ke default\n\n` +
+      `*Ganti akun Google:* tekan "Ganti Akun" lalu login dengan akun lain.`;
+    kb.text(st.autoUpload ? "⏸ Matikan Auto-Upload" : "▶️ Nyalakan Auto-Upload", "drive_toggle").row();
+    if (st.folderUrl) kb.url("📂 Buka Folder", st.folderUrl).row();
+    if (st.folderSource === "user") kb.text("↩️ Reset Folder", "drive_reset_folder").row();
+    kb.url("🔄 Ganti Akun", getDriveAuthUrl(userId)).row();
+    kb.text("🔌 Putuskan Drive", "drive_disconnect");
+  }
+
+  await ctx.reply(text, { parse_mode: "Markdown", reply_markup: kb });
+}
+
+bot.command("drive", async (ctx) => {
+  await sendDriveMenu(ctx);
+});
+
+bot.command("driveon", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const st = await getDriveStatus(userId);
+  if (!st.connected) {
+    await sendDriveMenu(ctx);
+    return;
+  }
+  await setDriveAutoUpload(userId, true);
+  await ctx.reply("✅ Auto-upload Google Drive *diaktifkan*.", { parse_mode: "Markdown" });
+});
+
+bot.command("driveoff", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const st = await getDriveStatus(userId);
+  if (!st.connected) {
+    await ctx.reply("☁️ Google Drive belum terhubung.");
+    return;
+  }
+  await setDriveAutoUpload(userId, false);
+  await ctx.reply("⏸ Auto-upload Google Drive *dimatikan*. Nyalakan lagi dengan /driveon.", {
+    parse_mode: "Markdown",
+  });
+});
+
+bot.command("drivedisconnect", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  await disconnectDrive(userId);
+  await ctx.reply("✅ Google Drive berhasil diputus. Hubungkan lagi lewat /drive.");
+});
+
+bot.command("drivefolder", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const arg = (ctx.match || "").toString().trim();
+
+  const st = await getDriveStatus(userId);
+  if (!st.connected) {
+    await sendDriveMenu(ctx);
+    return;
+  }
+
+  if (!arg) {
+    await ctx.reply(
+      `📁 *Folder tujuan saat ini:* ${mdEscape(st.folderLabel)}\n\n` +
+        `Ganti dengan:\n\`/drivefolder <link folder Google Drive>\`\n` +
+        `Kembali ke default:\n\`/drivefolder reset\``,
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+
+  if (/^(reset|default)$/i.test(arg)) {
+    await resetDriveFolder(userId);
+    const after = await getDriveStatus(userId);
+    await ctx.reply(`↩️ Folder direset ke default: *${mdEscape(after.folderLabel)}*`, { parse_mode: "Markdown" });
+    return;
+  }
+
+  try {
+    const folder = await setDriveFolder(userId, arg);
+    await ctx.reply(
+      `✅ Folder tujuan diganti ke: *${mdEscape(folder.name)}*\n` +
+        `Klip berikutnya akan masuk ke folder ini.`,
+      { parse_mode: "Markdown" }
+    );
+  } catch (err) {
+    await ctx.reply(`❌ ${err instanceof Error ? err.message : String(err)}`);
+  }
+});
+
+bot.callbackQuery("drive_menu", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await sendDriveMenu(ctx);
+});
+
+bot.callbackQuery("drive_toggle", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const st = await getDriveStatus(userId);
+  if (!st.connected) {
+    await ctx.answerCallbackQuery("Drive belum terhubung");
+    return;
+  }
+  await setDriveAutoUpload(userId, !st.autoUpload);
+  await ctx.answerCallbackQuery(!st.autoUpload ? "✅ Auto-upload aktif" : "⏸ Auto-upload mati");
+  await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
+  await sendDriveMenu(ctx);
+});
+
+bot.callbackQuery("drive_reset_folder", async (ctx) => {
+  await ctx.answerCallbackQuery("↩️ Folder direset");
+  await resetDriveFolder(ctx.from.id.toString());
+  await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
+  await sendDriveMenu(ctx);
+});
+
+bot.callbackQuery("drive_disconnect", async (ctx) => {
+  await ctx.answerCallbackQuery("🔌 Drive diputus");
+  await disconnectDrive(ctx.from.id.toString());
+  await ctx.editMessageText("✅ Google Drive berhasil diputus. Hubungkan lagi kapan saja lewat /drive.");
+});
+
 // ===== MESSAGE HANDLER =====
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
@@ -390,13 +569,22 @@ async function handleVideoUrl(ctx: Context, url: string) {
   const zoomCfg = getZoomEffectConfig();
   const ioCfg = getIntroOutroConfig();
   const maxClips = getMaxClipsConfig();
+  const driveSt = await getDriveStatus(userId).catch(() => null);
+  const driveLine = !driveSt?.configured || !driveSt.globallyEnabled
+    ? ""
+    : `\n☁️ Google Drive: *${
+        driveSt.connected
+          ? driveSt.autoUpload ? "✅ Auto-upload aktif" : "⏸ Dimatikan"
+          : "❌ Belum terhubung (/drive)"
+      }*`;
 
   const featureInfo =
     `📐 Mode 9:16: *${modeLabel}*\n` +
     `✂️ AutoClip: *${maxClips} klip* (ubah: \`MAX_CLIPS\` atau /clips)\n` +
     `💧 Watermark: *${wmCfg.enabled ? `✅ "${wmCfg.text}"` : "❌ Nonaktif"}*\n` +
     `🔍 Zoom Effect: *${zoomCfg.enabled ? `✅ ${zoomCfg.mode} (${zoomCfg.type})` : "❌ Nonaktif"}*\n` +
-    `🎬 Intro/Outro: *${ioCfg.introEnabled || ioCfg.outroEnabled ? "✅ Aktif" : "❌ Nonaktif"}*`;
+    `🎬 Intro/Outro: *${ioCfg.introEnabled || ioCfg.outroEnabled ? "✅ Aktif" : "❌ Nonaktif"}*` +
+    driveLine;
 
   if (!isConnected) {
     await ctx.reply(
@@ -508,6 +696,7 @@ async function processJobWithUpdates(
           clip.thumbnailPath ? `🖼 Thumbnail: ✅` : ``,
           clip.youtubeUrl ? `\n🔗 YouTube: ${clip.youtubeUrl}` : ``,
           clip.youtubeUrl ? ` (Tersimpan sebagai Draft di YouTube Studio) ` : ``,
+          clip.driveUrl ? `\n☁️ Drive: ${clip.driveUrl}` : ``,
         ]
           .join("\n")
           .trim();
@@ -527,7 +716,7 @@ async function processJobWithUpdates(
           console.error(`Failed to send clip ${i + 1}:`, err);
           await ctx.api.sendMessage(
             chatId,
-            `✅ Klip ${i + 1}: *${clip.title}*${clip.youtubeUrl ? `\n🔗 ${clip.youtubeUrl}` : ""}`,
+            `✅ Klip ${i + 1}: *${clip.title}*${clip.youtubeUrl ? `\n🔗 ${clip.youtubeUrl}` : ""}${clip.driveUrl ? `\n☁️ ${clip.driveUrl}` : ""}`,
             { parse_mode: "Markdown" }
           );
         }
@@ -539,6 +728,14 @@ async function processJobWithUpdates(
         summaryKeyboard
           .url("📺 Buka YouTube Studio", "https://studio.youtube.com/channel/videos/upload")
           .row();
+      }
+      const driveCount = successClips.filter((c) => c.driveUrl).length;
+      if (driveCount > 0) {
+        const st = await getDriveStatus(job.telegramUserId).catch(() => null);
+        if (st?.folderUrl) summaryKeyboard.url("☁️ Buka Folder Google Drive", st.folderUrl).row();
+        await ctx.api
+          .sendMessage(chatId, `☁️ *${driveCount} klip tersimpan di Google Drive.*`, { parse_mode: "Markdown" })
+          .catch(() => {});
       }
       summaryKeyboard.text("🎬 Proses Video Lain", "help");
 
@@ -663,7 +860,8 @@ async function handleSettings(ctx: Context) {
         .text("🔗 Unlisted", "set_privacy_unlisted")
         .text("🌐 Public", "set_privacy_public")
         .row()
-        .text("🔗 Hubungkan YouTube", "connect"),
+        .text("🔗 Hubungkan YouTube", "connect")
+        .text("☁️ Google Drive", "drive_menu"),
     }
   );
 }

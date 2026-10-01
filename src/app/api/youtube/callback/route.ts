@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { youtubeTokens, userSettings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { exchangeCodeForTokens } from "@/lib/youtube-oauth";
+import { handleDriveOAuthCallback } from "@/lib/drive-callback";
+import { DRIVE_STATE_PREFIX } from "@/lib/drive-uploader";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,11 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state"); // userId
   const error = req.nextUrl.searchParams.get("error");
+
+  // Callback yang sama dipakai untuk Google Drive (state = "drive:<userId>")
+  if (state?.startsWith(DRIVE_STATE_PREFIX)) {
+    return handleDriveOAuthCallback(code, state.slice(DRIVE_STATE_PREFIX.length), error);
+  }
 
   if (error) {
     return new NextResponse(

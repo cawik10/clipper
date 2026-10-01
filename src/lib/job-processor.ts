@@ -9,6 +9,7 @@ import {
   isTokenExpired,
   refreshAccessToken,
 } from "@/lib/youtube-uploader";
+import { uploadClipsToDrive } from "@/lib/drive-uploader";
 
 type StatusUpdateFn = (status: string, message: string) => Promise<void>;
 
@@ -143,7 +144,9 @@ const effectiveMaxClips = settings.maxClips || envMaxClips;
       .set({ clips: processedClips, status: "uploading", updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
 
-    // === STEP 5: UPLOAD TO YOUTUBE ===
+    // === STEP 5: UPLOAD TO YOUTUBE (jika terhubung) ===
+    let finalClips: ClipResult[] = processedClips;
+
     const tokenRows = await db
       .select()
       .from(youtubeTokens)
@@ -186,24 +189,61 @@ const effectiveMaxClips = settings.maxClips || envMaxClips;
         }
       );
 
-      const updatedClips = processedClips.map((clip, i) => {
-        const uploadResult = uploadResults[i];
+      // uploadResults sejajar dengan successfulClips (bukan processedClips)
+      finalClips = finalClips.map((clip) => {
+        const idx = successfulClips.indexOf(clip);
+        const uploadResult = idx >= 0 ? uploadResults[idx] : null;
         if (uploadResult) {
           return { ...clip, youtubeVideoId: uploadResult.videoId, youtubeUrl: uploadResult.videoUrl };
         }
         return clip;
       });
-
-      await db
-        .update(clipJobs)
-        .set({ clips: updatedClips, status: "done", updatedAt: new Date() })
-        .where(eq(clipJobs.jobId, jobId));
-    } else {
-      await db
-        .update(clipJobs)
-        .set({ status: "done", updatedAt: new Date() })
-        .where(eq(clipJobs.jobId, jobId));
     }
+
+    // === STEP 5b: AUTO-UPLOAD KE GOOGLE DRIVE (jika terhubung & aktif) ===
+    // Kegagalan Drive TIDAK menggagalkan job — klip tetap dikirim ke Telegram.
+    try {
+      const driveSummary = await uploadClipsToDrive({
+        userId: job.telegramUserId,
+        jobId,
+        videoTitle: downloadResult.title,
+        clips: successfulClips,
+        onProgress: async (clipIndex, total, result, error) => {
+          if (result) {
+            await update("uploading", `☁️ Klip ${clipIndex + 1}/${total} masuk Google Drive`);
+          } else {
+            await update("uploading", `⚠️ Drive klip ${clipIndex + 1} gagal: ${error}`);
+          }
+        },
+      });
+
+      if (driveSummary.attempted) {
+        finalClips = finalClips.map((clip) => {
+          const idx = successfulClips.indexOf(clip);
+          const r = idx >= 0 ? driveSummary.results[idx] : null;
+          return r ? { ...clip, driveFileId: r.fileId, driveUrl: r.url } : clip;
+        });
+        const okCount = driveSummary.results.filter(Boolean).length;
+        if (okCount > 0) {
+          await update(
+            "uploading",
+            `☁️ ${okCount}/${successfulClips.length} klip tersimpan di Google Drive` +
+              (driveSummary.folderName ? ` (📁 ${driveSummary.folderName})` : "")
+          );
+        }
+        if (driveSummary.warning) await update("uploading", `⚠️ ${driveSummary.warning}`);
+        if (driveSummary.error && okCount === 0) {
+          await update("uploading", `⚠️ Upload Google Drive gagal: ${driveSummary.error}`);
+        }
+      }
+    } catch (err) {
+      console.error("[drive] step gagal (diabaikan):", err);
+    }
+
+    await db
+      .update(clipJobs)
+      .set({ clips: finalClips, status: "done", updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
 
     // Cleanup source video
     try {

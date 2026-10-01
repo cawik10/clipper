@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@types/form-data": "^2.2.1",
     "@types/uuid": "^10.0.0",
     "axios": "^1.20.0",
     "dotenv": "17.3.1",
@@ -19,7 +18,7 @@
     "googleapis": "^182.0.0",
     "grammy": "^1.46.0",
     "next": "16.2.6",
-    "openai": "^7.23.0",
+    "openai": "^7.25.0",
     "pg": "8.20.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",

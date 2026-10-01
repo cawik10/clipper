@@ -14,35 +14,20 @@ import { getMaxClipsConfig } from "@/lib/video-config";
 
 export async function getOrCreateUserSettings(
   userId: string,
-  meta?: { username?: string; firstName?: string }
+  _meta?: { username?: string; firstName?: string }
 ): Promise<UserSettingsRow> {
   const rows = await db
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, userId));
 
-  if (rows.length > 0) {
-    // Update display name if provided
-    if (meta?.username || meta?.firstName) {
-      await db
-        .update(userSettings)
-        .set({
-          telegramUsername: meta.username ?? rows[0].telegramUsername,
-          telegramFirstName: meta.firstName ?? rows[0].telegramFirstName,
-          updatedAt: new Date(),
-        })
-        .where(eq(userSettings.telegramUserId, userId));
-    }
-    return rows[0];
-  }
+  if (rows.length > 0) return rows[0];
 
   // Create new user settings with env var defaults
   const newRow = await db
     .insert(userSettings)
     .values({
       telegramUserId: userId,
-      telegramUsername: meta?.username,
-      telegramFirstName: meta?.firstName,
       maxClips: getMaxClipsConfig(),
       minDuration: 20,
       maxDuration: 40,

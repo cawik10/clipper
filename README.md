@@ -94,6 +94,43 @@ curl "https://yourapp.vercel.app/api/webhook/setup?secret=setup-autoclip-2024"
 5. Tambahkan redirect URI: `https://yourapp.vercel.app/api/youtube/callback`
 6. Copy Client ID dan Client Secret ke `.env`
 
+## ☁️ Auto-Upload ke Google Drive
+
+Setiap klip yang selesai dibuat otomatis di-upload ke Google Drive milik user (selain dikirim ke Telegram & YouTube).
+
+### Setup (sekali saja)
+1. Di [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services → Library** → aktifkan **Google Drive API** (project yang sama dengan YouTube).
+2. Pakai OAuth Client yang sama (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`). **Tidak perlu redirect URI baru** — callback YouTube (`/api/youtube/callback`) juga menangani Drive. (Opsional: `GOOGLE_DRIVE_REDIRECT_URI=https://app.up.railway.app/api/drive/callback`, lalu tambahkan URI itu di Google Console.)
+3. Kirim `/drive` ke bot → **Hubungkan Google Drive** → login. Selesai.
+
+> Tabel `drive_tokens` dibuat otomatis oleh aplikasi — tidak perlu `drizzle-kit push` di Railway.
+
+### Cara mengganti (tanpa ubah kode)
+| Ingin ganti | Cara |
+| --- | --- |
+| Folder tujuan (per akun) | `/drivefolder https://drive.google.com/drive/folders/XXXX` |
+| Kembali ke folder default | `/drivefolder reset` |
+| Akun Google | `/drive` → **Ganti Akun** (atau `/drivedisconnect` lalu `/drive`) |
+| Nyalakan / matikan | `/driveon` · `/driveoff` (atau tombol di `/drive`) |
+| Folder default global | Railway Variable `GOOGLE_DRIVE_FOLDER_ID` |
+| Matikan fitur total | Railway Variable `GOOGLE_DRIVE_ENABLED=false` |
+
+Prioritas folder: pilihan user (`/drivefolder`) → `GOOGLE_DRIVE_FOLDER_ID` → folder otomatis `GOOGLE_DRIVE_FOLDER_NAME` ("AutoClip Shorts") di My Drive.
+
+### Variable opsional
+| Variable | Default | Keterangan |
+| --- | --- | --- |
+| `GOOGLE_DRIVE_ENABLED` | `true` | Saklar global |
+| `GOOGLE_DRIVE_FOLDER_ID` | – | ID/link folder default |
+| `GOOGLE_DRIVE_FOLDER_NAME` | `AutoClip Shorts` | Nama folder otomatis |
+| `GOOGLE_DRIVE_SUBFOLDER` | `false` | `true` = buat subfolder per video sumber |
+| `GOOGLE_DRIVE_UPLOAD_THUMBNAIL` | `true` | Ikut upload thumbnail `.jpg` |
+| `GOOGLE_DRIVE_SHARE` | `none` | `anyone` = siapa saja yang punya link bisa melihat |
+| `GOOGLE_DRIVE_SCOPE` | `drive` | `drive` (folder mana saja) / `drive.file` (hanya folder buatan bot) |
+| `GOOGLE_DRIVE_REDIRECT_URI` | = `GOOGLE_REDIRECT_URI` | Redirect URI khusus Drive |
+
+Jika upload Drive gagal, job **tidak** gagal — klip tetap dikirim ke Telegram.
+
 ## 🤖 Telegram Bot Commands
 
 ```
@@ -104,6 +141,9 @@ curl "https://yourapp.vercel.app/api/webhook/setup?secret=setup-autoclip-2024"
 /status   - Status job terbaru
 /history  - Riwayat semua job
 /cancel   - Batalkan proses
+/drive    - Google Drive auto-upload (status, hubungkan, ganti akun)
+/drivefolder <link|reset> - Ganti folder tujuan Drive
+/driveon /driveoff - Nyalakan/matikan auto-upload Drive
 ```
 
 ## 📱 Cara Penggunaan

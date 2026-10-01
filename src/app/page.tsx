@@ -572,6 +572,11 @@ export default async function HomePage() {
               { cmd: "/zoom",       desc: "Info & ubah zoom effect config",        isNew: false },
               { cmd: "/introoutro", desc: "Info & ubah intro/outro config",        isNew: false },
               { cmd: "/disconnect", desc: "Putuskan koneksi YouTube",              isNew: false },
+              { cmd: "/drive",       desc: "Google Drive: status, hubungkan, ganti akun",   isNew: true },
+              { cmd: "/drivefolder", desc: "Ganti folder tujuan Drive (link / reset)",      isNew: true },
+              { cmd: "/driveon",     desc: "Nyalakan auto-upload ke Google Drive",          isNew: true },
+              { cmd: "/driveoff",    desc: "Matikan auto-upload ke Google Drive",           isNew: true },
+              { cmd: "/drivedisconnect", desc: "Putuskan akun Google Drive",                isNew: true },
             ].map((item) => (
               <div key={item.cmd} className="flex items-start gap-2 bg-slate-800/60 rounded-lg px-3 py-2 text-sm">
                 <code className={`font-mono font-bold shrink-0 ${item.isNew ? "text-emerald-400" : "text-blue-400"}`}>
@@ -602,6 +607,15 @@ export default async function HomePage() {
               { key: "GOOGLE_CLIENT_ID",     desc: "Google OAuth Client ID" },
               { key: "GOOGLE_CLIENT_SECRET", desc: "Google OAuth Client Secret" },
               { key: "GOOGLE_REDIRECT_URI",  desc: "https://yourapp.railway.app/api/youtube/callback" },
+              { section: "# === ☁️ GOOGLE DRIVE AUTO-UPLOAD (semua opsional) ===" },
+              { key: "GOOGLE_DRIVE_ENABLED",        desc: "true | false — saklar fitur Drive (default: true)", isNew: true },
+              { key: "GOOGLE_DRIVE_FOLDER_ID",      desc: "ID / link folder tujuan default", isNew: true },
+              { key: "GOOGLE_DRIVE_FOLDER_NAME",    desc: "nama folder otomatis (default: AutoClip Shorts)", isNew: true },
+              { key: "GOOGLE_DRIVE_SUBFOLDER",      desc: "true = subfolder per video sumber (default: false)", isNew: true },
+              { key: "GOOGLE_DRIVE_UPLOAD_THUMBNAIL", desc: "true | false (default: true)", isNew: true },
+              { key: "GOOGLE_DRIVE_SHARE",          desc: "none | anyone — siapa saja yang punya link (default: none)", isNew: true },
+              { key: "GOOGLE_DRIVE_SCOPE",          desc: "drive | drive.file (default: drive)", isNew: true },
+              { key: "GOOGLE_DRIVE_REDIRECT_URI",   desc: "opsional, default = GOOGLE_REDIRECT_URI", isNew: true },
               { section: "# === AI / TRANSKRIPSI ===" },
               { key: "OPENAI_API_KEY",  desc: "GPT-4o + Whisper transcription" },
               { key: "GEMINI_API_KEY",  desc: "Google Gemini (alternatif OpenAI)" },

@@ -71,7 +71,31 @@ export const userSettings = pgTable("user_settings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Google Drive connection + destination per Telegram user.
+// NOTE: tabel ini juga dibuat otomatis saat runtime (lihat src/lib/drive-uploader.ts → ensureDriveTable)
+// jadi di Railway tidak wajib menjalankan `drizzle-kit push`.
+export const driveTokens = pgTable("drive_tokens", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull().unique(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  scope: text("scope"),
+  googleEmail: text("google_email"),
+  // Folder tujuan yang dipilih user via /drivefolder (null = pakai env / folder otomatis)
+  folderId: text("folder_id"),
+  folderName: text("folder_name"),
+  // Folder yang dibuat otomatis oleh bot (fallback terakhir)
+  autoFolderId: text("auto_folder_id"),
+  autoUpload: boolean("auto_upload").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Types
+export type UserSettingsRow = typeof userSettings.$inferSelect;
+export type DriveTokenRow = typeof driveTokens.$inferSelect;
+
 export interface ClipResult {
   index: number;
   startTime: number;
@@ -86,4 +110,6 @@ export interface ClipResult {
   thumbnailPath?: string;
   youtubeVideoId?: string;
   youtubeUrl?: string;
+  driveFileId?: string;
+  driveUrl?: string;
 }
