@@ -8,73 +8,80 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
-  const state = req.nextUrl.searchParams.get("state"); // telegramUserId
+  const state = req.nextUrl.searchParams.get("state"); // userId
   const error = req.nextUrl.searchParams.get("error");
 
   if (error) {
     return new NextResponse(
-      `<html><body style="font-family:sans-serif;text-align:center;padding:40px">
-        <h2>❌ Koneksi Dibatalkan</h2>
-        <p>Kamu membatalkan koneksi YouTube.</p>
-        <p>Kembali ke Telegram dan coba lagi jika diperlukan.</p>
+      `<html><body style="font-family:sans-serif;text-align:center;padding:50px">
+        <h2>❌ Login Dibatalkan</h2>
+        <p>Kamu membatalkan proses login YouTube.</p>
+        <p>Kembali ke Telegram dan coba lagi.</p>
       </body></html>`,
       { headers: { "Content-Type": "text/html" } }
     );
   }
 
   if (!code || !state) {
-    return new NextResponse(
-      `<html><body style="font-family:sans-serif;text-align:center;padding:40px">
-        <h2>❌ Error</h2><p>Parameter tidak lengkap.</p>
-      </body></html>`,
-      { headers: { "Content-Type": "text/html" } }
-    );
+    return NextResponse.json({ error: "Missing code or state" }, { status: 400 });
   }
 
   try {
     const tokens = await exchangeCodeForTokens(code);
 
-    await db
-      .insert(youtubeTokens)
-      .values({
-        telegramUserId: state,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: tokens.expiresAt,
-        scope: tokens.scope,
-      })
-      .onConflictDoUpdate({
-        target: youtubeTokens.telegramUserId,
-        set: {
+    // Upsert token
+    const existing = await db
+      .select()
+      .from(youtubeTokens)
+      .where(eq(youtubeTokens.telegramUserId, state));
+
+    if (existing.length) {
+      await db
+        .update(youtubeTokens)
+        .set({
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           expiresAt: tokens.expiresAt,
           scope: tokens.scope,
           updatedAt: new Date(),
-        },
+        })
+        .where(eq(youtubeTokens.telegramUserId, state));
+    } else {
+      await db.insert(youtubeTokens).values({
+        telegramUserId: state,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt: tokens.expiresAt,
+        scope: tokens.scope,
       });
+    }
 
+    // Update user settings
     await db
       .update(userSettings)
       .set({ youtubeConnected: true, updatedAt: new Date() })
       .where(eq(userSettings.telegramUserId, state));
 
     return new NextResponse(
-      `<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0f172a;color:#e2e8f0">
-        <div style="max-width:400px;margin:0 auto;background:#1e293b;padding:40px;border-radius:16px;border:1px solid #10b981">
-          <div style="font-size:60px;margin-bottom:20px">✅</div>
-          <h2 style="color:#10b981;margin-bottom:12px">YouTube Terhubung!</h2>
-          <p style="color:#94a3b8">Akun YouTube Studio Anda berhasil terhubung dengan AutoClip Bot.</p>
-          <p style="color:#64748b;margin-top:20px;font-size:14px">Kembali ke Telegram dan mulai kirim link video!</p>
-        </div>
-      </body></html>`,
+      `<html>
+        <head><title>YouTube Connected</title></head>
+        <body style="font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:white">
+          <div style="max-width:400px;margin:0 auto;background:#1e293b;border-radius:16px;padding:40px">
+            <div style="font-size:64px">✅</div>
+            <h2 style="color:#22c55e">YouTube Terhubung!</h2>
+            <p style="color:#94a3b8">Akun YouTube Studio Anda berhasil terhubung dengan AutoClip Bot.</p>
+            <p style="color:#94a3b8">Kembali ke Telegram dan mulai kirim link video!</p>
+          </div>
+        </body>
+      </html>`,
       { headers: { "Content-Type": "text/html" } }
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    console.error("YouTube callback error:", err);
     return new NextResponse(
-      `<html><body style="font-family:sans-serif;text-align:center;padding:40px">
-        <h2>❌ Gagal</h2><p>${msg}</p>
+      `<html><body style="font-family:sans-serif;text-align:center;padding:50px">
+        <h2>❌ Error</h2>
+        <p>${err instanceof Error ? err.message : "Terjadi kesalahan"}</p>
       </body></html>`,
       { headers: { "Content-Type": "text/html" }, status: 500 }
     );

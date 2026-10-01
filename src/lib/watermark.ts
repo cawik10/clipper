@@ -1,13 +1,17 @@
 /**
  * WATERMARK PROCESSOR
  * ===================
- * Supports per-user config override via ProcessClipsUserConfig.
+ * Menambahkan watermark teks atau gambar pada video klip menggunakan FFmpeg.
  */
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
-import { resolveWatermarkConfig, type WatermarkPosition } from "@/lib/video-config";
-import type { ProcessClipsUserConfig } from "@/lib/video-processor";
+import path from "path";
+import {
+  getWatermarkConfig,
+  type WatermarkConfig,
+  type WatermarkPosition,
+} from "@/lib/video-config";
 
 const execAsync = promisify(exec);
 
@@ -21,17 +25,9 @@ export interface WatermarkResult {
 export async function applyWatermark(
   inputPath: string,
   outputPath: string,
-  userConfig?: ProcessClipsUserConfig
+  config?: WatermarkConfig
 ): Promise<WatermarkResult> {
-  const cfg = resolveWatermarkConfig({
-    watermarkEnabled: userConfig?.watermarkEnabled,
-    watermarkText: userConfig?.watermarkText,
-    watermarkPosition: userConfig?.watermarkPosition,
-    watermarkFontSize: userConfig?.watermarkFontSize,
-    watermarkColor: userConfig?.watermarkColor,
-    watermarkOpacity: userConfig?.watermarkOpacity,
-    watermarkBox: userConfig?.watermarkBox,
-  });
+  const cfg = config || getWatermarkConfig();
 
   if (!cfg.enabled) {
     fs.copyFileSync(inputPath, outputPath);
@@ -39,7 +35,7 @@ export async function applyWatermark(
   }
 
   if (!fs.existsSync(inputPath)) {
-    return { success: false, outputPath: inputPath, error: "Input tidak ditemukan", type: "none" };
+    return { success: false, outputPath: inputPath, error: "Input file tidak ditemukan", type: "none" };
   }
 
   try {
@@ -50,8 +46,12 @@ export async function applyWatermark(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[watermark] ❌ Gagal:", msg);
-    try { fs.copyFileSync(inputPath, outputPath); } catch { /* ignore */ }
+    console.error("[watermark] ❌ Gagal menambahkan watermark:", msg);
+    try {
+      fs.copyFileSync(inputPath, outputPath);
+    } catch {
+      /* ignore */
+    }
     return { success: false, outputPath: inputPath, error: msg, type: "none" };
   }
 }
@@ -59,7 +59,7 @@ export async function applyWatermark(
 async function applyTextWatermark(
   inputPath: string,
   outputPath: string,
-  cfg: ReturnType<typeof resolveWatermarkConfig>
+  cfg: WatermarkConfig
 ): Promise<WatermarkResult> {
   const { x, y } = getDrawtextXY(cfg.position);
   const escapedText = cfg.text
@@ -71,62 +71,83 @@ async function applyTextWatermark(
   drawtextFilter += `:fontsize=${cfg.fontSize}`;
   drawtextFilter += `:fontcolor=${fontcolor}`;
   drawtextFilter += `:x=${x}:y=${y}`;
-  if (cfg.box) drawtextFilter += `:box=1:boxcolor=${cfg.boxColor}:boxborderw=8`;
+  if (cfg.box) {
+    drawtextFilter += `:box=1:boxcolor=${cfg.boxColor}:boxborderw=8`;
+  }
   drawtextFilter += `:font='DejaVu Sans'`;
 
   const cmd = [
-    "ffmpeg", "-y",
+    "ffmpeg",
+    "-y",
     "-i", `"${inputPath}"`,
     "-vf", `"${drawtextFilter}"`,
     "-c:a", "copy",
     "-threads", "2",
-    "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+    "-c:v", "libx264",
+    "-crf", "23",
+    "-preset", "fast",
     `"${outputPath}"`,
   ].join(" ");
 
+  console.log(`[watermark] Applying text watermark: "${cfg.text}" @ ${cfg.position}`);
   await execAsync(cmd, { timeout: 120000 });
-  if (!fs.existsSync(outputPath)) throw new Error("Output tidak terbuat");
+
+  if (!fs.existsSync(outputPath)) {
+    throw new Error("Output file tidak terbuat setelah FFmpeg selesai");
+  }
+
+  console.log(`[watermark] ✅ Text watermark berhasil: ${path.basename(outputPath)}`);
   return { success: true, outputPath, type: "text" };
 }
 
 async function applyImageWatermark(
   inputPath: string,
   outputPath: string,
-  cfg: ReturnType<typeof resolveWatermarkConfig>
+  cfg: WatermarkConfig
 ): Promise<WatermarkResult> {
   const { overlayX, overlayY } = getOverlayXY(cfg.position, cfg.imageScale);
   const scaleFilter = `scale=iw*${cfg.imageScale}:-1`;
-  const alphaFilter = cfg.opacity < 1 ? `,format=rgba,colorchannelmixer=aa=${cfg.opacity}` : "";
+  const alphaFilter =
+    cfg.opacity < 1 ? `,format=rgba,colorchannelmixer=aa=${cfg.opacity}` : "";
   const filterComplex = [
     `[1:v]${scaleFilter}${alphaFilter}[logo]`,
     `[0:v][logo]overlay=${overlayX}:${overlayY}`,
   ].join(";");
 
   const cmd = [
-    "ffmpeg", "-y",
+    "ffmpeg",
+    "-y",
     "-i", `"${inputPath}"`,
     "-i", `"${cfg.imagePath}"`,
     "-filter_complex", `"${filterComplex}"`,
     "-c:a", "copy",
     "-threads", "2",
-    "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+    "-c:v", "libx264",
+    "-crf", "23",
+    "-preset", "fast",
     `"${outputPath}"`,
   ].join(" ");
 
+  console.log(`[watermark] Applying image watermark: ${cfg.imagePath} @ ${cfg.position}`);
   await execAsync(cmd, { timeout: 120000 });
-  if (!fs.existsSync(outputPath)) throw new Error("Output tidak terbuat (image)");
+
+  if (!fs.existsSync(outputPath)) {
+    throw new Error("Output file tidak terbuat setelah FFmpeg selesai (image watermark)");
+  }
+
+  console.log(`[watermark] ✅ Image watermark berhasil: ${path.basename(outputPath)}`);
   return { success: true, outputPath, type: "image" };
 }
 
 function getDrawtextXY(position: WatermarkPosition): { x: string; y: string } {
-  const p = 20;
+  const padding = 20;
   switch (position) {
-    case "topleft": return { x: `${p}`, y: `${p}` };
-    case "topright": return { x: `w-tw-${p}`, y: `${p}` };
-    case "bottomleft": return { x: `${p}`, y: `h-th-${p}` };
-    case "bottomright": return { x: `w-tw-${p}`, y: `h-th-${p}` };
-    case "center": return { x: `(w-tw)/2`, y: `(h-th)/2` };
-    default: return { x: `w-tw-${p}`, y: `h-th-${p}` };
+    case "topleft":    return { x: `${padding}`, y: `${padding}` };
+    case "topright":   return { x: `w-tw-${padding}`, y: `${padding}` };
+    case "bottomleft": return { x: `${padding}`, y: `h-th-${padding}` };
+    case "bottomright":return { x: `w-tw-${padding}`, y: `h-th-${padding}` };
+    case "center":     return { x: `(w-tw)/2`, y: `(h-th)/2` };
+    default:           return { x: `w-tw-${padding}`, y: `h-th-${padding}` };
   }
 }
 
@@ -134,13 +155,13 @@ function getOverlayXY(
   position: WatermarkPosition,
   _scale: number
 ): { overlayX: string; overlayY: string } {
-  const p = 20;
+  const padding = 20;
   switch (position) {
-    case "topleft": return { overlayX: `${p}`, overlayY: `${p}` };
-    case "topright": return { overlayX: `W-w-${p}`, overlayY: `${p}` };
-    case "bottomleft": return { overlayX: `${p}`, overlayY: `H-h-${p}` };
-    case "bottomright": return { overlayX: `W-w-${p}`, overlayY: `H-h-${p}` };
-    case "center": return { overlayX: `(W-w)/2`, overlayY: `(H-h)/2` };
-    default: return { overlayX: `W-w-${p}`, overlayY: `H-h-${p}` };
+    case "topleft":    return { overlayX: `${padding}`, overlayY: `${padding}` };
+    case "topright":   return { overlayX: `W-w-${padding}`, overlayY: `${padding}` };
+    case "bottomleft": return { overlayX: `${padding}`, overlayY: `H-h-${padding}` };
+    case "bottomright":return { overlayX: `W-w-${padding}`, overlayY: `H-h-${padding}` };
+    case "center":     return { overlayX: `(W-w)/2`, overlayY: `(H-h)/2` };
+    default:           return { overlayX: `W-w-${padding}`, overlayY: `H-h-${padding}` };
   }
 }

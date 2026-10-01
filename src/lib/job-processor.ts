@@ -3,7 +3,7 @@ import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
-import { resolveMaxClips } from "@/lib/video-config";
+import { getMaxClipsConfig } from "@/lib/video-config";
 import {
   uploadClipsToYouTube,
   isTokenExpired,
@@ -20,52 +20,29 @@ export async function processJob(
 
   const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
   if (!jobs.length) throw new Error(`Job ${jobId} tidak ditemukan`);
-
   const job = jobs[0];
 
-  // ── Load per-user settings ──────────────────────────────────────────────
   const settingsRows = await db
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, job.telegramUserId));
 
-  const userSetting = settingsRows[0] || null;
-
-  // Resolve effective values: per-user DB > env var default > hardcoded fallback
-  const effectiveMaxClips = resolveMaxClips(userSetting?.maxClips);
-  const effectiveMinDuration = userSetting?.minDuration ?? 20;
-  const effectiveMaxDuration = userSetting?.maxDuration ?? 40;
-  const effectivePrivacy = (userSetting?.defaultPrivacy as "private" | "unlisted" | "public") ?? "private";
-  const effectiveLanguage = userSetting?.language ?? "id";
-
-  // Per-user video processing config (passed to processClips)
-  const userVideoConfig = {
-    aspectRatioMode: userSetting?.aspectRatioMode,
-    watermarkEnabled: userSetting?.watermarkEnabled,
-    watermarkText: userSetting?.watermarkText,
-    watermarkPosition: userSetting?.watermarkPosition,
-    watermarkFontSize: userSetting?.watermarkFontSize,
-    watermarkColor: userSetting?.watermarkColor,
-    watermarkOpacity: userSetting?.watermarkOpacity,
-    watermarkBox: userSetting?.watermarkBox,
-    thumbnailEnabled: userSetting?.thumbnailEnabled,
-    thumbnailMode: userSetting?.thumbnailMode,
-    thumbnailQuality: userSetting?.thumbnailQuality,
-    zoomEnabled: userSetting?.zoomEnabled,
-    zoomMode: userSetting?.zoomMode,
-    zoomType: userSetting?.zoomType,
-    zoomIntensity: userSetting?.zoomIntensity,
-    zoomMinScore: userSetting?.zoomMinScore,
-    introEnabled: userSetting?.introEnabled,
-    introText: userSetting?.introText,
-    introDuration: userSetting?.introDuration,
-    outroEnabled: userSetting?.outroEnabled,
-    outroText: userSetting?.outroText,
-    outroDuration: userSetting?.outroDuration,
+  // Use env var MAX_CLIPS as the source of truth; fall back to user DB setting, then default 5
+  const envMaxClips = getMaxClipsConfig();
+  const settings = settingsRows[0] || {
+    maxClips: envMaxClips,
+    minDuration: 20,
+    maxDuration: 40,
+    defaultPrivacy: "private",
+    language: "id",
+    youtubeConnected: false,
   };
 
+  // ENV var takes priority over per-user setting
+  const effectiveMaxClips = envMaxClips;
+
   try {
-    // ── STEP 1: DOWNLOAD ───────────────────────────────────────────────────
+    // === STEP 1: DOWNLOAD ===
     await db
       .update(clipJobs)
       .set({ status: "downloading", updatedAt: new Date() })
@@ -93,7 +70,7 @@ export async function processJob(
       })
       .where(eq(clipJobs.jobId, jobId));
 
-    // ── STEP 2: TRANSCRIBE ─────────────────────────────────────────────────
+    // === STEP 2: TRANSCRIBE ===
     await db
       .update(clipJobs)
       .set({ status: "analyzing", updatedAt: new Date() })
@@ -102,15 +79,15 @@ export async function processJob(
 
     let transcript: { start: number; end: number; text: string }[] = [];
     try {
-      transcript = await transcribeAudio(downloadResult.filePath, effectiveLanguage);
+      transcript = await transcribeAudio(downloadResult.filePath, settings.language || "id");
     } catch (err) {
       console.warn("Transcription failed, proceeding without:", err);
     }
 
-    // ── STEP 3: ANALYZE ────────────────────────────────────────────────────
+    // === STEP 3: ANALYZE ===
     await update("analyzing", `🧠 Menganalisis momen viral dengan AI... (target: ${effectiveMaxClips} klip)`);
 
-    let analysisClips: Omit<ClipResult, "filePath" | "thumbnailPath">[];
+    let analysisClips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[];
     try {
       analysisClips = await analyzeVideoForClips(
         {
@@ -118,11 +95,11 @@ export async function processJob(
           duration: downloadResult.duration,
           transcript,
           platform: job.platform,
-          language: effectiveLanguage,
+          language: settings.language || "id",
         },
         effectiveMaxClips,
-        effectiveMinDuration,
-        effectiveMaxDuration
+        settings.minDuration || 20,
+        settings.maxDuration || 40
       );
     } catch (err) {
       throw new Error(`Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`);
@@ -134,7 +111,7 @@ export async function processJob(
 
     await update("analyzing", `🎯 ${analysisClips.length} momen viral ditemukan!`);
 
-    // ── STEP 4: CLIP + ZOOM + WATERMARK + INTRO/OUTRO + THUMBNAIL ──────────
+    // === STEP 4: CLIP + ZOOM + WATERMARK + INTRO/OUTRO + THUMBNAIL ===
     await db
       .update(clipJobs)
       .set({ status: "clipping", updatedAt: new Date() })
@@ -146,10 +123,17 @@ export async function processJob(
       jobId,
       true,
       async (clipIndex, total) => {
-        await update("clipping", `✂️ Memproses klip ${clipIndex + 1}/${total}...`);
-      },
-      userVideoConfig
+        await update(
+          "clipping",
+          `✂️ Memproses klip ${clipIndex + 1}/${total}... (Zoom + Watermark + Intro/Outro)`
+        );
+      }
     );
+
+    const thumbnailCount = processedClips.filter((c) => c.thumbnailPath).length;
+    if (thumbnailCount > 0) {
+      await update("clipping", `🖼 ${thumbnailCount} thumbnail berhasil di-generate!`);
+    }
 
     const successfulClips = processedClips.filter((c) => c.filePath);
     if (!successfulClips.length) throw new Error("Semua klip gagal diproses");
@@ -159,7 +143,7 @@ export async function processJob(
       .set({ clips: processedClips, status: "uploading", updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
 
-    // ── STEP 5: UPLOAD TO YOUTUBE ──────────────────────────────────────────
+    // === STEP 5: UPLOAD TO YOUTUBE ===
     const tokenRows = await db
       .select()
       .from(youtubeTokens)
@@ -175,7 +159,11 @@ export async function processJob(
           accessToken = newTokens.accessToken;
           await db
             .update(youtubeTokens)
-            .set({ accessToken: newTokens.accessToken, expiresAt: newTokens.expiresAt, updatedAt: new Date() })
+            .set({
+              accessToken: newTokens.accessToken,
+              expiresAt: newTokens.expiresAt,
+              updatedAt: new Date(),
+            })
             .where(eq(youtubeTokens.telegramUserId, job.telegramUserId));
         } catch (err) {
           console.error("Token refresh failed:", err);
@@ -188,7 +176,7 @@ export async function processJob(
         successfulClips,
         accessToken,
         refreshToken,
-        effectivePrivacy,
+        (settings.defaultPrivacy as "private" | "unlisted" | "public") || "private",
         async (clipIndex, result, error) => {
           if (result) {
             await update("uploading", `✅ Klip ${clipIndex + 1} berhasil diupload!\n🔗 ${result.videoUrl}`);
@@ -221,8 +209,9 @@ export async function processJob(
     try {
       const { unlinkSync, existsSync } = await import("fs");
       if (existsSync(downloadResult.filePath)) unlinkSync(downloadResult.filePath);
-    } catch { /* ignore */ }
-
+    } catch {
+      /* ignore */
+    }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error(`Job ${jobId} failed:`, err);

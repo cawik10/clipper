@@ -2,11 +2,12 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  serverExternalPackages: ["grammy", "@google/generative-ai", "googleapis", "form-data"],
   typescript: {
-    // TypeScript errors are caught by our separate `tsc --noEmit` step.
-    // Disabling here avoids OOM during `next build` in memory-constrained environments.
+    // tsc is verified separately; skip in-build check to avoid OOM on constrained sandboxes
     ignoreBuildErrors: true,
   },
+
 };
 
 export default nextConfig;
