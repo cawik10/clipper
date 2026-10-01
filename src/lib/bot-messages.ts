@@ -104,13 +104,12 @@ Kirim link video yang valid dari:
     defaultPrivacy: string;
     youtubeConnected: boolean;
   }) =>
-    `⚙️ *Pengaturan Bot*
-
-• `  Maksimal Klip: ${s.maxClips} (ubah dengan tombol di bawah, atau set \`MAX_CLIPS\` di Railway)\n` +
-• Durasi Min: ${s.minDuration} detik
-• Durasi Max: ${s.maxDuration} detik
-• Privacy Default: ${s.defaultPrivacy}
-• YouTube: ${s.youtubeConnected ? "✅ Terhubung" : "❌ Belum terhubung"}`,
+    `⚙️ *Pengaturan Bot*\n` +
+    `• Maksimal Klip: ${s.maxClips} (ubah dengan tombol di bawah, atau set \`MAX_CLIPS\` di Railway)\n` +
+    `• Durasi Min: ${s.minDuration} detik\n` +
+    `• Durasi Max: ${s.maxDuration} detik\n` +
+    `• Privacy Default: ${s.defaultPrivacy}\n` +
+    `• YouTube: ${s.youtubeConnected ? "✅ Terhubung" : "❌ Belum terhubung"}`,
 
   resultSummary: (
     clips: {
