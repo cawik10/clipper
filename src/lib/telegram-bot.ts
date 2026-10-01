@@ -114,12 +114,12 @@ bot.command("clips", async (ctx) => {
 
   await ctx.reply(
     `✂️ *Konfigurasi Jumlah Klip AutoClip:*\n\n` +
-    `Aktif (env MAX\\_CLIPS): *${envMax} klip*\n` +
+    `Aktif (env \`MAX_CLIPS\`): *${envMax} klip*\n` +
     `Setting akunmu: *${userMax} klip*\n\n` +
     `*Cara Ubah (2 metode):*\n\n` +
     `*1️⃣ Railway Variables (global, semua user):*\n` +
-    `• Set variabel \`MAX\\_CLIPS\` di Railway Dashboard\n` +
-    `• Contoh: \`MAX\\_CLIPS=5\` → 5 klip per video\n` +
+    `  Set variabel \`MAX_CLIPS\` di Railway Dashboard\n` +
+    `  Contoh: \`MAX_CLIPS=5\`   5 klip per video\n` +
     `• Rentang valid: \`1\` sampai \`10\`\n` +
     `• Tidak perlu redeploy — langsung berlaku\n\n` +
     `*2️⃣ Per-akun via /settings (tombol di bawah):*\n` +
@@ -132,7 +132,7 @@ bot.command("clips", async (ctx) => {
     `• 4 klip — lebih banyak pilihan\n` +
     `• *5 klip — default baru ⭐*\n` +
     `• 6-10 klip — maksimal (butuh lebih lama)\n\n` +
-    `_ENV var MAX\\_CLIPS selalu override setting per-akun._`,
+    `💡 ENV var \`MAX_CLIPS\` selalu override setting per-akun.`,
     {
       parse_mode: "Markdown",
       reply_markup: new InlineKeyboard()
@@ -324,7 +324,7 @@ bot.callbackQuery(/^set_clips_(\d+)$/, async (ctx) => {
   const envMax = getMaxClipsConfig();
   await ctx.editMessageText(
     `✅ Setting akun: Maksimal *${maxClips} klip* per video.\n\n` +
-    `_Catatan: env var MAX\\_CLIPS=${envMax} selalu override setting ini._`,
+    `💡 Catatan: env var \`MAX_CLIPS=${envMax}\` selalu override setting ini.`,
     { parse_mode: "Markdown" }
   );
 });
@@ -393,7 +393,7 @@ async function handleVideoUrl(ctx: Context, url: string) {
 
   const featureInfo =
     `📐 Mode 9:16: *${modeLabel}*\n` +
-    `✂️ AutoClip: *${maxClips} klip* _(ubah: MAX\\_CLIPS atau /clips)_\n` +
+    `✂️ AutoClip: *${maxClips} klip* _(ubah: \`MAX_CLIPS\` atau /clips)\n` +
     `💧 Watermark: *${wmCfg.enabled ? `✅ "${wmCfg.text}"` : "❌ Nonaktif"}*\n` +
     `🔍 Zoom Effect: *${zoomCfg.enabled ? `✅ ${zoomCfg.mode} (${zoomCfg.type})` : "❌ Nonaktif"}*\n` +
     `🎬 Intro/Outro: *${ioCfg.introEnabled || ioCfg.outroEnabled ? "✅ Aktif" : "❌ Nonaktif"}*`;
@@ -636,7 +636,7 @@ async function handleSettings(ctx: Context) {
   const extraInfo =
     `\n\n*Fitur Aktif:*\n` +
     `• Mode 9:16: *${modeLabel}*\n` +
-    `• AutoClip: *${envMaxClips} klip* (env MAX\\_CLIPS — /clips untuk ubah)\n` +
+    `• AutoClip: *${envMaxClips} klip* (env \`MAX_CLIPS\`   /clips untuk ubah)\n` +
     `• Watermark: *${wmCfg.enabled ? `"${wmCfg.text}" @ ${wmCfg.position}` : "Nonaktif"}*\n` +
     `• Zoom Effect: *${zoomCfg.enabled ? `${zoomCfg.mode} (${zoomCfg.type})` : "Nonaktif"}*\n` +
     `• Intro: *${ioCfg.introEnabled ? `✅ "${ioCfg.introText}"` : "❌"}* | Outro: *${ioCfg.outroEnabled ? `✅ "${ioCfg.outroText}"` : "❌"}*\n\n` +

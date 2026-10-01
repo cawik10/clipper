@@ -106,7 +106,7 @@ Kirim link video yang valid dari:
   }) =>
     `⚙️ *Pengaturan Bot*
 
-• Maksimal Klip: ${s.maxClips} _(ubah dengan tombol di bawah, atau set MAX\\_CLIPS di Railway)_
+• `  Maksimal Klip: ${s.maxClips} (ubah dengan tombol di bawah, atau set \`MAX_CLIPS\` di Railway)\n` +
 • Durasi Min: ${s.minDuration} detik
 • Durasi Max: ${s.maxDuration} detik
 • Privacy Default: ${s.defaultPrivacy}
