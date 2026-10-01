@@ -38,8 +38,8 @@ export async function processJob(
     youtubeConnected: false,
   };
 
-  // ENV var takes priority over per-user setting
-  const effectiveMaxClips = envMaxClips;
+  // Memprioritaskan setting per-akun dari database pengguna
+const effectiveMaxClips = settings.maxClips || envMaxClips;
 
   try {
     // === STEP 1: DOWNLOAD ===
