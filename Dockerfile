@@ -10,7 +10,7 @@ RUN apk add --no-cache \
     ttf-dejavu
 
 # Install yt-dlp
-RUN pip3 install -U "yt-dlp[default]" curl-cffi --break-system-packages || pip3 install -U "yt-dlp[default]" curl-cffi
+RUN pip3 install -U --pre "yt-dlp[default]" curl-cffi --break-system-packages || pip3 install -U --pre "yt-dlp[default]" curl-cffi
 
 # Dependencies stage
 FROM base AS deps
