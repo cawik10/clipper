@@ -53,6 +53,7 @@ export async function downloadVideo(
     "--no-playlist",
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
+    "--cookies", "cookies.txt", // <-- TAMBAHKAN BARIS INI
     "--progress",
     "--newline",
     "-o", `"${outputTemplate}"`,
@@ -70,7 +71,7 @@ export async function downloadVideo(
 
   const filePath = path.join(TMP_DIR, files[0]);
 
-  const infoCmd = `yt-dlp --dump-json --no-playlist "${url}"`;
+  const infoCmd = `yt-dlp --cookies cookies.txt --dump-json --no-playlist "${url}"`;
   let title = "Video";
   let duration = 0;
   try {
