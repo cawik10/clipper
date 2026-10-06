@@ -64,6 +64,11 @@ export const userSettings = pgTable("user_settings", {
   defaultPrivacy: text("default_privacy").default("private"),
   // Default changed to 5 — can also be overridden by MAX_CLIPS env var
   maxClips: integer("max_clips").default(5),
+  // Durasi klip pilihan tetap: 15 | 20 | 30 | 40 | 60 detik (lihat src/lib/video-config.ts).
+  // Bisa juga di-override via env var CLIP_DURATION. Default: 30.
+  clipDuration: integer("clip_duration").default(30),
+  // minDuration/maxDuration kini dihitung otomatis dari clipDuration (± toleransi)
+  // tetap disimpan untuk kompatibilitas data lama.
   minDuration: integer("min_duration").default(20),
   maxDuration: integer("max_duration").default(40),
   language: text("language").default("id"),

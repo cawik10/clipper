@@ -18,6 +18,10 @@ import {
   getZoomEffectConfig,
   getZoomEffectLabel,
   getMaxClipsConfig,
+  getDefaultClipDuration,
+  getDurationRange,
+  CLIP_DURATION_OPTIONS,
+  isValidClipDuration,
 } from "@/lib/video-config";
 import {
   getDriveAuthUrl,
@@ -161,6 +165,51 @@ bot.command("clips", async (ctx) => {
     }
   );
 });
+
+// ===== /duration — PILIH DURASI KLIP TETAP (BARU!) =====
+// Sebelumnya durasi klip otomatis 15-40 detik. Sekarang user bisa memilih
+// durasi tetap dari daftar di CLIP_DURATION_OPTIONS (src/lib/video-config.ts).
+bot.command("duration", async (ctx) => {
+  await handleDuration(ctx);
+});
+
+async function handleDuration(ctx: Context) {
+  const envDuration = getDefaultClipDuration();
+  const userId = ctx.from?.id?.toString();
+  let userDuration: number = envDuration;
+  if (userId) {
+    const rows = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, userId));
+    userDuration = rows[0]?.clipDuration ?? envDuration;
+  }
+
+  const keyboard = new InlineKeyboard();
+  CLIP_DURATION_OPTIONS.forEach((d) => {
+    const label = d === userDuration ? `✅ ${d}s` : `${d} detik`;
+    keyboard.text(label, `set_duration_${d}`);
+  });
+
+  await ctx.reply(
+    `⏱ *Konfigurasi Durasi Klip:*\n\n` +
+      `Aktif (env \`CLIP_DURATION\`): *${envDuration} detik*\n` +
+      `Setting akunmu: *${userDuration} detik*\n\n` +
+      `*Cara Ubah (2 metode):*\n\n` +
+      `*1️⃣ Railway Variables (global, semua user):*\n` +
+      `  Set variabel \`CLIP_DURATION\` di Railway Dashboard\n` +
+      `  Contoh: \`CLIP_DURATION=20\`   klip 20 detik\n` +
+      `• Nilai valid: \`${CLIP_DURATION_OPTIONS.join("\`, \`")}\`\n` +
+      `• Tidak perlu redeploy — langsung berlaku\n\n` +
+      `*2️⃣ Per-akun via /settings atau /duration (tombol di bawah):*\n` +
+      `• Tekan tombol durasi yang diinginkan\n` +
+      `• Berlaku untuk akun Telegram kamu saja\n\n` +
+      `📋 *Pilihan durasi tersedia:*\n` +
+      CLIP_DURATION_OPTIONS.map((d) => `• ${d} detik`).join("\n") +
+      `\n\n💡 ENV var \`CLIP_DURATION\` jadi default untuk user baru; setting akun selalu dipakai setelah dipilih.`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: keyboard,
+    }
+  );
+}
 
 // ===== INFO COMMANDS =====
 bot.command("mode", async (ctx) => {
@@ -508,6 +557,30 @@ bot.callbackQuery(/^set_clips_(\d+)$/, async (ctx) => {
   );
 });
 
+// Pilih durasi klip tetap: 15 | 20 | 30 | 40 | 60 detik
+bot.callbackQuery(/^set_duration_(\d+)$/, async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const duration = parseInt(ctx.match[1], 10);
+  if (!isValidClipDuration(duration)) {
+    await ctx.answerCallbackQuery(
+      `❌ Nilai tidak valid (pilih: ${CLIP_DURATION_OPTIONS.join(", ")})`
+    );
+    return;
+  }
+  const { min, max } = getDurationRange(duration);
+  await ctx.answerCallbackQuery(`✅ Durasi klip diset ke ${duration} detik`);
+  await db
+    .update(userSettings)
+    .set({ clipDuration: duration, minDuration: min, maxDuration: max, updatedAt: new Date() })
+    .where(eq(userSettings.telegramUserId, userId));
+  const envDuration = getDefaultClipDuration();
+  await ctx.editMessageText(
+    `✅ Setting akun: Durasi klip *${duration} detik* per Shorts.\n\n` +
+      `💡 Catatan: env var \`CLIP_DURATION=${envDuration}\` dipakai sebagai default untuk user baru.`,
+    { parse_mode: "Markdown" }
+  );
+});
+
 bot.callbackQuery(/^set_privacy_(private|unlisted|public)$/, async (ctx) => {
   const userId = ctx.from.id.toString();
   const privacy = ctx.match[1];
@@ -829,19 +902,28 @@ async function handleSettings(ctx: Context) {
   const zoomCfg = getZoomEffectConfig();
   const ioCfg = getIntroOutroConfig();
   const envMaxClips = getMaxClipsConfig();
+  const envClipDuration = getDefaultClipDuration();
+  const activeDuration = settings.clipDuration || envClipDuration;
 
   const extraInfo =
     `\n\n*Fitur Aktif:*\n` +
     `• Mode 9:16: *${modeLabel}*\n` +
     `• AutoClip: *${envMaxClips} klip* (env \`MAX_CLIPS\`   /clips untuk ubah)\n` +
+    `• Durasi Klip: *${activeDuration} detik* (env \`CLIP_DURATION\`   /duration untuk ubah)\n` +
     `• Watermark: *${wmCfg.enabled ? `"${wmCfg.text}" @ ${wmCfg.position}` : "Nonaktif"}*\n` +
     `• Zoom Effect: *${zoomCfg.enabled ? `${zoomCfg.mode} (${zoomCfg.type})` : "Nonaktif"}*\n` +
     `• Intro: *${ioCfg.introEnabled ? `✅ "${ioCfg.introText}"` : "❌"}* | Outro: *${ioCfg.outroEnabled ? `✅ "${ioCfg.outroText}"` : "❌"}*\n\n` +
-    `_Gunakan /clips /watermark /zoom /introoutro /thumbnail /mode untuk info detail_`;
+    `_Gunakan /clips /duration /watermark /zoom /introoutro /thumbnail /mode untuk info detail_`;
+
+  const durationKeyboardRow = new InlineKeyboard();
+  CLIP_DURATION_OPTIONS.forEach((d) => {
+    durationKeyboardRow.text(d === activeDuration ? `✅ ${d}s` : `${d}s`, `set_duration_${d}`);
+  });
 
   await ctx.reply(
     messages.settings({
       maxClips: settings.maxClips || envMaxClips,
+      clipDuration: activeDuration,
       minDuration: settings.minDuration || 20,
       maxDuration: settings.maxDuration || 40,
       defaultPrivacy: settings.defaultPrivacy || "private",
@@ -855,6 +937,8 @@ async function handleSettings(ctx: Context) {
         .text("3️⃣ Klip", "set_clips_3")
         .text("4️⃣ Klip", "set_clips_4")
         .text("5️⃣ Klip ⭐", "set_clips_5")
+        .row()
+        .append(durationKeyboardRow)
         .row()
         .text("🔒 Private", "set_privacy_private")
         .text("🔗 Unlisted", "set_privacy_unlisted")
@@ -913,11 +997,14 @@ async function ensureUserSettings(userId: string): Promise<void> {
     .where(eq(userSettings.telegramUserId, userId));
   if (!existing.length) {
     const envMaxClips = getMaxClipsConfig();
+    const envClipDuration = getDefaultClipDuration();
+    const { min, max } = getDurationRange(envClipDuration);
     await db.insert(userSettings).values({
       telegramUserId: userId,
       maxClips: envMaxClips, // Use env var as default for new users
-      minDuration: 20,
-      maxDuration: 40,
+      clipDuration: envClipDuration, // Use env var CLIP_DURATION as default for new users
+      minDuration: min,
+      maxDuration: max,
       defaultPrivacy: "private",
       language: "id",
     });

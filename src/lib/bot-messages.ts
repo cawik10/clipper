@@ -9,11 +9,12 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 *Cara Penggunaan:*
 1. Kirim link video (YouTube, Facebook, TikTok, Instagram)
 2. Bot akan menganalisis dan memilih momen terbaik
-3. Video akan dipotong otomatis (20-40 detik)
+3. Video akan dipotong sesuai durasi pilihanmu (15/20/30/40/60 detik, default 30s)
 4. Upload langsung ke YouTube sebagai Draft
 
 *Fitur Unggulan:*
 ✂️ AutoClip — hingga 5 klip per video (mudah diubah)
+⏱ Durasi klip bisa dipilih: 15 / 20 / 30 / 40 / 60 detik
 🖼 Thumbnail auto-generate
 💧 Watermark custom
 🎬 Intro/Outro otomatis
@@ -27,6 +28,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 /status - Cek status
 /history - Riwayat klip
 /clips - Info & cara ubah jumlah klip
+/duration - Info & cara ubah durasi klip (15/20/30/40/60s)
 /watermark - Info watermark config
 /zoom - Info zoom effect config
 /introoutro - Info intro/outro config
@@ -47,7 +49,7 @@ Kirim link video untuk mulai! 🎬`,
 1. *Download* - Video diunduh dari platform
 2. *Transkripsi* - Audio ditranskripsi ke teks
 3. *Analisis AI* - Momen viral diidentifikasi
-4. *Pemotongan* - Video dipotong (20-40 detik)
+4. *Pemotongan* - Video dipotong sesuai durasi pilihan (15/20/30/40/60 detik)
 5. *Zoom Effect* - Auto zoom pada highlight moment ✨
 6. *Watermark* - Watermark custom ditambahkan ✨
 7. *Intro/Outro* - Ditambahkan jika aktif ✨
@@ -59,6 +61,7 @@ Kirim link video untuk mulai! 🎬`,
 
 *Perintah Info Konfigurasi:*
 /clips - Info & cara ubah jumlah klip (default: 5)
+/duration - Info & cara ubah durasi klip (15/20/30/40/60s, default: 30s)
 /mode - Info aspect ratio mode
 /thumbnail - Info thumbnail config
 /watermark - Info watermark config
@@ -66,7 +69,7 @@ Kirim link video untuk mulai! 🎬`,
 /introoutro - Info intro/outro config
 
 *Ketentuan:*
-• Durasi klip: 20-40 detik
+• Durasi klip: pilih salah satu dari 15 / 20 / 30 / 40 / 60 detik (lihat /duration)
 • Format output: Vertikal 9:16 (1080x1920)
 • Maksimal klip: lihat /settings (default 5, ubah via \`MAX_CLIPS\`)
 
@@ -99,6 +102,7 @@ Kirim link video yang valid dari:
 
   settings: (s: {
     maxClips: number;
+    clipDuration: number;
     minDuration: number;
     maxDuration: number;
     defaultPrivacy: string;
@@ -106,8 +110,8 @@ Kirim link video yang valid dari:
   }) =>
     `⚙️ *Pengaturan Bot*\n` +
     `• Maksimal Klip: ${s.maxClips} (ubah dengan tombol di bawah, atau set \`MAX_CLIPS\` di Railway)\n` +
-    `• Durasi Min: ${s.minDuration} detik\n` +
-    `• Durasi Max: ${s.maxDuration} detik\n` +
+    `• Durasi Klip: ${s.clipDuration} detik — pilihan: 15/20/30/40/60 (ubah dengan tombol di bawah, atau /duration)\n` +
+    `• Rentang toleransi AI: ${s.minDuration}-${s.maxDuration} detik\n` +
     `• Privacy Default: ${s.defaultPrivacy}\n` +
     `• YouTube: ${s.youtubeConnected ? "✅ Terhubung" : "❌ Belum terhubung"}`,
 

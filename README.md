@@ -1,6 +1,6 @@
 # 🤖 AutoClip Bot — AI YouTube Shorts Generator
 
-> Bot Telegram cerdas yang secara otomatis memotong video panjang menjadi klip viral 20-40 detik untuk YouTube Shorts, lalu auto-upload ke YouTube Studio sebagai Draft.
+> Bot Telegram cerdas yang secara otomatis memotong video panjang menjadi klip viral untuk YouTube Shorts (durasi klip bisa dipilih: 15/20/30/40/60 detik), lalu auto-upload ke YouTube Studio sebagai Draft.
 
 ![AutoClip Bot](./public/images/hero-bg.jpg)
 
@@ -11,7 +11,7 @@
 | 🎬 **Multi-Platform** | YouTube, Facebook, TikTok, Instagram |
 | 🧠 **AI Analysis** | GPT-4o / Gemini memilih momen viral terbaik |
 | 🎙️ **Transkripsi** | OpenAI Whisper / Groq untuk transkripsi akurat |
-| ✂️ **Auto Clip** | FFmpeg memotong video 20-40 detik, format 9:16 |
+| ✂️ **Auto Clip** | FFmpeg memotong video, durasi bisa dipilih (15/20/30/40/60 detik), format 9:16 |
 | 📤 **Auto Upload** | Upload langsung ke YouTube Studio sebagai Draft |
 | 🔥 **Viral Score** | Rating 1-10 untuk setiap klip |
 | ⚡ **Realtime** | Update status real-time di Telegram |
@@ -82,8 +82,20 @@ curl "https://yourapp.vercel.app/api/webhook/setup?secret=setup-autoclip-2024"
 | `GEMINI_API_KEY` | ⚪ | Gemini AI (alternatif OpenAI) |
 | `GROQ_API_KEY` | ⚪ | Groq Whisper (gratis, cepat) |
 | `NEXT_PUBLIC_APP_URL` | ⚪ | URL aplikasi Anda |
+| `MAX_CLIPS` | ⚪ | Jumlah klip per video, 1-10 (default: `5`) |
+| `CLIP_DURATION` | ⚪ | Durasi klip tetap (detik): `15`, `20`, `30`, `40`, atau `60` (default: `30`) |
 
 > ✅ Required | 🔶 Required for YouTube upload | ⚪ Optional (ada fallback)
+
+## ⏱ Durasi Clip (BARU!)
+
+Sebelumnya durasi klip otomatis dalam rentang 15-40 detik. Sekarang durasi klip dipilih dari daftar tetap agar lebih mudah diprediksi dan diubah:
+
+- Pilihan tersedia: **15, 20, 30, 40, 60 detik** (default: `30`).
+- Konfigurasi terpusat di satu tempat: `src/lib/video-config.ts` → konstanta `CLIP_DURATION_OPTIONS`. Tambah/kurangi nilai di array ini untuk mengubah pilihan yang tersedia di seluruh aplikasi (bot Telegram, dashboard, AI analyzer).
+- **Cara ganti durasi default (semua user)**: set Railway Variable `CLIP_DURATION` (misalnya `CLIP_DURATION=20`). Tidak perlu redeploy.
+- **Cara ganti per-akun (Telegram)**: kirim `/duration` ke bot lalu pilih tombol durasi yang diinginkan, atau buka `/settings` dan tekan tombol durasi di baris "⏱ Durasi Klip".
+- AI tetap diberi sedikit toleransi (±3 sampai ±8 detik tergantung durasi) di sekitar durasi pilihan supaya hasil potongan tetap mengikuti kalimat/momen secara alami, bukan terpotong kaku di tengah kata.
 
 ## 🔧 Google OAuth Setup (untuk YouTube Upload)
 
@@ -138,6 +150,8 @@ Jika upload Drive gagal, job **tidak** gagal — klip tetap dikirim ke Telegram.
 /help     - Panduan lengkap
 /connect  - Hubungkan YouTube Studio
 /settings - Pengaturan bot
+/clips    - Info & cara ubah jumlah klip (1-10, default 5)
+/duration - Info & cara ubah durasi klip (15/20/30/40/60 detik, default 30)
 /status   - Status job terbaru
 /history  - Riwayat semua job
 /cancel   - Batalkan proses
@@ -155,7 +169,7 @@ Jika upload Drive gagal, job **tidak** gagal — klip tetap dikirim ke Telegram.
    - ⬇️ Download video
    - 🎙️ Transkripsi audio
    - 🧠 Analisis momen viral (AI)
-   - ✂️ Potong video 20-40 detik
+   - ✂️ Potong video sesuai durasi pilihan (15/20/30/40/60 detik)
    - 📤 Upload ke YouTube Studio sebagai Draft
 5. Terima klip video + link YouTube Studio di Telegram!
 

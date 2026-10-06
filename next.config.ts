@@ -7,7 +7,6 @@ const nextConfig: NextConfig = {
     // tsc is verified separately; skip in-build check to avoid OOM on constrained sandboxes
     ignoreBuildErrors: true,
   },
-
 };
 
 export default nextConfig;

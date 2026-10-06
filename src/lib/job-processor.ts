@@ -3,7 +3,7 @@ import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
-import { getMaxClipsConfig } from "@/lib/video-config";
+import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
 import {
   uploadClipsToYouTube,
   isTokenExpired,
@@ -30,8 +30,10 @@ export async function processJob(
 
   // Use env var MAX_CLIPS as the source of truth; fall back to user DB setting, then default 5
   const envMaxClips = getMaxClipsConfig();
+  const envClipDuration = getDefaultClipDuration();
   const settings = settingsRows[0] || {
     maxClips: envMaxClips,
+    clipDuration: envClipDuration,
     minDuration: 20,
     maxDuration: 40,
     defaultPrivacy: "private",
@@ -40,7 +42,10 @@ export async function processJob(
   };
 
   // Memprioritaskan setting per-akun dari database pengguna
-const effectiveMaxClips = settings.maxClips || envMaxClips;
+  const effectiveMaxClips = settings.maxClips || envMaxClips;
+  // Durasi klip: pilihan tetap (15/20/30/40/60 detik) — lihat src/lib/video-config.ts
+  const effectiveClipDuration = settings.clipDuration || envClipDuration;
+  const { min: effectiveMinDuration, max: effectiveMaxDuration } = getDurationRange(effectiveClipDuration);
 
   try {
     // === STEP 1: DOWNLOAD ===
@@ -86,7 +91,10 @@ const effectiveMaxClips = settings.maxClips || envMaxClips;
     }
 
     // === STEP 3: ANALYZE ===
-    await update("analyzing", `🧠 Menganalisis momen viral dengan AI... (target: ${effectiveMaxClips} klip)`);
+    await update(
+      "analyzing",
+      `🧠 Menganalisis momen viral dengan AI... (target: ${effectiveMaxClips} klip, durasi ~${effectiveClipDuration}s)`
+    );
 
     let analysisClips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[];
     try {
@@ -99,8 +107,9 @@ const effectiveMaxClips = settings.maxClips || envMaxClips;
           language: settings.language || "id",
         },
         effectiveMaxClips,
-        settings.minDuration || 20,
-        settings.maxDuration || 40
+        effectiveMinDuration,
+        effectiveMaxDuration,
+        effectiveClipDuration
       );
     } catch (err) {
       throw new Error(`Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`);

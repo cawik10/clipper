@@ -12,6 +12,8 @@ import {
   getZoomEffectConfig,
   getZoomEffectLabel,
   getMaxClipsConfig,
+  getDefaultClipDuration,
+  CLIP_DURATION_OPTIONS,
   type AspectRatioMode,
   type ThumbnailMode,
   type WatermarkPosition,
@@ -134,6 +136,7 @@ export default async function HomePage() {
   const ioCfg = getIntroOutroConfig();
   const zoomCfg = getZoomEffectConfig();
   const maxClips = getMaxClipsConfig();
+  const clipDuration = getDefaultClipDuration();
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 px-4 py-10">
@@ -262,6 +265,115 @@ export default async function HomePage() {
                 <div className="text-3xl font-black">{item.n}</div>
                 <div className="text-xs opacity-70">{item.label}</div>
                 <div className="text-[10px] opacity-50 mt-1">{item.badge}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════
+            ⏱ CLIP DURATION SECTION (FITUR BARU!)
+        ══════════════════════════════════════════════════════════ */}
+        <section className="bg-gradient-to-br from-sky-500/10 to-indigo-600/10 border-2 border-sky-500/40 rounded-2xl p-6 space-y-5">
+          <div className="flex items-start justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-sky-400 flex items-center gap-2">
+                ⏱ Durasi Klip
+                <span className="text-xs bg-sky-500/20 border border-sky-500/40 text-sky-300 px-2 py-0.5 rounded-full">
+                  Fitur Baru!
+                </span>
+              </h2>
+              <p className="text-slate-400 text-sm mt-1">
+                Sebelumnya otomatis 15-40 detik — sekarang pilih durasi tetap, mudah diubah lewat Railway Variables atau bot Telegram.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-4xl font-black text-sky-400">{clipDuration}s</span>
+              <span className="text-slate-400 text-sm">durasi<br/>aktif</span>
+            </div>
+          </div>
+
+          {/* Visual selector */}
+          <div className="flex flex-wrap gap-2">
+            {CLIP_DURATION_OPTIONS.map((d) => (
+              <div
+                key={d}
+                className={`min-w-14 h-12 px-3 rounded-xl flex flex-col items-center justify-center text-sm font-bold transition-all
+                  ${d === clipDuration
+                    ? "bg-sky-500 text-white scale-110 shadow-lg shadow-sky-500/40"
+                    : d === 30
+                    ? "bg-sky-500/20 border-2 border-sky-500/50 text-sky-400"
+                    : "bg-slate-800 border border-slate-700 text-slate-400"
+                  }`}
+              >
+                {d}s
+                {d === 30 && <span className="text-[8px] leading-none">default</span>}
+              </div>
+            ))}
+          </div>
+
+          {/* Current config */}
+          <div className="bg-slate-900/60 rounded-xl p-4 space-y-2">
+            <div className="text-sm font-semibold text-slate-300 mb-2">📋 Konfigurasi Aktif</div>
+            <div className="flex items-center gap-2 text-sm font-mono">
+              <span className="text-slate-500">ENV:</span>
+              <span className="text-yellow-300">CLIP_DURATION</span>
+              <span className="text-slate-500">=</span>
+              <span className="text-sky-400 font-bold">{clipDuration}</span>
+              {clipDuration === 30 && <span className="text-xs text-slate-500">(default)</span>}
+            </div>
+          </div>
+
+          {/* How to change */}
+          <div className="bg-sky-950/40 border border-sky-500/20 rounded-xl p-4 space-y-3">
+            <div className="text-sm font-semibold text-sky-300">🔧 Cara Ubah di Railway Variables:</div>
+            <div className="font-mono text-sm bg-slate-900/80 rounded-lg p-3 space-y-1">
+              <div>
+                <span className="text-yellow-300">CLIP_DURATION</span>
+                <span className="text-slate-500"> = </span>
+                <span className="text-sky-400">30</span>
+                <span className="text-slate-600">  ← default</span>
+              </div>
+              <div className="text-slate-500 text-xs mt-2">
+                # Nilai valid: {CLIP_DURATION_OPTIONS.join(", ")}
+              </div>
+              <div className="text-slate-500 text-xs">
+                # Contoh lain:
+              </div>
+              <div>
+                <span className="text-yellow-300">CLIP_DURATION</span>
+                <span className="text-slate-500"> = </span>
+                <span className="text-blue-400">15</span>
+                <span className="text-slate-600">  ← klip pendek & padat</span>
+              </div>
+              <div>
+                <span className="text-yellow-300">CLIP_DURATION</span>
+                <span className="text-slate-500"> = </span>
+                <span className="text-purple-400">60</span>
+                <span className="text-slate-600"> ← klip paling panjang</span>
+              </div>
+            </div>
+            <div className="text-xs text-slate-400 space-y-1">
+              <div>💡 <strong>Tidak perlu redeploy</strong> — perubahan Railway Variables langsung berlaku saat restart.</div>
+              <div>🤖 Telegram command: <code className="text-sky-300">/duration</code> untuk info + ubah per-akun</div>
+              <div>⚙️ Telegram command: <code className="text-slate-300">/settings</code> untuk ubah via tombol (15/20/30/40/60 detik)</div>
+            </div>
+          </div>
+
+          {/* Options table */}
+          <div className="grid grid-cols-5 gap-2 text-center text-sm">
+            {CLIP_DURATION_OPTIONS.map((d) => (
+              <div
+                key={d}
+                className={`border rounded-xl p-3 ${
+                  d === clipDuration
+                    ? "border-yellow-500/60 text-yellow-400"
+                    : d === 30
+                    ? "border-sky-500/60 text-sky-400"
+                    : "border-slate-600 text-slate-400"
+                }`}
+              >
+                <div className="text-2xl font-black">{d}s</div>
+                <div className="text-[10px] opacity-50 mt-1">{d === clipDuration ? "aktif" : d === 30 ? "default" : "pilihan"}</div>
               </div>
             ))}
           </div>
@@ -564,6 +676,7 @@ export default async function HomePage() {
               { cmd: "/connect",    desc: "Hubungkan YouTube Studio",              isNew: false },
               { cmd: "/settings",   desc: "Pengaturan bot (klip, privacy)",        isNew: false },
               { cmd: "/clips",      desc: "Info & cara ubah jumlah klip ← BARU!", isNew: true },
+              { cmd: "/duration",   desc: "Info & cara ubah durasi klip (15/20/30/40/60s) ← BARU!", isNew: true },
               { cmd: "/status",     desc: "Status job terbaru",                    isNew: false },
               { cmd: "/history",    desc: "Riwayat semua job",                     isNew: false },
               { cmd: "/mode",       desc: "Info & ubah ASPECT_RATIO_MODE",         isNew: false },
@@ -622,6 +735,7 @@ export default async function HomePage() {
               { key: "GROQ_API_KEY",    desc: "Groq Whisper (gratis, cepat)" },
               { section: "# === ✂️ AUTOCLIP (DIPERBARUI!) ===" },
               { key: "MAX_CLIPS",       desc: "Jumlah klip per video — 1 s/d 10 (default: 5) ← BARU!", isNew: true },
+              { key: "CLIP_DURATION",   desc: "Durasi klip tetap — 15 | 20 | 30 | 40 | 60 detik (default: 30) ← BARU!", isNew: true },
               { section: "# === ASPECT RATIO ===" },
               { key: "ASPECT_RATIO_MODE", desc: "blur | crop | pad | stretch | none (default: blur)" },
               { section: "# === THUMBNAIL ===" },

@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AutoClip Bot — AI YouTube Shorts Generator",
-  description: "Bot Telegram yang otomatis memotong video panjang menjadi klip viral 20-40 detik untuk YouTube Shorts.",
+  description: "Bot Telegram yang otomatis memotong video panjang menjadi klip viral untuk YouTube Shorts, dengan durasi klip bisa dipilih: 15, 20, 30, 40, atau 60 detik.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

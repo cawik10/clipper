@@ -99,6 +99,77 @@ export function getMaxClipsConfig(): number {
   return 5;
 }
 
+// =====================================================================
+// CLIP DURATION CONFIG (BARU!)
+// =====================================================================
+// Sebelumnya durasi klip otomatis dalam rentang 15–40 detik. Sekarang
+// durasi klip bisa dipilih secara eksplisit dari daftar pilihan tetap.
+//
+// 👉 UNTUK MENAMBAH / MENGURANGI PILIHAN DURASI, CUKUP EDIT ARRAY DI
+//    BAWAH INI (`CLIP_DURATION_OPTIONS`) — seluruh bagian lain dari
+//    aplikasi (bot Telegram, dashboard, AI analyzer) otomatis mengikuti.
+//
+// CLIP_DURATION=30        ← Durasi default (detik) via Railway Variables
+//                            Harus salah satu nilai di CLIP_DURATION_OPTIONS
+// =====================================================================
+
+/** Daftar pilihan durasi klip (detik). Ubah array ini untuk menambah/mengurangi opsi. */
+export const CLIP_DURATION_OPTIONS = [15, 20, 30, 40, 60] as const;
+
+export type ClipDurationOption = (typeof CLIP_DURATION_OPTIONS)[number];
+
+/** Durasi default jika user belum pernah memilih (dan tidak ada env var). */
+export const DEFAULT_CLIP_DURATION: ClipDurationOption = 30;
+
+export function isValidClipDuration(value: number): value is ClipDurationOption {
+  return (CLIP_DURATION_OPTIONS as readonly number[]).includes(value);
+}
+
+/**
+ * Durasi klip default global, dibaca dari env var `CLIP_DURATION`.
+ * Bisa diubah per-akun lewat /settings atau /duration di Telegram
+ * (nilai per-akun disimpan di kolom `clip_duration` tabel user_settings
+ * dan selalu lebih diprioritaskan daripada env var ini).
+ */
+export function getDefaultClipDuration(): ClipDurationOption {
+  const raw = process.env.CLIP_DURATION;
+  if (raw) {
+    const parsed = parseInt(raw.trim(), 10);
+    if (isValidClipDuration(parsed)) return parsed;
+    console.warn(
+      `[video-config] CLIP_DURATION="${raw}" tidak valid (harus salah satu dari ${CLIP_DURATION_OPTIONS.join(
+        ", "
+      )}). Menggunakan ${DEFAULT_CLIP_DURATION}.`
+    );
+  }
+  return DEFAULT_CLIP_DURATION;
+}
+
+/**
+ * Toleransi (detik) di sekitar durasi target agar AI/analisis konten tetap
+ * punya sedikit ruang gerak menyesuaikan kalimat/momen secara alami.
+ */
+export function getDurationToleranceSeconds(targetDuration: number): number {
+  if (targetDuration <= 15) return 3;
+  if (targetDuration <= 20) return 4;
+  if (targetDuration <= 30) return 5;
+  if (targetDuration <= 40) return 6;
+  return 8; // 60s
+}
+
+/** Rentang min-max (detik) yang dipakai AI analyzer berdasarkan durasi target. */
+export function getDurationRange(targetDuration: number): { min: number; max: number } {
+  const tolerance = getDurationToleranceSeconds(targetDuration);
+  return {
+    min: Math.max(5, targetDuration - tolerance),
+    max: targetDuration + tolerance,
+  };
+}
+
+export function getClipDurationLabel(duration: number): string {
+  return `${duration} detik`;
+}
+
 // ===== ASPECT RATIO =====
 export function getAspectRatioMode(): AspectRatioMode {
   const mode = (process.env.ASPECT_RATIO_MODE || "blur").toLowerCase().trim();

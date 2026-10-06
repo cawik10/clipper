@@ -27,7 +27,8 @@ export async function analyzeVideoForClips(
   input: VideoAnalysisInput,
   maxClips: number = getMaxClipsConfig(),
   minDuration: number = 20,
-  maxDuration: number = 40
+  maxDuration: number = 40,
+  targetDuration: number = Math.round((minDuration + maxDuration) / 2)
 ): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
   const openai = getOpenAIClient();
   const transcriptText = input.transcript
@@ -50,12 +51,12 @@ KRITERIA SELEKSI MOMEN VIRAL:
 2. Konten emosional, mengejutkan, lucu, atau informatif
 3. Kalimat yang lengkap dan bermakna
 4. Cocok untuk format vertikal 9:16
-5. Durasi WAJIB antara ${minDuration}-${maxDuration} detik
+5. Durasi target adalah ${targetDuration} detik (WAJIB antara ${minDuration}-${maxDuration} detik)
 6. Hindari momen intro/outro atau iklan
 7. Prioritaskan: puncak emosi, reveal penting, poin mengejutkan
 
 INSTRUKSI:
-- Setiap klip harus memiliki durasi antara ${minDuration} dan ${maxDuration} detik
+- Setiap klip harus sedekat mungkin dengan ${targetDuration} detik, dan tidak boleh di luar rentang ${minDuration}-${maxDuration} detik
 - Pilih momen yang bisa berdiri sendiri tanpa konteks sebelumnya
 - Buat judul YouTube Shorts yang menarik (max 70 karakter)
 - Buat deskripsi singkat (max 150 karakter)
@@ -97,7 +98,7 @@ Output JSON array (tanpa markdown):
         const clips = Array.isArray(parsed) ? parsed : parsed.clips || parsed.moments || [];
         return validateAndFixClips(clips, input.duration, minDuration, maxDuration, maxClips);
       } catch {
-        return fallbackAnalysis(input, maxClips, minDuration, maxDuration);
+        return fallbackAnalysis(input, maxClips, minDuration, maxDuration, targetDuration);
       }
     } catch (err) {
       console.error("OpenAI analysis failed:", err);
@@ -113,7 +114,7 @@ Output JSON array (tanpa markdown):
     }
   }
 
-  return fallbackAnalysis(input, maxClips, minDuration, maxDuration);
+  return fallbackAnalysis(input, maxClips, minDuration, maxDuration, targetDuration);
 }
 
 async function analyzeWithGemini(
@@ -140,10 +141,14 @@ function fallbackAnalysis(
   input: VideoAnalysisInput,
   maxClips: number,
   minDuration: number,
-  maxDuration: number
+  maxDuration: number,
+  preferredDuration?: number
 ): Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[] {
   const { duration, transcript, title } = input;
-  const targetDuration = Math.min(Math.max(30, minDuration), maxDuration);
+  const targetDuration = Math.min(
+    Math.max(preferredDuration ?? Math.round((minDuration + maxDuration) / 2), minDuration),
+    maxDuration
+  );
   const clips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[] = [];
 
   if (transcript.length === 0) {

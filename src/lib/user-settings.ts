@@ -8,7 +8,7 @@
 import { db } from "@/db";
 import { userSettings, UserSettingsRow } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { getMaxClipsConfig } from "@/lib/video-config";
+import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
 
 // ─── GET OR CREATE ────────────────────────────────────────────────────────
 
@@ -24,13 +24,16 @@ export async function getOrCreateUserSettings(
   if (rows.length > 0) return rows[0];
 
   // Create new user settings with env var defaults
+  const defaultDuration = getDefaultClipDuration();
+  const { min, max } = getDurationRange(defaultDuration);
   const newRow = await db
     .insert(userSettings)
     .values({
       telegramUserId: userId,
       maxClips: getMaxClipsConfig(),
-      minDuration: 20,
-      maxDuration: 40,
+      clipDuration: defaultDuration,
+      minDuration: min,
+      maxDuration: max,
       defaultPrivacy: "private",
       language: "id",
     })
