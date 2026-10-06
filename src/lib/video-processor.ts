@@ -54,7 +54,8 @@ export async function downloadVideo(
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
     "--impersonate", "chrome",
-    "--extractor-args", '"youtube:player_client=android,ios"', // Menggunakan klien HP yang lebih tahan blokir tanpa cookies
+    "--extractor-args", '"youtube:player_client=android,ios"',
+    "--cookies", "cookies.txt", // <--- TAMBAHKAN BARIS INI
     "--progress",
     "--newline",
     "-o", `"${outputTemplate}"`,
@@ -72,7 +73,7 @@ export async function downloadVideo(
 
   const filePath = path.join(TMP_DIR, files[0]);
 
-  const infoCmd = `yt-dlp --impersonate chrome --extractor-args "youtube:player_client=android,ios" --dump-json --no-playlist "${url}"`;
+  const infoCmd = `yt-dlp --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=android,ios" --dump-json --no-playlist "${url}"`;
   let title = "Video";
   let duration = 0;
   try {
