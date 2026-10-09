@@ -1,6 +1,6 @@
 FROM node:20-alpine AS base
 
-# Install system dependencies (ffmpeg, python, curl, dan deno untuk bypass n-challenge YouTube)
+# Install system dependencies (ffmpeg, python, curl, deno)
 RUN apk add --no-cache \
     ffmpeg \
     python3 \
@@ -10,8 +10,9 @@ RUN apk add --no-cache \
     ttf-dejavu \
     deno
 
-# Install yt-dlp terbaru
-RUN pip3 install -U --pre "yt-dlp[default]" curl-cffi --break-system-packages || pip3 install -U --pre "yt-dlp[default]" curl-cffi
+# Install yt-dlp versi nightly terbaru untuk bypass proteksi YouTube terbaru
+RUN pip3 install --no-cache-dir -U --pre "yt-dlp[default]" curl-cffi --break-system-packages || true
+RUN pip3 install --no-cache-dir -U --pre --extra-index-url https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/ "yt-dlp[default]" --break-system-packages || true
 
 # Dependencies stage
 FROM base AS deps
