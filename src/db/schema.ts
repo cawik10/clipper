@@ -27,6 +27,28 @@ export const clipJobs = pgTable("clip_jobs", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// =====================================================================
+// REAL-TIME PROGRESS TRACKING (Telegram step-by-step job updates)
+// =====================================================================
+// Tabel tambahan — TIDAK mengubah tabel/kolom yang sudah ada di atas,
+// jadi dashboard web (src/app/page.tsx) tidak terpengaruh sama sekali.
+// Setiap kali status job berubah (download/transkripsi/analisis/clip/
+// upload/selesai/gagal), satu baris dicatat di sini sehingga progres
+// bisa ditampilkan step-by-step secara real-time di Telegram dan bisa
+// dipakai lagi untuk fitur lain di masa depan tanpa migrasi ulang.
+// Lihat src/lib/progress-config.ts untuk konfigurasi tampilan/step yang
+// mudah diubah.
+export const jobProgressEvents = pgTable("job_progress_events", {
+  id: serial("id").primaryKey(),
+  jobId: text("job_id").notNull(),
+  stepId: text("step_id").notNull(), // lihat PROGRESS_STEPS di progress-config.ts
+  stepLabel: text("step_label").notNull(),
+  state: text("state").notNull(), // pending | active | done | error
+  message: text("message"),
+  percent: integer("percent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const youtubeTokens = pgTable("youtube_tokens", {
   id: serial("id").primaryKey(),
   telegramUserId: text("telegram_user_id").notNull().unique(),

@@ -7,6 +7,7 @@ import { detectPlatform } from "@/lib/video-processor";
 import { getAuthUrl } from "@/lib/youtube-oauth";
 import { messages, getPlatformEmoji, formatDuration } from "@/lib/bot-messages";
 import { processJob } from "@/lib/job-processor";
+import { TelegramProgressTracker } from "@/lib/telegram-progress-tracker";
 import {
   getAspectRatioMode,
   getModeLabel,
@@ -722,19 +723,41 @@ async function processJobWithUpdates(
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
-  const statusMsg = await ctx.api.sendMessage(chatId, "⏳ *Memproses...*", {
-    parse_mode: "Markdown",
-  });
-  const statusMessageId = statusMsg.message_id;
+  // ===== REAL-TIME PROGRESS JOB DI TELEGRAM (fitur baru) =====
+  // Mengirim 1 pesan "live checklist" yang terus di-edit sesuai step job
+  // (download → transkripsi → analisis AI → potong klip → upload → selesai)
+  // alih-alih hanya notifikasi "selesai/gagal" di akhir.
+  // Tampilan & daftar step bisa diubah lewat src/lib/progress-config.ts
+  // tanpa menyentuh logika di file ini. Bisa dimatikan lewat env var
+  // TELEGRAM_PROGRESS_ENABLED=false (kembali ke perilaku lama).
+  const jobRows = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  const jobForTitle = jobRows[0];
+  const trackerTitle = jobForTitle
+    ? `${getPlatformEmoji(jobForTitle.platform)} ${jobForTitle.platform.toUpperCase()}`
+    : "Video";
+  const trackerLabel = jobForTitle?.sourceUrl
+    ? `🔗 \`${jobForTitle.sourceUrl.slice(0, 60)}${jobForTitle.sourceUrl.length > 60 ? "..." : ""}\``
+    : undefined;
 
-  const onStatusUpdate = async (_status: string, message: string) => {
-    try {
-      await ctx.api.editMessageText(chatId, statusMessageId, `*${message}*`, {
-        parse_mode: "Markdown",
-      });
-    } catch {
-      /* ignore unchanged message errors */
+  const tracker = new TelegramProgressTracker({
+    api: ctx.api,
+    chatId,
+    jobId,
+    title: trackerTitle,
+    jobLabel: trackerLabel,
+  });
+  await tracker.start();
+
+  const onStatusUpdate = async (
+    status: string,
+    message: string,
+    meta?: { step?: string; percent?: number }
+  ) => {
+    if (status === "error") {
+      await tracker.fail(message);
+      return;
     }
+    await tracker.update(meta?.step ?? status, { detail: message, percent: meta?.percent });
   };
 
   try {
@@ -747,12 +770,7 @@ async function processJobWithUpdates(
       const clips = job.clips as ClipResult[];
       const successClips = clips.filter((c) => c.filePath);
 
-      await ctx.api.editMessageText(
-        chatId,
-        statusMessageId,
-        `✅ *Selesai! ${successClips.length} klip berhasil dibuat!*`,
-        { parse_mode: "Markdown" }
-      );
+      await tracker.finishSuccess(`✅ *${successClips.length} klip berhasil dibuat!* Mengirim ke chat...`);
 
       for (let i = 0; i < successClips.length; i++) {
         const clip = successClips[i];
@@ -838,21 +856,14 @@ async function processJobWithUpdates(
         });
       }, 30000);
     } else if (job.status === "error") {
-      await ctx.api.editMessageText(
-        chatId,
-        statusMessageId,
-        messages.error(job.errorMessage || "Terjadi kesalahan tidak diketahui"),
-        {
-          parse_mode: "Markdown",
-          reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
-        }
-      );
+      await tracker.finishError(job.errorMessage || "Terjadi kesalahan tidak diketahui", {
+        reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
+      });
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await ctx.api
-      .editMessageText(chatId, statusMessageId, messages.error(errorMsg), {
-        parse_mode: "Markdown",
+    await tracker
+      .finishError(errorMsg, {
         reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
       })
       .catch(() => {});

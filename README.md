@@ -97,6 +97,63 @@ Sebelumnya durasi klip otomatis dalam rentang 15-40 detik. Sekarang durasi klip 
 - **Cara ganti per-akun (Telegram)**: kirim `/duration` ke bot lalu pilih tombol durasi yang diinginkan, atau buka `/settings` dan tekan tombol durasi di baris "⏱ Durasi Klip".
 - AI tetap diberi sedikit toleransi (±3 sampai ±8 detik tergantung durasi) di sekitar durasi pilihan supaya hasil potongan tetap mengikuti kalimat/momen secara alami, bukan terpotong kaku di tengah kata.
 
+## ⚡ Real-time Progress Job di Telegram (BARU!)
+
+Sebelumnya user hanya menerima notifikasi **"selesai"** atau **"gagal"** di akhir proses.
+Sekarang setiap job menampilkan **checklist step-by-step** yang di-update (edit pesan)
+secara real-time langsung di chat Telegram:
+
+```
+🎬 Progres Job — 📺 YOUTUBE
+🔗 `https://youtu.be/xxxxxxxx`
+[▓▓▓▓▓▓▓░░░░░] 58%
+
+✅ ⬇️ Download video
+✅ 🎙️ Transkripsi audio
+⏳ 🧠 Analisis momen viral (AI) — 60%
+   ↳ 🎯 3 momen viral ditemukan!
+⬜ ✂️ Potong & edit klip
+⬜ 📤 Upload ke YouTube
+⬜ ☁️ Upload ke Google Drive
+⬜ 🎉 Selesai
+
+⏱ Berjalan 00:42
+```
+
+Fitur ini **murni tambahan** — tidak mengubah tampilan/tabel yang dipakai dashboard web
+(`src/app/page.tsx` & kolom `status` pada tabel `clip_jobs` tetap persis seperti sebelumnya).
+
+### File terkait (dibuat agar mudah diganti tanpa bongkar banyak kode)
+
+| File | Fungsi |
+| ---- | ------ |
+| `src/lib/progress-config.ts` | **Satu-satunya tempat** untuk mengubah daftar step (`PROGRESS_STEPS`), ikon, label, gaya tampilan, dan pengaturan lain. |
+| `src/lib/telegram-progress-tracker.ts` | Class `TelegramProgressTracker` — mengelola edit pesan Telegram, throttle anti rate-limit, dan menyimpan histori step ke database. |
+| `src/lib/job-processor.ts` | Memanggil `update(status, message, { step, percent })` di setiap tahap proses (download/transkripsi/analisis/clip/upload). |
+| `src/lib/telegram-bot.ts` (`processJobWithUpdates`) | Menghubungkan `job-processor` ke `TelegramProgressTracker` saat user memproses video. |
+| `src/db/schema.ts` → tabel `job_progress_events` | Tabel baru (additif) untuk menyimpan histori setiap perubahan step per job. Tidak mengubah tabel yang sudah ada. |
+
+### Cara ubah tampilan / step (tanpa bongkar logic)
+
+- **Tambah/kurangi/ubah step**: edit array `PROGRESS_STEPS` di `src/lib/progress-config.ts`.
+- **Ganti gaya tampilan**: set `TELEGRAM_PROGRESS_STYLE=compact` (1 baris status + progress bar) atau `checklist` (default, daftar lengkap).
+- **Matikan fitur ini** (kembali ke notifikasi status 1 baris seperti sebelumnya): set Railway Variable `TELEGRAM_PROGRESS_ENABLED=false`. Tidak perlu redeploy kode.
+- **Atur kecepatan update** (hindari rate-limit Telegram): `TELEGRAM_PROGRESS_MIN_INTERVAL_MS=1500` (default, dalam milidetik).
+- **Sembunyikan progress bar / elapsed time**: `TELEGRAM_PROGRESS_SHOW_BAR=false`, `TELEGRAM_PROGRESS_SHOW_ELAPSED=false`.
+
+| Variable | Default | Keterangan |
+| -------- | ------- | ---------- |
+| TELEGRAM_PROGRESS_ENABLED | true | Nyalakan/matikan real-time progress checklist |
+| TELEGRAM_PROGRESS_STYLE | checklist | `checklist` (lengkap) atau `compact` (ringkas) |
+| TELEGRAM_PROGRESS_MIN_INTERVAL_MS | 1500 | Jeda minimum antar edit pesan Telegram |
+| TELEGRAM_PROGRESS_SHOW_BAR | true | Tampilkan progress bar keseluruhan |
+| TELEGRAM_PROGRESS_SHOW_ELAPSED | true | Tampilkan waktu berjalan (mm:ss) |
+
+> Catatan deploy di Railway: tabel baru `job_progress_events` **dibuat otomatis saat
+> runtime** (sama seperti tabel `drive_tokens`) — jadi tidak wajib menjalankan
+> `drizzle-kit push` di Railway. Kalau mau tetap menjalankan migrasi manual, perintahnya
+> tetap sama: `npx drizzle-kit push`.
+
 ## 🔧 Google OAuth Setup (untuk YouTube Upload)
 
 1. Buka [Google Cloud Console](https://console.cloud.google.com)

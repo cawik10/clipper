@@ -11,7 +11,15 @@ import {
 } from "@/lib/youtube-uploader";
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
 
-type StatusUpdateFn = (status: string, message: string) => Promise<void>;
+// `meta.step` memetakan update ke step real-time progress Telegram (lihat
+// src/lib/progress-config.ts). Opsional — kalau tidak diisi, `status` dipakai
+// sebagai id step. `meta.percent` dipakai untuk progress bar per-step.
+export type JobStatusMeta = { step?: string; percent?: number };
+export type StatusUpdateFn = (
+  status: string,
+  message: string,
+  meta?: JobStatusMeta
+) => Promise<void>;
 
 export async function processJob(
   jobId: string,
@@ -53,13 +61,16 @@ export async function processJob(
       .update(clipJobs)
       .set({ status: "downloading", updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
-    await update("downloading", "⬇️ Mengunduh video...");
+    await update("downloading", "⬇️ Mengunduh video...", { step: "downloading", percent: 0 });
 
     let downloadResult: { filePath: string; title: string; duration: number };
     try {
       downloadResult = await downloadVideo(job.sourceUrl, jobId, async (progress) => {
         if (progress % 20 === 0) {
-          await update("downloading", `⬇️ Mengunduh video... ${progress.toFixed(0)}%`);
+          await update("downloading", `⬇️ Mengunduh video... ${progress.toFixed(0)}%`, {
+            step: "downloading",
+            percent: progress,
+          });
         }
       });
     } catch (err) {
@@ -81,7 +92,7 @@ export async function processJob(
       .update(clipJobs)
       .set({ status: "analyzing", updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
-    await update("analyzing", "🎙️ Mentranskripsi audio...");
+    await update("analyzing", "🎙️ Mentranskripsi audio...", { step: "transcribing" });
 
     let transcript: { start: number; end: number; text: string }[] = [];
     try {
@@ -93,7 +104,8 @@ export async function processJob(
     // === STEP 3: ANALYZE ===
     await update(
       "analyzing",
-      `🧠 Menganalisis momen viral dengan AI... (target: ${effectiveMaxClips} klip, durasi ~${effectiveClipDuration}s)`
+      `🧠 Menganalisis momen viral dengan AI... (target: ${effectiveMaxClips} klip, durasi ~${effectiveClipDuration}s)`,
+      { step: "analyzing" }
     );
 
     let analysisClips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[];
@@ -119,7 +131,10 @@ export async function processJob(
       throw new Error("Tidak ada momen yang cocok ditemukan untuk dijadikan Shorts");
     }
 
-    await update("analyzing", `🎯 ${analysisClips.length} momen viral ditemukan!`);
+    await update("analyzing", `🎯 ${analysisClips.length} momen viral ditemukan!`, {
+      step: "analyzing",
+      percent: 100,
+    });
 
     // === STEP 4: CLIP + ZOOM + WATERMARK + INTRO/OUTRO + THUMBNAIL ===
     await db
@@ -135,14 +150,18 @@ export async function processJob(
       async (clipIndex, total) => {
         await update(
           "clipping",
-          `✂️ Memproses klip ${clipIndex + 1}/${total}... (Zoom + Watermark + Intro/Outro)`
+          `✂️ Memproses klip ${clipIndex + 1}/${total}... (Zoom + Watermark + Intro/Outro)`,
+          { step: "clipping", percent: Math.round(((clipIndex + 1) / total) * 100) }
         );
       }
     );
 
     const thumbnailCount = processedClips.filter((c) => c.thumbnailPath).length;
     if (thumbnailCount > 0) {
-      await update("clipping", `🖼 ${thumbnailCount} thumbnail berhasil di-generate!`);
+      await update("clipping", `🖼 ${thumbnailCount} thumbnail berhasil di-generate!`, {
+        step: "clipping",
+        percent: 100,
+      });
     }
 
     const successfulClips = processedClips.filter((c) => c.filePath);
@@ -182,7 +201,10 @@ export async function processJob(
         }
       }
 
-      await update("uploading", "📤 Mengupload ke YouTube Studio sebagai Draft...");
+      await update("uploading", "📤 Mengupload ke YouTube Studio sebagai Draft...", {
+        step: "uploading_youtube",
+        percent: 0,
+      });
 
       const uploadResults = await uploadClipsToYouTube(
         successfulClips,
@@ -190,10 +212,17 @@ export async function processJob(
         refreshToken,
         (settings.defaultPrivacy as "private" | "unlisted" | "public") || "private",
         async (clipIndex, result, error) => {
+          const percent = Math.round(((clipIndex + 1) / successfulClips.length) * 100);
           if (result) {
-            await update("uploading", `✅ Klip ${clipIndex + 1} berhasil diupload!\n🔗 ${result.videoUrl}`);
+            await update("uploading", `✅ Klip ${clipIndex + 1} berhasil diupload!\n🔗 ${result.videoUrl}`, {
+              step: "uploading_youtube",
+              percent,
+            });
           } else {
-            await update("uploading", `⚠️ Klip ${clipIndex + 1} gagal: ${error}`);
+            await update("uploading", `⚠️ Klip ${clipIndex + 1} gagal: ${error}`, {
+              step: "uploading_youtube",
+              percent,
+            });
           }
         }
       );
@@ -218,10 +247,17 @@ export async function processJob(
         videoTitle: downloadResult.title,
         clips: successfulClips,
         onProgress: async (clipIndex, total, result, error) => {
+          const percent = Math.round(((clipIndex + 1) / total) * 100);
           if (result) {
-            await update("uploading", `☁️ Klip ${clipIndex + 1}/${total} masuk Google Drive`);
+            await update("uploading", `☁️ Klip ${clipIndex + 1}/${total} masuk Google Drive`, {
+              step: "uploading_drive",
+              percent,
+            });
           } else {
-            await update("uploading", `⚠️ Drive klip ${clipIndex + 1} gagal: ${error}`);
+            await update("uploading", `⚠️ Drive klip ${clipIndex + 1} gagal: ${error}`, {
+              step: "uploading_drive",
+              percent,
+            });
           }
         },
       });
@@ -237,12 +273,16 @@ export async function processJob(
           await update(
             "uploading",
             `☁️ ${okCount}/${successfulClips.length} klip tersimpan di Google Drive` +
-              (driveSummary.folderName ? ` (📁 ${driveSummary.folderName})` : "")
+              (driveSummary.folderName ? ` (📁 ${driveSummary.folderName})` : ""),
+            { step: "uploading_drive", percent: 100 }
           );
         }
-        if (driveSummary.warning) await update("uploading", `⚠️ ${driveSummary.warning}`);
+        if (driveSummary.warning)
+          await update("uploading", `⚠️ ${driveSummary.warning}`, { step: "uploading_drive" });
         if (driveSummary.error && okCount === 0) {
-          await update("uploading", `⚠️ Upload Google Drive gagal: ${driveSummary.error}`);
+          await update("uploading", `⚠️ Upload Google Drive gagal: ${driveSummary.error}`, {
+            step: "uploading_drive",
+          });
         }
       }
     } catch (err) {
@@ -268,7 +308,7 @@ export async function processJob(
       .update(clipJobs)
       .set({ status: "error", errorMessage: errorMsg, updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
-    await update("error", `❌ ${errorMsg}`);
+    await update("error", `❌ ${errorMsg}`, { step: "error" });
     throw err;
   }
 }
