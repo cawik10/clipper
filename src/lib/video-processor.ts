@@ -53,8 +53,8 @@ export async function downloadVideo(
       "--no-playlist",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--impersonate", "chrome", // <--- WAJIB ADA karena kita pakai cookies dari browser
-      "--js-runtimes", "node",
+      "--impersonate", "chrome",
+      "--js-runtimes", "deno", // <--- Ubah dari node menjadi deno
       "--cookies", "cookies.txt",
       "--extractor-args", '"youtube:player_client=web,tv"',
       "--progress",
