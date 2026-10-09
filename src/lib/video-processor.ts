@@ -54,7 +54,7 @@ export async function downloadVideo(
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
       "--js-runtimes", "node",
-      "--extractor-args", '"youtube:player_client=tv,web"', // <--- Tambahkan fallback client TV
+      "--extractor-args", '"youtube:player_client=default,web_embedded"', // <--- Kunci penyelesaiannya di sini
       "--cookies", "cookies.txt",
       "--progress",
       "--newline",
