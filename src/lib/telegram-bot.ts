@@ -694,25 +694,28 @@ async function handleVideoUrl(ctx: Context, url: string) {
 
 bot.callbackQuery(/^process_v_(.+)$/, async (ctx) => {
   const jobId = ctx.match[1];
-  await ctx.answerCallbackQuery("🚀 Memproses video...");
-  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
-  await processJobWithUpdates(ctx, jobId, true);
+  await ctx.answerCallbackQuery("  Memproses video...");
+  await ctx.editMessageText("  Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
+  // Hapus await, biarkan berjalan di background
+  processJobWithUpdates(ctx, jobId, true).catch(console.error);
 });
 
 bot.callbackQuery(/^process_o_(.+)$/, async (ctx) => {
   const jobId = ctx.match[1];
-  await ctx.answerCallbackQuery("🚀 Memproses video...");
-  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
-  await processJobWithUpdates(ctx, jobId, false);
+  await ctx.answerCallbackQuery("  Memproses video...");
+  await ctx.editMessageText("  Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
+  // Hapus await
+  processJobWithUpdates(ctx, jobId, false).catch(console.error);
 });
 
 bot.callbackQuery(/^process_(.+)$/, async (ctx) => {
   const rawMatch = ctx.match[1];
   if (rawMatch.startsWith("v_") || rawMatch.startsWith("o_")) return;
   const jobId = rawMatch;
-  await ctx.answerCallbackQuery("🚀 Memproses video...");
-  await ctx.editMessageText("🚀 Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
-  await processJobWithUpdates(ctx, jobId, true);
+  await ctx.answerCallbackQuery("  Memproses video...");
+  await ctx.editMessageText("  Memulai proses... Mohon tunggu!", { parse_mode: "Markdown" });
+  // Hapus await
+  processJobWithUpdates(ctx, jobId, true).catch(console.error);
 });
 
 async function processJobWithUpdates(
