@@ -53,10 +53,8 @@ export async function downloadVideo(
       "--no-playlist",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--js-runtimes", "node",
-      "--extractor-args", '"youtube:player_client=default,web_embedded"', // <--- Kunci penyelesaiannya di sini
-      "--cookies", "cookies.txt",
-      "--progress",
+      "--extractor-args", '"youtube:player_client=ios,android"', // Paksa pakai API mobile
+      "--progress", // PERHATIKAN: Baris --cookies dihapus
       "--newline",
       "-o", `"${outputTemplate}"`,
       `"${url}"`,
