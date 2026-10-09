@@ -52,7 +52,7 @@ export async function downloadVideo(
       "yt-dlp",
       "--no-playlist",
       "--merge-output-format", "mp4",
-      "-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+      "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
       "--cookies", "cookies.txt",
       "--progress",
       "--newline",
