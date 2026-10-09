@@ -53,6 +53,7 @@ export async function downloadVideo(
       "--no-playlist",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
+      "--js-runtimes", "node", // <--- TAMBAHKAN BARIS INI
       "--cookies", "cookies.txt",
       "--progress",
       "--newline",
