@@ -53,8 +53,10 @@ export async function downloadVideo(
       "--no-playlist",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--extractor-args", '"youtube:player_client=ios,android"', // Paksa pakai API mobile
-      "--progress", // PERHATIKAN: Baris --cookies dihapus
+      "--js-runtimes", "node", // Wajib ada untuk memecahkan JavaScript challenge
+      "--cookies", "cookies.txt", // Wajib karena IP server sudah diblokir untuk anonim
+      "--extractor-args", '"youtube:player_client=tv,web"', // Prioritaskan TV agar minim challenge
+      "--progress",
       "--newline",
       "-o", `"${outputTemplate}"`,
       `"${url}"`,
