@@ -53,11 +53,7 @@ export async function downloadVideo(
       "--no-playlist",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--impersonate", "chrome",
-      "--js-runtimes", "deno",
-      "--remote-components", "ejs:github", // <--- Tambahkan baris ini agar ejs compiler aktif
-      "--cookies", "cookies.txt",
-      "--extractor-args", '"youtube:player_client=web,tv"',
+      "--extractor-args", '"youtube:player_client=mweb"', // <--- Menggunakan Mobile Web Client yang tidak memicu error page reloaded
       "--progress",
       "--newline",
       "-o", `"${outputTemplate}"`,
