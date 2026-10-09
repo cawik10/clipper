@@ -2,28 +2,87 @@
 
 > Bot Telegram cerdas yang secara otomatis memotong video panjang menjadi klip viral untuk YouTube Shorts (durasi klip bisa dipilih: 15/20/30/40/60 detik), lalu auto-upload ke YouTube Studio sebagai Draft.
 
-![AutoClip Bot](./public/images/hero-bg.jpg)
+[![Live Demo](https://img.shields.io/badge/demo-online-brightgreen)](https://cawik-clipper.up.railway.app/)
+[![Deployed on Railway](https://img.shields.io/badge/deployed%20on-Railway-black)](https://cawik-clipper.up.railway.app/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](#-license)
+
+🔗 **Repository:** [github.com/cawik10/clipper](https://github.com/cawik10/clipper)
+🌐 **Live Dashboard:** [cawik-clipper.up.railway.app](https://cawik-clipper.up.railway.app/)
+
+---
+
+## 📖 Tentang Proyek
+
+**AutoClip Bot** adalah aplikasi web + bot Telegram yang mengotomasi proses pembuatan klip pendek (Shorts/Reels/TikTok) dari video panjang. Cukup kirim link video (YouTube, Facebook, TikTok, atau Instagram) ke bot Telegram, dan sistem akan:
+
+1. ⬇️ Mengunduh video menggunakan `yt-dlp`
+2. 🎙️ Mentranskripsi audio menggunakan Whisper (OpenAI/Groq)
+3. 🧠 Menganalisis momen paling viral menggunakan AI (GPT-4o / Gemini)
+4. ✂️ Memotong video menjadi beberapa klip format 9:16 menggunakan FFmpeg
+5. 📤 Mengunggah hasil klip ke YouTube Studio sebagai Draft (opsional ke Google Drive)
+6. 📱 Mengirimkan hasil klip beserta laporan progres real-time langsung ke chat Telegram
+
+Dashboard web menampilkan statistik job, konfigurasi fitur (jumlah klip, durasi klip, watermark, zoom effect, intro/outro, thumbnail, aspect ratio), serta daftar job terbaru yang telah diproses.
+
+---
 
 ## ✨ Fitur Utama
 
 | Fitur | Deskripsi |
-|-------|-----------|
-| 🎬 **Multi-Platform** | YouTube, Facebook, TikTok, Instagram |
-| 🧠 **AI Analysis** | GPT-4o / Gemini memilih momen viral terbaik |
-| 🎙️ **Transkripsi** | OpenAI Whisper / Groq untuk transkripsi akurat |
-| ✂️ **Auto Clip** | FFmpeg memotong video, durasi bisa dipilih (15/20/30/40/60 detik), format 9:16 |
+| --- | --- |
+| 🎬 **Multi-Platform** | Mendukung YouTube, Facebook, TikTok, dan Instagram |
+| 🧠 **AI Analysis** | GPT-4o / Gemini memilih momen paling viral secara otomatis |
+| 🎙️ **Transkripsi** | OpenAI Whisper / Groq untuk transkripsi audio yang akurat |
+| ✂️ **Auto Clip** | FFmpeg memotong video dengan durasi yang bisa dipilih (15/20/30/40/60 detik), format 9:16 |
 | 📤 **Auto Upload** | Upload langsung ke YouTube Studio sebagai Draft |
-| 🔥 **Viral Score** | Rating 1-10 untuk setiap klip |
-| ⚡ **Realtime** | Update status real-time di Telegram |
-| 🔒 **Privacy** | Draft private by default |
+| ☁️ **Google Drive** | Auto-upload klip & thumbnail ke Google Drive milik user |
+| 💧 **Watermark Custom** | Teks atau logo pada setiap klip, posisi & gaya dapat diatur |
+| 🔍 **Zoom Effect** | Efek zoom otomatis pada momen dengan viral score tinggi |
+| 🎬 **Intro/Outro** | Tambahan intro & outro otomatis di setiap klip |
+| 🖼 **Thumbnail Generator** | Generate thumbnail otomatis dari frame klip |
+| 📐 **Aspect Ratio 9:16** | Mode blur background, center crop, black bars, stretch, atau original |
+| 🔥 **Viral Score** | Rating 1–10 untuk setiap klip hasil analisis AI |
+| ⚡ **Realtime Progress** | Update status step-by-step secara real-time di Telegram |
+| 🔒 **Privacy** | Draft upload bersifat private secara default |
 
-## 🚀 Quick Start
+---
+
+## 🖥️ Live Demo
+
+Dashboard web (statistik job & konfigurasi fitur) dapat diakses di:
+
+👉 **https://cawik-clipper.up.railway.app/**
+
+Dashboard menampilkan:
+- Total job, job selesai, jumlah pengguna, klip & thumbnail yang dibuat
+- Konfigurasi aktif: jumlah klip (`MAX_CLIPS`), durasi klip (`CLIP_DURATION`), watermark, zoom effect, intro/outro, thumbnail, dan aspect ratio
+- Alur proses lengkap dari download hingga upload
+- Daftar perintah bot Telegram
+- Riwayat job terbaru beserta statusnya
+
+---
+
+## 🏗️ Tech Stack
+
+- **Framework:** Next.js 16 (App Router)
+- **Bot SDK:** Grammy.js (Telegram Bot)
+- **Database:** PostgreSQL + Drizzle ORM
+- **Video Download:** yt-dlp
+- **Video Processing:** FFmpeg
+- **AI Analysis:** OpenAI GPT-4o-mini / Google Gemini
+- **Transkripsi:** OpenAI Whisper / Groq Whisper
+- **YouTube & Drive API:** Google APIs (`googleapis`)
+- **Hosting:** Railway (Docker, mendukung FFmpeg & yt-dlp secara native)
+
+---
+
+## 🚀 Quick Start (Local Development)
 
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/yourname/autoclip-bot.git
-cd autoclip-bot
+git clone https://github.com/cawik10/clipper.git
+cd clipper
 npm install
 ```
 
@@ -39,9 +98,6 @@ cp .env.example .env
 ```bash
 # yt-dlp (video downloader)
 pip3 install yt-dlp
-# atau
-curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-  -o /usr/local/bin/yt-dlp && chmod +x /usr/local/bin/yt-dlp
 
 # FFmpeg (video processor)
 # Ubuntu/Debian:
@@ -56,7 +112,7 @@ brew install ffmpeg
 npx drizzle-kit push
 ```
 
-### 5. Run Development
+### 5. Jalankan Development Server
 
 ```bash
 npm run dev
@@ -65,229 +121,127 @@ npm run dev
 ### 6. Setup Telegram Webhook
 
 ```bash
-# Setelah deploy, jalankan:
-curl "https://yourapp.vercel.app/api/webhook/setup?secret=setup-autoclip-2024"
+curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
 ```
 
-## 📋 Environment Variables
+---
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | ✅ | PostgreSQL URL |
-| `TELEGRAM_BOT_TOKEN` | ✅ | Token dari @BotFather |
-| `GOOGLE_CLIENT_ID` | 🔶 | Google OAuth Client ID |
-| `GOOGLE_CLIENT_SECRET` | 🔶 | Google OAuth Client Secret |
-| `GOOGLE_REDIRECT_URI` | 🔶 | `https://yourapp.vercel.app/api/youtube/callback` |
-| `OPENAI_API_KEY` | ⚪ | GPT-4o + Whisper transcription |
-| `GEMINI_API_KEY` | ⚪ | Gemini AI (alternatif OpenAI) |
-| `GROQ_API_KEY` | ⚪ | Groq Whisper (gratis, cepat) |
-| `NEXT_PUBLIC_APP_URL` | ⚪ | URL aplikasi Anda |
-| `MAX_CLIPS` | ⚪ | Jumlah klip per video, 1-10 (default: `5`) |
-| `CLIP_DURATION` | ⚪ | Durasi klip tetap (detik): `15`, `20`, `30`, `40`, atau `60` (default: `30`) |
+## 📋 Environment Variables (Ringkasan)
 
-> ✅ Required | 🔶 Required for YouTube upload | ⚪ Optional (ada fallback)
-
-## ⏱ Durasi Clip (BARU!)
-
-Sebelumnya durasi klip otomatis dalam rentang 15-40 detik. Sekarang durasi klip dipilih dari daftar tetap agar lebih mudah diprediksi dan diubah:
-
-- Pilihan tersedia: **15, 20, 30, 40, 60 detik** (default: `30`).
-- Konfigurasi terpusat di satu tempat: `src/lib/video-config.ts` → konstanta `CLIP_DURATION_OPTIONS`. Tambah/kurangi nilai di array ini untuk mengubah pilihan yang tersedia di seluruh aplikasi (bot Telegram, dashboard, AI analyzer).
-- **Cara ganti durasi default (semua user)**: set Railway Variable `CLIP_DURATION` (misalnya `CLIP_DURATION=20`). Tidak perlu redeploy.
-- **Cara ganti per-akun (Telegram)**: kirim `/duration` ke bot lalu pilih tombol durasi yang diinginkan, atau buka `/settings` dan tekan tombol durasi di baris "⏱ Durasi Klip".
-- AI tetap diberi sedikit toleransi (±3 sampai ±8 detik tergantung durasi) di sekitar durasi pilihan supaya hasil potongan tetap mengikuti kalimat/momen secara alami, bukan terpotong kaku di tengah kata.
-
-## ⚡ Real-time Progress Job di Telegram (BARU!)
-
-Sebelumnya user hanya menerima notifikasi **"selesai"** atau **"gagal"** di akhir proses.
-Sekarang setiap job menampilkan **checklist step-by-step** yang di-update (edit pesan)
-secara real-time langsung di chat Telegram:
-
-```
-🎬 Progres Job — 📺 YOUTUBE
-🔗 `https://youtu.be/xxxxxxxx`
-[▓▓▓▓▓▓▓░░░░░] 58%
-
-✅ ⬇️ Download video
-✅ 🎙️ Transkripsi audio
-⏳ 🧠 Analisis momen viral (AI) — 60%
-   ↳ 🎯 3 momen viral ditemukan!
-⬜ ✂️ Potong & edit klip
-⬜ 📤 Upload ke YouTube
-⬜ ☁️ Upload ke Google Drive
-⬜ 🎉 Selesai
-
-⏱ Berjalan 00:42
-```
-
-Fitur ini **murni tambahan** — tidak mengubah tampilan/tabel yang dipakai dashboard web
-(`src/app/page.tsx` & kolom `status` pada tabel `clip_jobs` tetap persis seperti sebelumnya).
-
-### File terkait (dibuat agar mudah diganti tanpa bongkar banyak kode)
-
-| File | Fungsi |
-| ---- | ------ |
-| `src/lib/progress-config.ts` | **Satu-satunya tempat** untuk mengubah daftar step (`PROGRESS_STEPS`), ikon, label, gaya tampilan, dan pengaturan lain. |
-| `src/lib/telegram-progress-tracker.ts` | Class `TelegramProgressTracker` — mengelola edit pesan Telegram, throttle anti rate-limit, dan menyimpan histori step ke database. |
-| `src/lib/job-processor.ts` | Memanggil `update(status, message, { step, percent })` di setiap tahap proses (download/transkripsi/analisis/clip/upload). |
-| `src/lib/telegram-bot.ts` (`processJobWithUpdates`) | Menghubungkan `job-processor` ke `TelegramProgressTracker` saat user memproses video. |
-| `src/db/schema.ts` → tabel `job_progress_events` | Tabel baru (additif) untuk menyimpan histori setiap perubahan step per job. Tidak mengubah tabel yang sudah ada. |
-
-### Cara ubah tampilan / step (tanpa bongkar logic)
-
-- **Tambah/kurangi/ubah step**: edit array `PROGRESS_STEPS` di `src/lib/progress-config.ts`.
-- **Ganti gaya tampilan**: set `TELEGRAM_PROGRESS_STYLE=compact` (1 baris status + progress bar) atau `checklist` (default, daftar lengkap).
-- **Matikan fitur ini** (kembali ke notifikasi status 1 baris seperti sebelumnya): set Railway Variable `TELEGRAM_PROGRESS_ENABLED=false`. Tidak perlu redeploy kode.
-- **Atur kecepatan update** (hindari rate-limit Telegram): `TELEGRAM_PROGRESS_MIN_INTERVAL_MS=1500` (default, dalam milidetik).
-- **Sembunyikan progress bar / elapsed time**: `TELEGRAM_PROGRESS_SHOW_BAR=false`, `TELEGRAM_PROGRESS_SHOW_ELAPSED=false`.
-
-| Variable | Default | Keterangan |
-| -------- | ------- | ---------- |
-| TELEGRAM_PROGRESS_ENABLED | true | Nyalakan/matikan real-time progress checklist |
-| TELEGRAM_PROGRESS_STYLE | checklist | `checklist` (lengkap) atau `compact` (ringkas) |
-| TELEGRAM_PROGRESS_MIN_INTERVAL_MS | 1500 | Jeda minimum antar edit pesan Telegram |
-| TELEGRAM_PROGRESS_SHOW_BAR | true | Tampilkan progress bar keseluruhan |
-| TELEGRAM_PROGRESS_SHOW_ELAPSED | true | Tampilkan waktu berjalan (mm:ss) |
-
-> Catatan deploy di Railway: tabel baru `job_progress_events` **dibuat otomatis saat
-> runtime** (sama seperti tabel `drive_tokens`) — jadi tidak wajib menjalankan
-> `drizzle-kit push` di Railway. Kalau mau tetap menjalankan migrasi manual, perintahnya
-> tetap sama: `npx drizzle-kit push`.
-
-## 🔧 Google OAuth Setup (untuk YouTube Upload)
-
-1. Buka [Google Cloud Console](https://console.cloud.google.com)
-2. Buat project baru
-3. Enable **YouTube Data API v3**
-4. Buat **OAuth 2.0 Client ID** (Web Application)
-5. Tambahkan redirect URI: `https://yourapp.vercel.app/api/youtube/callback`
-6. Copy Client ID dan Client Secret ke `.env`
-
-## ☁️ Auto-Upload ke Google Drive
-
-Setiap klip yang selesai dibuat otomatis di-upload ke Google Drive milik user (selain dikirim ke Telegram & YouTube).
-
-### Setup (sekali saja)
-1. Di [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services → Library** → aktifkan **Google Drive API** (project yang sama dengan YouTube).
-2. Pakai OAuth Client yang sama (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`). **Tidak perlu redirect URI baru** — callback YouTube (`/api/youtube/callback`) juga menangani Drive. (Opsional: `GOOGLE_DRIVE_REDIRECT_URI=https://app.up.railway.app/api/drive/callback`, lalu tambahkan URI itu di Google Console.)
-3. Kirim `/drive` ke bot → **Hubungkan Google Drive** → login. Selesai.
-
-> Tabel `drive_tokens` dibuat otomatis oleh aplikasi — tidak perlu `drizzle-kit push` di Railway.
-
-### Cara mengganti (tanpa ubah kode)
-| Ingin ganti | Cara |
-| --- | --- |
-| Folder tujuan (per akun) | `/drivefolder https://drive.google.com/drive/folders/XXXX` |
-| Kembali ke folder default | `/drivefolder reset` |
-| Akun Google | `/drive` → **Ganti Akun** (atau `/drivedisconnect` lalu `/drive`) |
-| Nyalakan / matikan | `/driveon` · `/driveoff` (atau tombol di `/drive`) |
-| Folder default global | Railway Variable `GOOGLE_DRIVE_FOLDER_ID` |
-| Matikan fitur total | Railway Variable `GOOGLE_DRIVE_ENABLED=false` |
-
-Prioritas folder: pilihan user (`/drivefolder`) → `GOOGLE_DRIVE_FOLDER_ID` → folder otomatis `GOOGLE_DRIVE_FOLDER_NAME` ("AutoClip Shorts") di My Drive.
-
-### Variable opsional
-| Variable | Default | Keterangan |
+| Variable | Wajib | Deskripsi |
 | --- | --- | --- |
-| `GOOGLE_DRIVE_ENABLED` | `true` | Saklar global |
-| `GOOGLE_DRIVE_FOLDER_ID` | – | ID/link folder default |
-| `GOOGLE_DRIVE_FOLDER_NAME` | `AutoClip Shorts` | Nama folder otomatis |
-| `GOOGLE_DRIVE_SUBFOLDER` | `false` | `true` = buat subfolder per video sumber |
-| `GOOGLE_DRIVE_UPLOAD_THUMBNAIL` | `true` | Ikut upload thumbnail `.jpg` |
-| `GOOGLE_DRIVE_SHARE` | `none` | `anyone` = siapa saja yang punya link bisa melihat |
-| `GOOGLE_DRIVE_SCOPE` | `drive` | `drive` (folder mana saja) / `drive.file` (hanya folder buatan bot) |
-| `GOOGLE_DRIVE_REDIRECT_URI` | = `GOOGLE_REDIRECT_URI` | Redirect URI khusus Drive |
+| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `TELEGRAM_BOT_TOKEN` | ✅ | Token dari @BotFather |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | 🔶 | Untuk upload YouTube & Google Drive |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` / `GROQ_API_KEY` | ⚪ | AI analysis & transkripsi |
+| `MAX_CLIPS` | ⚪ | Jumlah klip per video (1–10, default `5`) |
+| `CLIP_DURATION` | ⚪ | Durasi klip tetap: `15`, `20`, `30`, `40`, atau `60` detik (default `30`) |
+| `WATERMARK_ENABLED` / `WATERMARK_TEXT` / `WATERMARK_POSITION` | ⚪ | Pengaturan watermark klip |
+| `ZOOM_EFFECT_ENABLED` / `ZOOM_EFFECT_MODE` / `ZOOM_EFFECT_TYPE` | ⚪ | Pengaturan efek zoom otomatis |
+| `INTRO_ENABLED` / `OUTRO_ENABLED` | ⚪ | Pengaturan intro & outro otomatis |
+| `THUMBNAIL_ENABLED` / `THUMBNAIL_MODE` | ⚪ | Pengaturan thumbnail otomatis |
+| `ASPECT_RATIO_MODE` | ⚪ | `blur` \| `crop` \| `pad` \| `stretch` \| `none` (default `blur`) |
+| `GOOGLE_DRIVE_ENABLED` / `GOOGLE_DRIVE_FOLDER_ID` | ⚪ | Pengaturan auto-upload Google Drive |
 
-Jika upload Drive gagal, job **tidak** gagal — klip tetap dikirim ke Telegram.
+> ✅ Wajib | 🔶 Wajib untuk fitur upload YouTube/Drive | ⚪ Opsional (ada nilai default)
+>
+> Daftar lengkap environment variables tersedia di file `.env.example` dan pada dashboard aplikasi.
 
-## 🤖 Telegram Bot Commands
+---
+
+## 🤖 Perintah Bot Telegram
 
 ```
-/start    - Menu utama
-/help     - Panduan lengkap
-/connect  - Hubungkan YouTube Studio
-/settings - Pengaturan bot
-/clips    - Info & cara ubah jumlah klip (1-10, default 5)
-/duration - Info & cara ubah durasi klip (15/20/30/40/60 detik, default 30)
-/status   - Status job terbaru
-/history  - Riwayat semua job
-/cancel   - Batalkan proses
-/drive    - Google Drive auto-upload (status, hubungkan, ganti akun)
-/drivefolder <link|reset> - Ganti folder tujuan Drive
-/driveon /driveoff - Nyalakan/matikan auto-upload Drive
+/start            - Menu utama
+/help             - Panduan lengkap
+/connect          - Hubungkan YouTube Studio
+/settings         - Pengaturan bot
+/clips            - Info & ubah jumlah klip (1-10, default 5)
+/duration         - Info & ubah durasi klip (15/20/30/40/60 detik, default 30)
+/status           - Status job terbaru
+/history          - Riwayat semua job
+/mode             - Info & ubah ASPECT_RATIO_MODE
+/thumbnail        - Info & ubah konfigurasi thumbnail
+/watermark        - Info & ubah konfigurasi watermark
+/zoom             - Info & ubah konfigurasi zoom effect
+/introoutro       - Info & ubah konfigurasi intro/outro
+/drive            - Google Drive: status, hubungkan, ganti akun
+/drivefolder      - Ganti folder tujuan Drive (link / reset)
+/driveon /driveoff - Nyalakan / matikan auto-upload Drive
+/cancel           - Batalkan proses
 ```
+
+---
 
 ## 📱 Cara Penggunaan
 
-1. Buka bot di Telegram: `@your_bot`
-2. Kirim `/connect` untuk hubungkan YouTube Studio
+1. Buka bot Telegram milik Anda
+2. Kirim `/connect` untuk menghubungkan akun YouTube Studio
 3. Kirim link video (YouTube/Facebook/TikTok/Instagram)
-4. Bot akan:
-   - ⬇️ Download video
-   - 🎙️ Transkripsi audio
-   - 🧠 Analisis momen viral (AI)
-   - ✂️ Potong video sesuai durasi pilihan (15/20/30/40/60 detik)
-   - 📤 Upload ke YouTube Studio sebagai Draft
-5. Terima klip video + link YouTube Studio di Telegram!
+4. Bot akan otomatis: download → transkripsi → analisis AI → potong klip → upload
+5. Terima klip video beserta link YouTube Studio langsung di Telegram!
 
-## 🌐 Deploy ke Vercel
+---
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourname/autoclip-bot)
+## 🚂 Deployment
 
-```bash
-# Install Vercel CLI
-npm i -g vercel
+Proyek ini sudah **live di Railway**: **https://cawik-clipper.up.railway.app/**
 
-# Login & deploy
-vercel login
-vercel deploy --prod
-```
-
-⚠️ **Catatan:** Vercel Serverless Functions tidak support `ffmpeg` langsung. Untuk video processing penuh:
-- Gunakan **Railway** atau **Render** (support custom buildpacks)
-- Atau deploy ke **VPS** (DigitalOcean, Hetzner, dll)
-
-## 🚂 Deploy ke Railway (Recommended)
-
-Railway mendukung `ffmpeg` dan `yt-dlp` via custom Dockerfile:
+Railway dipilih karena mendukung `ffmpeg` dan `yt-dlp` melalui custom Dockerfile, yang tidak didukung penuh oleh platform serverless seperti Vercel.
 
 ```dockerfile
-FROM node:20-alpine
-RUN apk add --no-cache ffmpeg python3 py3-pip
-RUN pip3 install yt-dlp
+FROM node:20-alpine AS base
+RUN apk add --no-cache ffmpeg python3 py3-pip curl ca-certificates
+RUN pip3 install yt-dlp --break-system-packages || pip3 install yt-dlp
+
+FROM base AS deps
 WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+
+FROM base AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
 COPY . .
-RUN npm ci
 RUN npm run build
+
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+RUN mkdir -p /tmp/autoclip
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 EXPOSE 3000
-CMD ["npm", "start"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:3000/api/health || exit 1
+CMD ["node", "server.js"]
 ```
 
-## 🏗️ Tech Stack
+Setelah deploy, jalankan setup webhook Telegram:
 
-- **Framework:** Next.js 16 (App Router)
-- **Bot SDK:** Grammy.js
-- **Database:** PostgreSQL + Drizzle ORM
-- **Video Download:** yt-dlp
-- **Video Processing:** FFmpeg
-- **AI Analysis:** OpenAI GPT-4o-mini / Google Gemini
-- **Transcription:** OpenAI Whisper / Groq Whisper
-- **YouTube API:** Google APIs (googleapis)
-- **Deploy:** Vercel / Railway / VPS
+```bash
+curl "https://cawik-clipper.up.railway.app/api/webhook/setup?secret=<SETUP_SECRET>"
+```
+
+---
 
 ## 📊 API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
+| Endpoint | Method | Deskripsi |
+| --- | --- | --- |
 | `/api/health` | GET | System health check |
 | `/api/telegram/webhook` | POST | Telegram webhook receiver |
 | `/api/youtube/callback` | GET | Google OAuth callback |
 | `/api/webhook/setup` | GET | Setup Telegram webhook |
 
+---
+
 ## 📝 License
 
-MIT License — Free to use and modify.
+MIT License — Bebas digunakan dan dimodifikasi.
 
 ---
 
-Made with ❤️ using Next.js, Grammy.js, FFmpeg & OpenAI
+Made with ❤️ using Next.js, Grammy.js, FFmpeg & OpenAI.
