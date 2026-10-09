@@ -302,7 +302,9 @@ export async function processJob(
       /* ignore */
     }
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    // Escape karakter khusus agar tidak merusak format Markdown Telegram
+    const rawError = err instanceof Error ? err.message : String(err);
+    const errorMsg = rawError.replace(/([_*`\[\]])/g, "\\$1"); 
     console.error(`Job ${jobId} failed:`, err);
     await db
       .update(clipJobs)

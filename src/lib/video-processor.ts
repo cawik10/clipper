@@ -52,15 +52,13 @@ export async function downloadVideo(
       "yt-dlp",
       "--no-playlist",
       "--merge-output-format", "mp4",
-      "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
-      "--impersonate", "chrome",
-      "--extractor-args", '"youtube:player_client=web"', // <--- UBAH MENJADI WEB
+      "-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
       "--cookies", "cookies.txt",
       "--progress",
-    "--newline",
-    "-o", `"${outputTemplate}"`,
-    `"${url}"`,
-  ].join(" ");
+      "--newline",
+      "-o", `"${outputTemplate}"`,
+      `"${url}"`,
+    ].join(" ");
 
   console.log(`[download] Starting: ${url}`);
 
