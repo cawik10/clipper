@@ -49,14 +49,14 @@ export async function downloadVideo(
   ensureDir(TMP_DIR);
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
   const cmd = [
-    "yt-dlp",
-    "--no-playlist",
-    "--merge-output-format", "mp4",
-    "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
-    "--impersonate", "chrome",
-    "--extractor-args", '"youtube:player_client=android,ios"',
-    "--cookies", "cookies.txt", // <--- TAMBAHKAN BARIS INI
-    "--progress",
+      "yt-dlp",
+      "--no-playlist",
+      "--merge-output-format", "mp4",
+      "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
+      "--impersonate", "chrome",
+      "--extractor-args", '"youtube:player_client=web"', // <--- UBAH MENJADI WEB
+      "--cookies", "cookies.txt",
+      "--progress",
     "--newline",
     "-o", `"${outputTemplate}"`,
     `"${url}"`,
