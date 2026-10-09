@@ -53,7 +53,7 @@ export async function downloadVideo(
       "--no-playlist",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--extractor-args", '"youtube:player_client=mweb"', // <--- Menggunakan Mobile Web Client yang tidak memicu error page reloaded
+      "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"', // Menggunakan kombinasi klien aman
       "--progress",
       "--newline",
       "-o", `"${outputTemplate}"`,
