@@ -53,7 +53,8 @@ export async function downloadVideo(
       "--no-playlist",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"', // Menggunakan kombinasi klien aman
+      "--cookies", "cookies.txt", // <--- WAJIB ditambahkan kembali untuk melewati HTTP 429
+      "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"',
       "--progress",
       "--newline",
       "-o", `"${outputTemplate}"`,
