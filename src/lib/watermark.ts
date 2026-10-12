@@ -90,7 +90,7 @@ async function applyTextWatermark(
   ].join(" ");
 
   console.log(`[watermark] Applying text watermark: "${cfg.text}" @ ${cfg.position}`);
-  await execAsync(cmd, { timeout: 120000 });
+  await execAsync(cmd, { timeout: 600000 });
 
   if (!fs.existsSync(outputPath)) {
     throw new Error("Output file tidak terbuat setelah FFmpeg selesai");
@@ -129,7 +129,7 @@ async function applyImageWatermark(
   ].join(" ");
 
   console.log(`[watermark] Applying image watermark: ${cfg.imagePath} @ ${cfg.position}`);
-  await execAsync(cmd, { timeout: 120000 });
+  await execAsync(cmd, { timeout: 600000 });
 
   if (!fs.existsSync(outputPath)) {
     throw new Error("Output file tidak terbuat setelah FFmpeg selesai (image watermark)");

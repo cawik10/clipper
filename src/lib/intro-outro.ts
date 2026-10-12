@@ -100,7 +100,7 @@ export async function applyIntroOutro(
       `"${outputPath}"`,
     ].join(" ");
 
-    await execAsync(concatCmd, { timeout: 180000 });
+    await execAsync(concatCmd, { timeout: 600000 });
 
     if (!fs.existsSync(outputPath)) {
       throw new Error("Output file tidak terbuat setelah concat");
@@ -171,7 +171,7 @@ async function generateSlateVideo(
     `"${outputPath}"`,
   ].join(" ");
 
-  await execAsync(cmd, { timeout: 60000 });
+  await execAsync(cmd, { timeout: 600000 });
 
   if (!fs.existsSync(outputPath)) throw new Error("Slate video tidak terbuat");
 }
@@ -193,7 +193,7 @@ async function normalizeSegment(inputPath: string, outputPath: string): Promise<
     `"${outputPath}"`,
   ].join(" ");
 
-  await execAsync(cmd, { timeout: 120000 });
+  await execAsync(cmd, { timeout: 600000 });
 
   if (!fs.existsSync(outputPath)) throw new Error(`Normalize gagal: ${outputPath}`);
 }
