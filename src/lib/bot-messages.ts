@@ -19,6 +19,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 💧 Watermark custom
 🎬 Intro/Outro otomatis
 🔍 Zoom effect pada highlight
+🎯 Custom Niche Prompt — arahkan fokus AI Analysis ✨ Baru!
 
 *Perintah:*
 /start - Menu utama
@@ -34,6 +35,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 /introoutro - Info intro/outro config
 /thumbnail - Info thumbnail config
 /mode - Info aspect ratio
+/niche - Atur Custom Niche Prompt untuk AI Analysis ✨ Baru!
 
 Kirim link video untuk mulai! 🎬`,
 
@@ -67,6 +69,7 @@ Kirim link video untuk mulai! 🎬`,
 /watermark - Info watermark config
 /zoom - Info zoom effect config
 /introoutro - Info intro/outro config
+/niche - Atur Custom Niche Prompt (fokus AI Analysis) ✨ Baru!
 
 *Ketentuan:*
 • Durasi klip: pilih salah satu dari 15 / 20 / 30 / 40 / 60 detik (lihat /duration)

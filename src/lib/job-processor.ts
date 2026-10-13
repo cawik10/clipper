@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
 import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
+import { getDefaultNichePrompt } from "@/lib/niche-prompt";
 import {
   uploadClipsToYouTube,
   isTokenExpired,
@@ -47,6 +48,8 @@ export async function processJob(
     defaultPrivacy: "private",
     language: "id",
     youtubeConnected: false,
+    // 🎯 Custom Niche Prompt (BARU!) — fallback ke default global kalau user belum punya setting
+    nichePrompt: getDefaultNichePrompt(),
   };
 
   // Memprioritaskan setting per-akun dari database pengguna
@@ -121,7 +124,9 @@ export async function processJob(
         effectiveMaxClips,
         effectiveMinDuration,
         effectiveMaxDuration,
-        effectiveClipDuration
+        effectiveClipDuration,
+        // 🎯 Custom Niche Prompt (BARU!) — arahan khusus per-akun untuk AI Analysis
+        settings.nichePrompt
       );
     } catch (err) {
       throw new Error(`Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`);

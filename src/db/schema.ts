@@ -94,6 +94,16 @@ export const userSettings = pgTable("user_settings", {
   minDuration: integer("min_duration").default(20),
   maxDuration: integer("max_duration").default(40),
   language: text("language").default("id"),
+  // =====================================================================
+  // 🎯 CUSTOM NICHE PROMPT (BARU!)
+  // =====================================================================
+  // Prompt khusus milik user untuk mengarahkan AI Analysis, misal:
+  // "fokus ke momen lucu" atau "fokus ke insight bisnis".
+  // NULL = pakai DEFAULT_NICHE_PROMPT (env var) atau tanpa arahan khusus.
+  // Diatur via Telegram command /niche atau PATCH /api/settings.
+  // Lihat src/lib/niche-prompt.ts untuk konfigurasi lengkap — mudah diubah
+  // tanpa menyentuh bagian lain dari aplikasi.
+  nichePrompt: text("niche_prompt"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

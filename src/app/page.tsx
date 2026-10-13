@@ -20,8 +20,25 @@ import {
   type ZoomEffectType,
 } from "@/lib/video-config";
 import type { ClipResult } from "@/db/schema";
+// 🎯 Custom Niche Prompt (BARU!) — import terpisah, tidak mengubah import di atas.
+import { getDefaultNichePrompt, NICHE_PRESETS, MAX_NICHE_PROMPT_LENGTH } from "@/lib/niche-prompt";
+import { isNull, not } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
+
+// 🎯 Custom Niche Prompt (BARU!) — statistik ringan, terpisah dari getStats()
+// yang sudah ada supaya tidak mengubah perilaku/bentuk data dashboard lama.
+async function getNicheStats() {
+  try {
+    const rows = await db
+      .select({ nichePrompt: userSettings.nichePrompt })
+      .from(userSettings)
+      .where(not(isNull(userSettings.nichePrompt)));
+    return { usersWithNiche: rows.filter((r) => (r.nichePrompt || "").trim().length > 0).length };
+  } catch {
+    return { usersWithNiche: 0 };
+  }
+}
 
 // ═══════════════════════════════════════════════════════════
 // DATA FETCHING
@@ -137,6 +154,9 @@ export default async function HomePage() {
   const zoomCfg = getZoomEffectConfig();
   const maxClips = getMaxClipsConfig();
   const clipDuration = getDefaultClipDuration();
+  // 🎯 Custom Niche Prompt (BARU!) — data terpisah, tidak mengubah variabel di atas.
+  const nicheStats = await getNicheStats();
+  const defaultNichePrompt = getDefaultNichePrompt();
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 px-4 py-10">
@@ -477,6 +497,80 @@ export default async function HomePage() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════
+            🎯 CUSTOM NICHE PROMPT SECTION (FITUR BARU!)
+            Tidak mengubah section lain — murni tambahan di dashboard.
+        ══════════════════════════════════════════════════════════ */}
+        <section className="bg-gradient-to-br from-fuchsia-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white">🎯 Custom Niche Prompt</h2>
+                <span className="text-[10px] uppercase tracking-wide bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 px-2 py-0.5 rounded-full">
+                  ✨ Fitur Baru!
+                </span>
+              </div>
+              <p className="text-slate-400 text-sm mt-1 max-w-xl">
+                User bisa mengatur prompt khusus untuk mengarahkan AI Analysis saat memilih momen viral —
+                misal <span className="text-slate-300">&quot;fokus ke momen lucu&quot;</span> atau{" "}
+                <span className="text-slate-300">&quot;fokus ke insight bisnis&quot;</span>.
+              </p>
+            </div>
+            <div className="text-right">
+              <span className={`text-xs px-2 py-1 rounded-full border ${defaultNichePrompt ? "bg-green-500/20 border-green-500/40 text-green-400" : "bg-slate-700/40 border-slate-600 text-slate-400"}`}>
+                {defaultNichePrompt ? "✅ Default aktif" : "⚪ Belum ada default global"}
+              </span>
+              <div className="text-xs text-slate-500 mt-1">{nicheStats.usersWithNiche} user sudah atur niche sendiri</div>
+            </div>
+          </div>
+
+          {/* Preset examples */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {NICHE_PRESETS.map((preset) => (
+              <div
+                key={preset.label}
+                className="rounded-xl p-3 text-center text-xs border bg-slate-800 border-slate-700 text-slate-300"
+              >
+                <div className="text-lg">{preset.emoji}</div>
+                <div className="font-medium mt-1">{preset.label}</div>
+                <div className="text-[9px] opacity-60 mt-0.5 line-clamp-2">{preset.prompt}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Current config */}
+          <div className="bg-slate-800/60 rounded-xl p-4">
+            <div className="text-xs text-slate-500 mb-2">📋 Konfigurasi Aktif</div>
+            <div className="font-mono text-xs space-y-1 text-slate-400">
+              <div>
+                <span className="text-yellow-300">DEFAULT_NICHE_PROMPT</span> ={" "}
+                <span className="text-emerald-400">{defaultNichePrompt ? `"${defaultNichePrompt}"` : "(kosong)"}</span>
+                {!defaultNichePrompt && <span className="text-slate-500"> (opsional)</span>}
+              </div>
+              <div>
+                <span className="text-yellow-300">Batas panjang</span> ={" "}
+                <span className="text-emerald-400">{MAX_NICHE_PROMPT_LENGTH} karakter</span>
+              </div>
+            </div>
+          </div>
+
+          {/* How to change */}
+          <div className="bg-slate-800/60 rounded-xl p-4 space-y-2">
+            <div className="text-xs text-slate-500">🔧 Cara Mengatur (mudah diganti kapan saja):</div>
+            <div className="font-mono text-xs space-y-1 text-slate-400">
+              <div><span className="text-blue-300">/niche fokus ke momen lucu</span>  <span className="text-slate-500">← set via Telegram</span></div>
+              <div><span className="text-blue-300">/niche fokus ke insight bisnis</span></div>
+              <div><span className="text-blue-300">/niche reset</span>  <span className="text-slate-500">← kembali ke default</span></div>
+            </div>
+            <div className="text-xs text-slate-500 space-y-1 pt-1">
+              <div>💡 Telegram command: <code className="text-blue-300">/niche</code> untuk info + preset tombol cepat</div>
+              <div>⚙️ Juga tersedia tombol &quot;🎯 Niche Prompt&quot; di menu <code className="text-blue-300">/settings</code></div>
+              <div>🔌 API: <code className="text-blue-300">PATCH /api/settings</code> body <code className="text-blue-300">{"{ telegramUserId, nichePrompt }"}</code></div>
+              <div>🌐 Default global (semua user baru): set <code className="text-blue-300">DEFAULT_NICHE_PROMPT</code> di Railway Variables — tidak perlu redeploy</div>
+            </div>
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════
             INTRO / OUTRO SECTION
         ══════════════════════════════════════════════════════════ */}
         <section className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6 space-y-4">
@@ -684,6 +778,7 @@ export default async function HomePage() {
               { cmd: "/watermark",  desc: "Info & ubah watermark config",          isNew: false },
               { cmd: "/zoom",       desc: "Info & ubah zoom effect config",        isNew: false },
               { cmd: "/introoutro", desc: "Info & ubah intro/outro config",        isNew: false },
+              { cmd: "/niche",      desc: "Atur Custom Niche Prompt untuk AI Analysis ← BARU!", isNew: true },
               { cmd: "/disconnect", desc: "Putuskan koneksi YouTube",              isNew: false },
               { cmd: "/drive",       desc: "Google Drive: status, hubungkan, ganti akun",   isNew: true },
               { cmd: "/drivefolder", desc: "Ganti folder tujuan Drive (link / reset)",      isNew: true },
@@ -736,6 +831,8 @@ export default async function HomePage() {
               { section: "# === ✂️ AUTOCLIP (DIPERBARUI!) ===" },
               { key: "MAX_CLIPS",       desc: "Jumlah klip per video — 1 s/d 10 (default: 5) ← BARU!", isNew: true },
               { key: "CLIP_DURATION",   desc: "Durasi klip tetap — 15 | 20 | 30 | 40 | 60 detik (default: 30) ← BARU!", isNew: true },
+              { section: "# === 🎯 CUSTOM NICHE PROMPT (BARU!) ===" },
+              { key: "DEFAULT_NICHE_PROMPT", desc: "Default niche untuk user baru, mis. 'fokus ke insight bisnis' (opsional) ← BARU!", isNew: true },
               { section: "# === ASPECT RATIO ===" },
               { key: "ASPECT_RATIO_MODE", desc: "blur | crop | pad | stretch | none (default: blur)" },
               { section: "# === THUMBNAIL ===" },

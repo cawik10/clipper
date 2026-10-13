@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { userSettings, UserSettingsRow } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
+import { getDefaultNichePrompt, sanitizeNichePrompt } from "@/lib/niche-prompt";
 
 // ─── GET OR CREATE ────────────────────────────────────────────────────────
 
@@ -36,10 +37,30 @@ export async function getOrCreateUserSettings(
       maxDuration: max,
       defaultPrivacy: "private",
       language: "id",
+      // 🎯 Custom Niche Prompt (BARU!) — user baru mewarisi default global (bisa kosong)
+      nichePrompt: sanitizeNichePrompt(getDefaultNichePrompt()),
     })
     .returning();
 
   return newRow[0];
+}
+
+// ─── 🎯 CUSTOM NICHE PROMPT (BARU!) ─────────────────────────────────────────
+// Helper khusus supaya gampang dipakai ulang dari Telegram bot / API route
+// tanpa perlu tahu detail validasi. Lihat src/lib/niche-prompt.ts untuk
+// aturan sanitasi & preset yang mudah diubah.
+
+/** Set/ubah niche prompt milik satu user. Kirim string kosong/"reset" untuk menghapus. */
+export async function setNichePrompt(userId: string, rawPrompt: string): Promise<string | null> {
+  await getOrCreateUserSettings(userId);
+  const sanitized = sanitizeNichePrompt(rawPrompt);
+  await patchUserSettings(userId, { nichePrompt: sanitized });
+  return sanitized;
+}
+
+/** Hapus niche prompt milik user (kembali memakai default global / tanpa arahan khusus). */
+export async function clearNichePrompt(userId: string): Promise<void> {
+  await patchUserSettings(userId, { nichePrompt: null });
 }
 
 // ─── PATCH ────────────────────────────────────────────────────────────────

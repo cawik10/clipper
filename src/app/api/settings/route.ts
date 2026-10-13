@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { userSettings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getAllUserSettings, patchUserSettings } from "@/lib/user-settings";
+import { sanitizeNichePrompt } from "@/lib/niche-prompt";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,11 @@ export async function PATCH(req: NextRequest) {
 
     if (!telegramUserId) {
       return NextResponse.json({ error: "telegramUserId is required" }, { status: 400 });
+    }
+
+    // 🎯 Custom Niche Prompt (BARU!) — sanitasi & batasi panjang sebelum disimpan
+    if ("nichePrompt" in patch) {
+      patch.nichePrompt = sanitizeNichePrompt(patch.nichePrompt as string | null | undefined);
     }
 
     await patchUserSettings(telegramUserId, patch as Parameters<typeof patchUserSettings>[1]);

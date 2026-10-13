@@ -33,6 +33,8 @@ import {
   disconnectDrive,
   isDriveConfigured,
 } from "@/lib/drive-uploader";
+import { setNichePrompt, clearNichePrompt } from "@/lib/user-settings";
+import { NICHE_PRESETS, getNichePromptLabel, getDefaultNichePrompt } from "@/lib/niche-prompt";
 import fs from "fs";
 
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
@@ -211,6 +213,108 @@ async function handleDuration(ctx: Context) {
     }
   );
 }
+
+// ===== /niche — CUSTOM NICHE PROMPT (BARU!) =====
+// User bisa set prompt khusus untuk mengarahkan AI Analysis, misal:
+//   /niche fokus ke momen lucu
+//   /niche fokus ke insight bisnis
+//   /niche reset        ← kembali ke default
+// Preset cepat & aturan validasi ada di src/lib/niche-prompt.ts — gampang diubah.
+bot.command("niche", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const arg = (ctx.match || "").toString().trim();
+
+  if (!arg) {
+    await sendNicheMenu(ctx);
+    return;
+  }
+
+  if (/^(reset|off|default|hapus|matikan)$/i.test(arg)) {
+    await clearNichePrompt(userId);
+    const fallback = getDefaultNichePrompt();
+    await ctx.reply(
+      `↩️ Niche prompt direset.\n\n` +
+        (fallback
+          ? `AI sekarang memakai default global: *"${fallback}"*`
+          : `AI sekarang memilih momen viral secara umum (tanpa arahan khusus).`),
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+
+  const saved = await setNichePrompt(userId, arg);
+  await ctx.reply(
+    `✅ *Niche Prompt diset!*\n\n` +
+      `AI Analysis sekarang akan diarahkan dengan fokus:\n*"${saved}"*\n\n` +
+      `💡 Berlaku untuk video berikutnya yang kamu kirim. Reset kapan saja dengan \`/niche reset\`.`,
+    { parse_mode: "Markdown" }
+  );
+});
+
+async function sendNicheMenu(ctx: Context) {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const rows = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, userId));
+  const current = rows[0]?.nichePrompt ?? null;
+
+  const keyboard = new InlineKeyboard();
+  NICHE_PRESETS.forEach((preset, i) => {
+    keyboard.text(`${preset.emoji} ${preset.label}`, `niche_preset_${i}`);
+    if (i % 2 === 1) keyboard.row();
+  });
+  keyboard.row().text("↩️ Reset ke Default", "niche_reset");
+
+  await ctx.reply(
+    `🎯 *Custom Niche Prompt*\n\n` +
+      `Arahkan AI Analysis supaya fokus memilih momen sesuai niche kontenmu, ` +
+      `misal "fokus ke momen lucu" atau "fokus ke insight bisnis".\n\n` +
+      `Status saat ini: *${getNichePromptLabel(current)}*\n\n` +
+      `*Cara mengatur:*\n` +
+      `• Pilih salah satu preset di bawah, atau\n` +
+      `• Kirim \`/niche <prompt bebas>\`\n` +
+      `  Contoh: \`/niche fokus ke insight bisnis\`\n` +
+      `• Kembali ke default: \`/niche reset\`\n\n` +
+      `💡 Admin juga bisa set default global untuk semua user via Railway Variables: \`DEFAULT_NICHE_PROMPT\`.`,
+    { parse_mode: "Markdown", reply_markup: keyboard }
+  );
+}
+
+bot.callbackQuery(/^niche_preset_(\d+)$/, async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const preset = NICHE_PRESETS[parseInt(ctx.match[1], 10)];
+  if (!preset) {
+    await ctx.answerCallbackQuery("❌ Preset tidak ditemukan");
+    return;
+  }
+  const saved = await setNichePrompt(userId, preset.prompt);
+  await ctx.answerCallbackQuery(`✅ Niche diset: ${preset.label}`);
+  await ctx.editMessageText(
+    `✅ *Niche Prompt diset ke "${preset.label}"!*\n\n` +
+      `AI Analysis sekarang akan diarahkan dengan fokus:\n*"${saved}"*\n\n` +
+      `💡 Ubah lagi kapan saja lewat /niche.`,
+    { parse_mode: "Markdown" }
+  );
+});
+
+bot.callbackQuery("niche_reset", async (ctx) => {
+  const userId = ctx.from.id.toString();
+  await clearNichePrompt(userId);
+  const fallback = getDefaultNichePrompt();
+  await ctx.answerCallbackQuery("↩️ Niche direset");
+  await ctx.editMessageText(
+    `↩️ Niche prompt direset.\n\n` +
+      (fallback
+        ? `AI sekarang memakai default global: *"${fallback}"*`
+        : `AI sekarang memilih momen viral secara umum (tanpa arahan khusus).`),
+    { parse_mode: "Markdown" }
+  );
+});
+
+bot.callbackQuery("niche_menu", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await sendNicheMenu(ctx);
+});
 
 // ===== INFO COMMANDS =====
 bot.command("mode", async (ctx) => {
@@ -926,8 +1030,9 @@ async function handleSettings(ctx: Context) {
     `• Durasi Klip: *${activeDuration} detik* (env \`CLIP_DURATION\`   /duration untuk ubah)\n` +
     `• Watermark: *${wmCfg.enabled ? `"${wmCfg.text}" @ ${wmCfg.position}` : "Nonaktif"}*\n` +
     `• Zoom Effect: *${zoomCfg.enabled ? `${zoomCfg.mode} (${zoomCfg.type})` : "Nonaktif"}*\n` +
-    `• Intro: *${ioCfg.introEnabled ? `✅ "${ioCfg.introText}"` : "❌"}* | Outro: *${ioCfg.outroEnabled ? `✅ "${ioCfg.outroText}"` : "❌"}*\n\n` +
-    `_Gunakan /clips /duration /watermark /zoom /introoutro /thumbnail /mode untuk info detail_`;
+    `• Intro: *${ioCfg.introEnabled ? `✅ "${ioCfg.introText}"` : "❌"}* | Outro: *${ioCfg.outroEnabled ? `✅ "${ioCfg.outroText}"` : "❌"}*\n` +
+    `• 🎯 Niche Prompt: *${getNichePromptLabel(settings.nichePrompt)}*\n\n` +
+    `_Gunakan /clips /duration /watermark /zoom /introoutro /thumbnail /mode /niche untuk info detail_`;
 
   const durationKeyboardRow = new InlineKeyboard();
   CLIP_DURATION_OPTIONS.forEach((d) => {
@@ -957,6 +1062,8 @@ async function handleSettings(ctx: Context) {
         .text("🔒 Private", "set_privacy_private")
         .text("🔗 Unlisted", "set_privacy_unlisted")
         .text("🌐 Public", "set_privacy_public")
+        .row()
+        .text("🎯 Niche Prompt", "niche_menu")
         .row()
         .text("🔗 Hubungkan YouTube", "connect")
         .text("☁️ Google Drive", "drive_menu"),

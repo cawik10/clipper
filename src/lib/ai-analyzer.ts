@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { ClipResult } from "@/db/schema";
 import { getMaxClipsConfig } from "@/lib/video-config";
+import { buildNicheInstruction } from "@/lib/niche-prompt";
 
 function getOpenAIClient(): OpenAI | null {
   if (process.env.OPENAI_API_KEY) {
@@ -28,12 +29,18 @@ export async function analyzeVideoForClips(
   maxClips: number = getMaxClipsConfig(),
   minDuration: number = 20,
   maxDuration: number = 40,
-  targetDuration: number = Math.round((minDuration + maxDuration) / 2)
+  targetDuration: number = Math.round((minDuration + maxDuration) / 2),
+  // 🎯 Custom Niche Prompt (BARU!) — arahan khusus user, misal "fokus ke momen
+  // lucu" / "fokus ke insight bisnis". Kosong/undefined = pakai DEFAULT_NICHE_PROMPT
+  // (env var) atau tanpa arahan khusus. Lihat src/lib/niche-prompt.ts.
+  nichePrompt?: string | null
 ): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
   const openai = getOpenAIClient();
   const transcriptText = input.transcript
     .map((seg) => `[${formatTime(seg.start)}-${formatTime(seg.end)}] ${seg.text}`)
     .join("\n");
+
+  const nicheInstruction = buildNicheInstruction(nichePrompt);
 
   const prompt = `Kamu adalah ahli konten viral YouTube Shorts. Analisis transkrip video berikut dan temukan ${maxClips} momen terbaik yang berpotensi viral.
 
@@ -42,7 +49,7 @@ INFORMASI VIDEO:
 - Durasi Total: ${formatTime(input.duration)}
 - Platform Sumber: ${input.platform || "YouTube"}
 - Bahasa: ${input.language || "id"}
-
+${nicheInstruction}
 TRANSKRIP (format [MULAI-SELESAI] teks):
 ${transcriptText.slice(0, 8000)}
 
@@ -84,7 +91,9 @@ Output JSON array (tanpa markdown):
         messages: [
           {
             role: "system",
-            content: "Kamu adalah ahli konten digital. Berikan output JSON yang valid.",
+            content: nicheInstruction
+              ? "Kamu adalah ahli konten digital yang mengikuti arahan niche khusus dari user dengan ketat. Berikan output JSON yang valid."
+              : "Kamu adalah ahli konten digital. Berikan output JSON yang valid.",
           },
           { role: "user", content: prompt },
         ],
