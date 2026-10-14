@@ -357,6 +357,21 @@ bot.command("dupfilter", async (ctx) => {
   );
 });
 
+bot.command("jadwal", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const pending = await getPendingScheduledUploadsForUser(userId);
+  if (!pending.length) {
+    await ctx.reply("🗓 Belum ada video yang dijadwalkan.");
+    return;
+  }
+  let msg = "🗓 *Antrean Jadwal Upload Anda:*\n\n";
+  pending.forEach((p, i) => {
+    msg += `${i + 1}. Waktu: ${formatScheduleLabel(new Date(p.scheduledAt))} (Mode: ${p.mode})\n`;
+  });
+  await ctx.reply(msg, { parse_mode: "Markdown" });
+});
+
 // ===== INFO COMMANDS =====
 bot.command("mode", async (ctx) => {
   const currentMode = getAspectRatioMode();
