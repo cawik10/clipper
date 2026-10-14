@@ -1,8 +1,8 @@
-import type { NextConfig } from "next"; 
+import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone", // <--- Tambahkan baris ini
-  
+  output: "standalone",
+
   // grammy, googleapis, form-data, and the Gemini SDK rely on Node-only APIs
   // and should not be bundled for the serverless/edge runtime.
   serverExternalPackages: ["grammy", "@google/generative-ai", "googleapis", "form-data"],

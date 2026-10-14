@@ -6,8 +6,18 @@ import { v4 as uuidv4 } from "uuid";
 import { detectPlatform } from "@/lib/video-processor";
 import { getAuthUrl } from "@/lib/youtube-oauth";
 import { messages, getPlatformEmoji, formatDuration } from "@/lib/bot-messages";
-import { processJob } from "@/lib/job-processor";
+import { processJob, processClipsOnly, publishJobClips } from "@/lib/job-processor";
 import { TelegramProgressTracker } from "@/lib/telegram-progress-tracker";
+// 🗓️ Scheduler / Queue Posting (BARU!) — import terpisah, tidak mengubah import di atas.
+import { isSchedulerEnabled } from "@/lib/scheduler-config";
+import {
+  getOptimalSlots,
+  createScheduledUpload,
+  formatScheduleLabel,
+  parseCustomScheduleInput,
+  getPendingScheduledUploadsForUser,
+  cancelScheduledUpload,
+} from "@/lib/scheduler";
 import {
   getAspectRatioMode,
   getModeLabel,

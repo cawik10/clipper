@@ -26,6 +26,15 @@ import { isNull, not } from "drizzle-orm";
 // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getDuplicateFilterConfig, getDuplicateFilterScopeLabel } from "@/lib/duplicate-filter-config";
 import { getDuplicateFilterStats } from "@/lib/duplicate-filter";
+// 🗓️ Scheduler / Queue Posting (BARU!) — import terpisah, tidak mengubah import di atas.
+import {
+  isSchedulerEnabled,
+  getSchedulerPollIntervalMs,
+  getSchedulerTimezone,
+  getSchedulerMaxDaysAhead,
+  getSchedulerSlotCount,
+  NICHE_OPTIMAL_HOURS,
+} from "@/lib/scheduler-config";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +45,43 @@ async function getDupFilterData() {
   const config = getDuplicateFilterConfig();
   const stats = await getDuplicateFilterStats();
   return { config, stats };
+}
+
+// 🗓️ Scheduler / Queue Posting (BARU!) — statistik & konfigurasi ringan,
+// terpisah dari getStats() yang sudah ada supaya tidak mengubah perilaku/
+// bentuk data dashboard lama sama sekali. Kalau tabel `scheduled_uploads`
+// belum dibuat (belum sempat drizzle-kit push / belum pernah dipakai),
+// fallback ke angka 0 tanpa membuat dashboard error.
+async function getSchedulerData() {
+  const config = {
+    enabled: isSchedulerEnabled(),
+    pollIntervalMs: getSchedulerPollIntervalMs(),
+    timezone: getSchedulerTimezone(),
+    maxDaysAhead: getSchedulerMaxDaysAhead(),
+    slotCount: getSchedulerSlotCount(),
+  };
+  try {
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'pending')  AS pending,
+        COUNT(*) FILTER (WHERE status = 'done')     AS done,
+        COUNT(*) FILTER (WHERE status = 'error')    AS error,
+        COUNT(*) FILTER (WHERE mode = 'ai_recommended') AS ai_recommended
+      FROM scheduled_uploads
+    `);
+    const row = (result as unknown as Array<Record<string, string>>)[0] || {};
+    return {
+      config,
+      stats: {
+        pending: Number(row.pending ?? 0),
+        done: Number(row.done ?? 0),
+        error: Number(row.error ?? 0),
+        aiRecommended: Number(row.ai_recommended ?? 0),
+      },
+    };
+  } catch {
+    return { config, stats: { pending: 0, done: 0, error: 0, aiRecommended: 0 } };
+  }
 }
 
 // 🎯 Custom Niche Prompt (BARU!) — statistik ringan, terpisah dari getStats()
@@ -141,6 +187,10 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   downloading: { label: "⬇️ Download",    color: "text-blue-400" },
   analyzing:   { label: "🧠 Analisis",    color: "text-yellow-400" },
   clipping:    { label: "✂️ Clipping",    color: "text-orange-400" },
+  // 🗓️ Scheduler / Queue Posting (BARU!) — status tambahan, tidak mengubah
+  // status lain manapun di atas. Klip sudah siap, menunggu user memilih
+  // "post sekarang" / "jadwalkan" via Telegram.
+  clips_ready: { label: "🗓 Siap Jadwal",  color: "text-cyan-400" },
   uploading:   { label: "📤 Upload",      color: "text-purple-400" },
   done:        { label: "✅ Selesai",     color: "text-green-400" },
   error:       { label: "❌ Error",       color: "text-red-400" },
@@ -170,6 +220,7 @@ export default async function HomePage() {
   const nicheStats = await getNicheStats();
   // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — data terpisah, tidak mengubah variabel di atas.
   const dupFilter = await getDupFilterData();
+  const schedulerData = await getSchedulerData();
   const defaultNichePrompt = getDefaultNichePrompt();
 
   return (
@@ -689,6 +740,82 @@ export default async function HomePage() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════
+            🗓️ SCHEDULER / QUEUE POSTING SECTION (BARU!)
+            Section tambahan murni — tidak mengubah section lain di atas.
+        ══════════════════════════════════════════════════════════ */}
+        <section className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white">🗓️ Scheduler / Queue Posting <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-1.5 rounded-full align-middle">✨ Baru</span></h2>
+            <span className={`text-xs px-2 py-1 rounded-full border ${schedulerData.config.enabled ? "bg-green-500/20 border-green-500/40 text-green-400" : "bg-slate-700/40 border-slate-600 text-slate-400"}`}>
+              {schedulerData.config.enabled ? "✅ Aktif" : "❌ Nonaktif"}
+            </span>
+          </div>
+
+          <p className="text-sm text-slate-400">
+            Sebelum upload ke YouTube, bot Telegram sekarang menanyakan: upload{" "}
+            <span className="text-white">sekarang</span>, dijadwalkan sesuai{" "}
+            <span className="text-white">rekomendasi AI berdasarkan niche</span>, atau{" "}
+            <span className="text-white">jam custom</span> pilihan user. Klip yang dijadwalkan otomatis
+            di-upload oleh background worker tepat pada jamnya, lalu hasilnya dikirim ke Telegram.
+          </p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-cyan-400">{schedulerData.stats.pending}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Menunggu di antrean</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-green-400">{schedulerData.stats.done}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Berhasil dipublish</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-red-400">{schedulerData.stats.error}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Gagal</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-fuchsia-400">{schedulerData.stats.aiRecommended}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Pakai Rekomendasi AI</div>
+            </div>
+          </div>
+
+          <div className="font-mono text-xs text-slate-400 bg-slate-800/60 rounded-xl p-3 space-y-1">
+            <div><span className="text-yellow-300">SCHEDULER_ENABLED</span> = <span className="text-emerald-400">{String(schedulerData.config.enabled)}</span></div>
+            <div><span className="text-yellow-300">SCHEDULER_TIMEZONE</span> = <span className="text-emerald-400">{schedulerData.config.timezone}</span></div>
+            <div><span className="text-yellow-300">SCHEDULER_POLL_INTERVAL_MS</span> = <span className="text-emerald-400">{schedulerData.config.pollIntervalMs}</span> <span className="text-slate-600">(worker cek antrean tiap segini ms)</span></div>
+            <div><span className="text-yellow-300">SCHEDULER_MAX_DAYS_AHEAD</span> = <span className="text-emerald-400">{schedulerData.config.maxDaysAhead}</span> hari</div>
+            <div><span className="text-yellow-300">SCHEDULER_SLOT_COUNT</span> = <span className="text-emerald-400">{schedulerData.config.slotCount}</span> pilihan jam rekomendasi</div>
+          </div>
+
+          <div className="bg-slate-800/60 rounded-xl p-4 space-y-2">
+            <div className="text-xs text-slate-500">🤖 Jam optimal (fallback) per niche — lihat <code className="text-blue-300">src/lib/scheduler-config.ts</code> untuk menambah/mengubah:</div>
+            <div className="flex flex-wrap gap-2">
+              {NICHE_OPTIMAL_HOURS.map((preset) => (
+                <span key={preset.label} className="text-[10px] bg-slate-900/80 border border-slate-700 rounded-full px-2 py-1 text-slate-400">
+                  {preset.label}: <span className="text-cyan-400">{preset.hours.join("/")}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-slate-800/60 rounded-xl p-4 space-y-1">
+            <div className="text-xs text-slate-500">🔧 Cara Ubah (Railway Variables — mudah diganti, tanpa redeploy):</div>
+            <div className="font-mono text-xs space-y-1 text-slate-400">
+              <div><span className="text-blue-300">SCHEDULER_ENABLED</span> = <span className="text-slate-500">true | false (default: true)</span></div>
+              <div><span className="text-blue-300">SCHEDULER_TIMEZONE</span> = <span className="text-slate-500">mis. Asia/Jakarta (default)</span></div>
+              <div><span className="text-blue-300">SCHEDULER_POLL_INTERVAL_MS</span> = <span className="text-slate-500">10000 - 3600000 (default: 60000)</span></div>
+              <div><span className="text-blue-300">SCHEDULER_MAX_DAYS_AHEAD</span> = <span className="text-slate-500">1 - 30 (default: 7)</span></div>
+              <div><span className="text-blue-300">SCHEDULER_SLOT_COUNT</span> = <span className="text-slate-500">1 - 6 (default: 3)</span></div>
+            </div>
+            <div className="text-xs text-slate-500 space-y-1 pt-1">
+              <div>🤖 Telegram command: <code className="text-blue-300">/jadwal</code> untuk melihat/batalkan antrean jadwal milikmu</div>
+              <div>🧠 Rekomendasi AI: <code className="text-blue-300">src/lib/scheduler.ts</code> (OpenAI/Gemini bila API key tersedia, fallback heuristik niche)</div>
+              <div>⚙️ Worker publish otomatis: <code className="text-blue-300">src/lib/scheduler-worker.ts</code> — berjalan di proses server yang sama (cocok untuk Railway)</div>
+              <div>🌐 Trigger manual/cron eksternal: <code className="text-blue-300">GET /api/scheduler/run?secret=SETUP_SECRET</code></div>
+            </div>
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════
             INTRO / OUTRO SECTION
         ══════════════════════════════════════════════════════════ */}
         <section className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6 space-y-4">
@@ -861,6 +988,8 @@ export default async function HomePage() {
               { arrow: true },
               { step: "9", icon: "🖼", title: "Thumbnail",  desc: `${thumbConfig.enabled ? thumbConfig.mode : "skip"}` },
               { arrow: true },
+              { step: "9b", icon: "🗓", title: "Jadwal Upload", desc: schedulerData.config.enabled ? "now/AI/custom" : "nonaktif" },
+              { arrow: true },
               { step: "10", icon: "📤", title: "Upload YT", desc: "Draft" },
               { arrow: true },
               { step: "11", icon: "📱", title: "Kirim TG",  desc: "Telegram" },
@@ -906,6 +1035,7 @@ export default async function HomePage() {
               { cmd: "/driveon",     desc: "Nyalakan auto-upload ke Google Drive",          isNew: true },
               { cmd: "/driveoff",    desc: "Matikan auto-upload ke Google Drive",           isNew: true },
               { cmd: "/drivedisconnect", desc: "Putuskan akun Google Drive",                isNew: true },
+              { cmd: "/jadwal",      desc: "Lihat & batalkan antrean jadwal upload YouTube ← BARU!", isNew: true },
             ].map((item) => (
               <div key={item.cmd} className="flex items-start gap-2 bg-slate-800/60 rounded-lg px-3 py-2 text-sm">
                 <code className={`font-mono font-bold shrink-0 ${item.isNew ? "text-emerald-400" : "text-blue-400"}`}>
@@ -960,6 +1090,12 @@ export default async function HomePage() {
               { key: "DUPLICATE_FILTER_TEXT_THRESHOLD", desc: "0.0-1.0 kemiripan teks judul/deskripsi (default: 0.72) ← BARU!", isNew: true },
               { key: "DUPLICATE_FILTER_TIME_OVERLAP_THRESHOLD", desc: "0.0-1.0 overlap rentang waktu (default: 0.6) ← BARU!", isNew: true },
               { key: "DUPLICATE_FILTER_LOOKBACK_DAYS", desc: "jumlah hari, 0 = tanpa batas (default: 30) ← BARU!", isNew: true },
+              { section: "# === 🗓️ SCHEDULER / QUEUE POSTING (BARU!) ===" },
+              { key: "SCHEDULER_ENABLED", desc: "true | false — saklar utama fitur (default: true) ← BARU!", isNew: true },
+              { key: "SCHEDULER_TIMEZONE", desc: "timezone untuk jam rekomendasi/custom (default: Asia/Jakarta) ← BARU!", isNew: true },
+              { key: "SCHEDULER_POLL_INTERVAL_MS", desc: "interval cek antrean worker, ms (default: 60000) ← BARU!", isNew: true },
+              { key: "SCHEDULER_MAX_DAYS_AHEAD", desc: "batas hari ke depan untuk jadwal (default: 7) ← BARU!", isNew: true },
+              { key: "SCHEDULER_SLOT_COUNT", desc: "jumlah pilihan jam rekomendasi AI (default: 3) ← BARU!", isNew: true },
               { section: "# === ASPECT RATIO ===" },
               { key: "ASPECT_RATIO_MODE", desc: "blur | crop | pad | stretch | none (default: blur)" },
               { section: "# === THUMBNAIL ===" },

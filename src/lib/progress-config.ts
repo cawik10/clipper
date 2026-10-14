@@ -56,6 +56,10 @@ export const PROGRESS_STEPS: ProgressStepDefinition[] = [
   { id: "transcribing", label: "Transkripsi audio", icon: "🎙️" },
   { id: "analyzing", label: "Analisis momen viral (AI)", icon: "🧠" },
   { id: "clipping", label: "Potong & edit klip", icon: "✂️" },
+  // 🗓️ Scheduler / Queue Posting (BARU!) — step tambahan: sebelum upload,
+  // user ditanya mau post sekarang / dijadwalkan (rekomendasi AI) / jam
+  // custom. Lihat src/lib/scheduler.ts & src/lib/scheduler-config.ts.
+  { id: "scheduling", label: "Pilih jadwal upload", icon: "🗓️" },
   { id: "uploading_youtube", label: "Upload ke YouTube", icon: "📤" },
   { id: "uploading_drive", label: "Upload ke Google Drive", icon: "☁️" },
   { id: "done", label: "Selesai", icon: "🎉" },
