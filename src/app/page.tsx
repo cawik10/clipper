@@ -23,8 +23,20 @@ import type { ClipResult } from "@/db/schema";
 // 🎯 Custom Niche Prompt (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getDefaultNichePrompt, NICHE_PRESETS, MAX_NICHE_PROMPT_LENGTH } from "@/lib/niche-prompt";
 import { isNull, not } from "drizzle-orm";
+// 🧹 Duplicate/Repetitive Clip Filter (BARU!) — import terpisah, tidak mengubah import di atas.
+import { getDuplicateFilterConfig, getDuplicateFilterScopeLabel } from "@/lib/duplicate-filter-config";
+import { getDuplicateFilterStats } from "@/lib/duplicate-filter";
 
 export const dynamic = "force-dynamic";
+
+// 🧹 Duplicate/Repetitive Clip Filter (BARU!) — statistik & konfigurasi ringan,
+// terpisah dari getStats() yang sudah ada supaya tidak mengubah perilaku/bentuk
+// data dashboard lama sama sekali.
+async function getDupFilterData() {
+  const config = getDuplicateFilterConfig();
+  const stats = await getDuplicateFilterStats();
+  return { config, stats };
+}
 
 // 🎯 Custom Niche Prompt (BARU!) — statistik ringan, terpisah dari getStats()
 // yang sudah ada supaya tidak mengubah perilaku/bentuk data dashboard lama.
@@ -156,6 +168,8 @@ export default async function HomePage() {
   const clipDuration = getDefaultClipDuration();
   // 🎯 Custom Niche Prompt (BARU!) — data terpisah, tidak mengubah variabel di atas.
   const nicheStats = await getNicheStats();
+  // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — data terpisah, tidak mengubah variabel di atas.
+  const dupFilter = await getDupFilterData();
   const defaultNichePrompt = getDefaultNichePrompt();
 
   return (
@@ -571,6 +585,110 @@ export default async function HomePage() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════
+            🧹 DUPLICATE / REPETITIVE CLIP FILTER SECTION (BARU!)
+            Fitur tambahan — tidak mengubah section/kartu lain di atas.
+        ══════════════════════════════════════════════════════════ */}
+        <section className="bg-gradient-to-br from-amber-500/10 to-rose-500/10 border border-amber-500/30 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white">🧹 Duplicate/Repetitive Clip Filter</h2>
+                <span className="text-[10px] uppercase tracking-wide bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
+                  ✨ Fitur Baru!
+                </span>
+              </div>
+              <p className="text-slate-400 text-sm mt-1 max-w-xl">
+                Mencegah AutoClip membuat klip dengan konten mirip/berulang ketika source video yang
+                sama diproses berkali-kali — klip baru dibandingkan dengan sidik jari (judul,
+                deskripsi, alasan AI, dan rentang waktu) klip-klip yang sudah pernah dibuat.
+              </p>
+            </div>
+            <span className={`text-xs px-2 py-1 rounded-full border ${dupFilter.config.enabled ? "bg-green-500/20 border-green-500/40 text-green-400" : "bg-slate-700/40 border-slate-600 text-slate-400"}`}>
+              {dupFilter.config.enabled ? "✅ Aktif" : "❌ Nonaktif"}
+            </span>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-amber-400">{dupFilter.stats.totalSkipped}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Klip Disaring</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-emerald-400">{dupFilter.stats.totalFingerprints}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Sidik Jari Klip</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-sky-400">{Math.round(dupFilter.config.textThreshold * 100)}%</div>
+              <div className="text-[10px] text-slate-500 mt-1">Ambang Teks</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-fuchsia-400">{Math.round(dupFilter.config.timeOverlapThreshold * 100)}%</div>
+              <div className="text-[10px] text-slate-500 mt-1">Ambang Overlap Waktu</div>
+            </div>
+          </div>
+
+          {/* Current config */}
+          <div className="bg-slate-800/60 rounded-xl p-4">
+            <div className="text-xs text-slate-500 mb-2">📋 Konfigurasi Aktif</div>
+            <div className="font-mono text-xs space-y-1 text-slate-400">
+              <div>
+                <span className="text-yellow-300">DUPLICATE_FILTER_ENABLED</span> ={" "}
+                <span className="text-emerald-400">{String(dupFilter.config.enabled)}</span>
+              </div>
+              <div>
+                <span className="text-yellow-300">DUPLICATE_FILTER_SCOPE</span> ={" "}
+                <span className="text-emerald-400">{dupFilter.config.scope}</span>{" "}
+                <span className="text-slate-500">({getDuplicateFilterScopeLabel(dupFilter.config.scope)})</span>
+              </div>
+              <div>
+                <span className="text-yellow-300">DUPLICATE_FILTER_LOOKBACK_DAYS</span> ={" "}
+                <span className="text-emerald-400">{dupFilter.config.lookbackDays === 0 ? "tanpa batas" : dupFilter.config.lookbackDays}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* How to change */}
+          <div className="bg-slate-800/60 rounded-xl p-4 space-y-2">
+            <div className="text-xs text-slate-500">🔧 Cara Ubah (Railway Variables — mudah diganti, tanpa redeploy):</div>
+            <div className="font-mono text-xs space-y-1 text-slate-400">
+              <div><span className="text-blue-300">DUPLICATE_FILTER_ENABLED</span> = <span className="text-slate-500">true | false (default: true)</span></div>
+              <div><span className="text-blue-300">DUPLICATE_FILTER_SCOPE</span> = <span className="text-slate-500">source | user | global (default: source)</span></div>
+              <div><span className="text-blue-300">DUPLICATE_FILTER_TEXT_THRESHOLD</span> = <span className="text-slate-500">0.0 - 1.0 (default: 0.72)</span></div>
+              <div><span className="text-blue-300">DUPLICATE_FILTER_TIME_OVERLAP_THRESHOLD</span> = <span className="text-slate-500">0.0 - 1.0 (default: 0.6)</span></div>
+              <div><span className="text-blue-300">DUPLICATE_FILTER_LOOKBACK_DAYS</span> = <span className="text-slate-500">jumlah hari, 0 = tanpa batas (default: 30)</span></div>
+            </div>
+            <div className="text-xs text-slate-500 space-y-1 pt-1">
+              <div>🤖 Telegram command: <code className="text-blue-300">/dupfilter</code> untuk melihat status & statistik</div>
+              <div>🧠 Logika filter: <code className="text-blue-300">src/lib/duplicate-filter.ts</code> — kemiripan teks (Jaccard shingling) + overlap rentang waktu</div>
+              <div>⚙️ Konfigurasi: <code className="text-blue-300">src/lib/duplicate-filter-config.ts</code> — semua ambang batas di satu tempat, mudah diubah</div>
+            </div>
+          </div>
+
+          {dupFilter.stats.recentSkips.length > 0 && (
+            <div className="bg-slate-800/60 rounded-xl p-4">
+              <div className="text-xs text-slate-500 mb-2">🧾 Klip Duplikat Terbaru yang Disaring</div>
+              <div className="space-y-2">
+                {dupFilter.stats.recentSkips.map((skip) => (
+                  <div key={skip.id} className="text-xs border border-slate-700/60 rounded-lg p-2">
+                    <div className="text-slate-300 truncate">{skip.candidateTitle}</div>
+                    {skip.matchedTitle && (
+                      <div className="text-slate-500 truncate">↳ mirip dengan: {skip.matchedTitle}</div>
+                    )}
+                    <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
+                      <span className="truncate max-w-[70%]">{skip.sourceUrl}</span>
+                      {skip.combinedScore !== null && (
+                        <span className="text-amber-400">{skip.combinedScore}% mirip</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════
             INTRO / OUTRO SECTION
         ══════════════════════════════════════════════════════════ */}
         <section className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6 space-y-4">
@@ -715,6 +833,8 @@ export default async function HomePage() {
               { arrow: true },
               { step: "3", icon: "🧠", title: "AI Analisis", desc: "GPT/Gemini" },
               { arrow: true },
+              { step: "3b", icon: "🧹", title: "Dedup Filter", desc: dupFilter.config.enabled ? dupFilter.config.scope : "nonaktif" },
+              { arrow: true },
               { step: "4", icon: "✂️", title: `AutoClip ×${maxClips}`, desc: "AI picks moments" },
               { arrow: true },
               { step: "5", icon: "📐", title: "Cut 9:16",   desc: `FFmpeg (${currentMode})` },
@@ -779,6 +899,7 @@ export default async function HomePage() {
               { cmd: "/zoom",       desc: "Info & ubah zoom effect config",        isNew: false },
               { cmd: "/introoutro", desc: "Info & ubah intro/outro config",        isNew: false },
               { cmd: "/niche",      desc: "Atur Custom Niche Prompt untuk AI Analysis ← BARU!", isNew: true },
+              { cmd: "/dupfilter",  desc: "Info Duplicate/Repetitive Clip Filter ← BARU!", isNew: true },
               { cmd: "/disconnect", desc: "Putuskan koneksi YouTube",              isNew: false },
               { cmd: "/drive",       desc: "Google Drive: status, hubungkan, ganti akun",   isNew: true },
               { cmd: "/drivefolder", desc: "Ganti folder tujuan Drive (link / reset)",      isNew: true },
@@ -833,6 +954,12 @@ export default async function HomePage() {
               { key: "CLIP_DURATION",   desc: "Durasi klip tetap — 15 | 20 | 30 | 40 | 60 detik (default: 30) ← BARU!", isNew: true },
               { section: "# === 🎯 CUSTOM NICHE PROMPT (BARU!) ===" },
               { key: "DEFAULT_NICHE_PROMPT", desc: "Default niche untuk user baru, mis. 'fokus ke insight bisnis' (opsional) ← BARU!", isNew: true },
+              { section: "# === 🧹 DUPLICATE/REPETITIVE CLIP FILTER (BARU!) ===" },
+              { key: "DUPLICATE_FILTER_ENABLED", desc: "true | false — saklar utama fitur (default: true) ← BARU!", isNew: true },
+              { key: "DUPLICATE_FILTER_SCOPE", desc: "source | user | global (default: source) ← BARU!", isNew: true },
+              { key: "DUPLICATE_FILTER_TEXT_THRESHOLD", desc: "0.0-1.0 kemiripan teks judul/deskripsi (default: 0.72) ← BARU!", isNew: true },
+              { key: "DUPLICATE_FILTER_TIME_OVERLAP_THRESHOLD", desc: "0.0-1.0 overlap rentang waktu (default: 0.6) ← BARU!", isNew: true },
+              { key: "DUPLICATE_FILTER_LOOKBACK_DAYS", desc: "jumlah hari, 0 = tanpa batas (default: 30) ← BARU!", isNew: true },
               { section: "# === ASPECT RATIO ===" },
               { key: "ASPECT_RATIO_MODE", desc: "blur | crop | pad | stretch | none (default: blur)" },
               { section: "# === THUMBNAIL ===" },

@@ -11,6 +11,7 @@ import {
   refreshAccessToken,
 } from "@/lib/youtube-uploader";
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
+import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
 
 // `meta.step` memetakan update ke step real-time progress Telegram (lihat
 // src/lib/progress-config.ts). Opsional — kalau tidak diisi, `status` dipakai
@@ -141,6 +142,35 @@ export async function processJob(
       percent: 100,
     });
 
+    // === STEP 3b: 🧹 DUPLICATE / REPETITIVE CLIP FILTER ===
+    // Membuang kandidat klip yang kontennya terlalu mirip dengan klip yang
+    // sudah pernah dibuat sebelumnya (mis. source video ini diproses ulang).
+    // Lihat src/lib/duplicate-filter.ts & duplicate-filter-config.ts — fitur
+    // ini sepenuhnya opsional/additive dan bisa dimatikan via
+    // DUPLICATE_FILTER_ENABLED=false tanpa memengaruhi langkah lain.
+    const dedupeResult = await filterDuplicateClips({
+      sourceUrl: job.sourceUrl,
+      telegramUserId: job.telegramUserId,
+      jobId,
+      candidates: analysisClips,
+    });
+
+    if (dedupeResult.skipped.length > 0) {
+      await update(
+        "analyzing",
+        `🧹 ${dedupeResult.skipped.length} klip duplikat/repetitif disaring (konten mirip klip sebelumnya dari source ini).`,
+        { step: "analyzing", percent: 100 }
+      );
+    }
+
+    if (!dedupeResult.accepted.length) {
+      throw new Error(
+        "Semua momen yang ditemukan AI terdeteksi sebagai duplikat/repetitif dari klip yang sudah pernah dibuat. Coba video lain atau atur DUPLICATE_FILTER_TEXT_THRESHOLD."
+      );
+    }
+
+    analysisClips = dedupeResult.accepted;
+
     // === STEP 4: CLIP + ZOOM + WATERMARK + INTRO/OUTRO + THUMBNAIL ===
     await db
       .update(clipJobs)
@@ -171,6 +201,15 @@ export async function processJob(
 
     const successfulClips = processedClips.filter((c) => c.filePath);
     if (!successfulClips.length) throw new Error("Semua klip gagal diproses");
+
+    // 🧹 Simpan sidik jari klip yang berhasil dibuat, supaya jadi pembanding
+    // ketika source video ini (atau yang mirip) diproses lagi di kemudian hari.
+    await recordClipFingerprints({
+      sourceUrl: job.sourceUrl,
+      telegramUserId: job.telegramUserId,
+      jobId,
+      clips: successfulClips,
+    });
 
     await db
       .update(clipJobs)

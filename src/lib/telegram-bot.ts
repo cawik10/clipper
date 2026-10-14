@@ -35,6 +35,11 @@ import {
 } from "@/lib/drive-uploader";
 import { setNichePrompt, clearNichePrompt } from "@/lib/user-settings";
 import { NICHE_PRESETS, getNichePromptLabel, getDefaultNichePrompt } from "@/lib/niche-prompt";
+import {
+  getDuplicateFilterConfig,
+  getDuplicateFilterScopeLabel,
+} from "@/lib/duplicate-filter-config";
+import { getDuplicateFilterStats } from "@/lib/duplicate-filter";
 import fs from "fs";
 
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
@@ -314,6 +319,32 @@ bot.callbackQuery("niche_reset", async (ctx) => {
 bot.callbackQuery("niche_menu", async (ctx) => {
   await ctx.answerCallbackQuery();
   await sendNicheMenu(ctx);
+});
+
+// 🧹 Duplicate/Repetitive Clip Filter (BARU!) — info read-only, konfigurasi
+// via Railway Variables. Lihat src/lib/duplicate-filter-config.ts.
+bot.command("dupfilter", async (ctx) => {
+  const cfg = getDuplicateFilterConfig();
+  const stats = await getDuplicateFilterStats();
+  await ctx.reply(
+    `🧹 *Duplicate/Repetitive Clip Filter*\n\n` +
+      `Status: ${cfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+      `Cakupan pembanding: *${getDuplicateFilterScopeLabel(cfg.scope)}* (\`${cfg.scope}\`)\n` +
+      `Ambang kemiripan teks: ${Math.round(cfg.textThreshold * 100)}%\n` +
+      `Ambang overlap waktu: ${Math.round(cfg.timeOverlapThreshold * 100)}%\n` +
+      `Lookback: ${cfg.lookbackDays === 0 ? "tanpa batas" : `${cfg.lookbackDays} hari terakhir`}\n\n` +
+      `📊 Total klip disaring (semua user): *${stats.totalSkipped}*\n` +
+      `📊 Total sidik jari klip tersimpan: *${stats.totalFingerprints}*\n\n` +
+      `Fitur ini otomatis mencegah AutoClip membuat klip dengan konten mirip/berulang ` +
+      `ketika source video yang sama diproses lebih dari sekali.\n\n` +
+      `*Cara Ubah (Railway Variables):*\n` +
+      `• \`DUPLICATE_FILTER_ENABLED\` = \`true\` / \`false\`\n` +
+      `• \`DUPLICATE_FILTER_SCOPE\` = \`source\` | \`user\` | \`global\`\n` +
+      `• \`DUPLICATE_FILTER_TEXT_THRESHOLD\` = \`0.0\` sampai \`1.0\` (default 0.72)\n` +
+      `• \`DUPLICATE_FILTER_TIME_OVERLAP_THRESHOLD\` = \`0.0\` sampai \`1.0\` (default 0.6)\n` +
+      `• \`DUPLICATE_FILTER_LOOKBACK_DAYS\` = jumlah hari, \`0\` = tanpa batas (default 30)`,
+    { parse_mode: "Markdown" }
+  );
 });
 
 // ===== INFO COMMANDS =====
@@ -1031,8 +1062,9 @@ async function handleSettings(ctx: Context) {
     `• Watermark: *${wmCfg.enabled ? `"${wmCfg.text}" @ ${wmCfg.position}` : "Nonaktif"}*\n` +
     `• Zoom Effect: *${zoomCfg.enabled ? `${zoomCfg.mode} (${zoomCfg.type})` : "Nonaktif"}*\n` +
     `• Intro: *${ioCfg.introEnabled ? `✅ "${ioCfg.introText}"` : "❌"}* | Outro: *${ioCfg.outroEnabled ? `✅ "${ioCfg.outroText}"` : "❌"}*\n` +
-    `• 🎯 Niche Prompt: *${getNichePromptLabel(settings.nichePrompt)}*\n\n` +
-    `_Gunakan /clips /duration /watermark /zoom /introoutro /thumbnail /mode /niche untuk info detail_`;
+    `• 🎯 Niche Prompt: *${getNichePromptLabel(settings.nichePrompt)}*\n` +
+    `• 🧹 Duplicate Filter: *${getDuplicateFilterConfig().enabled ? `✅ Aktif (${getDuplicateFilterConfig().scope})` : "❌ Nonaktif"}*\n\n` +
+    `_Gunakan /clips /duration /watermark /zoom /introoutro /thumbnail /mode /niche /dupfilter untuk info detail_`;
 
   const durationKeyboardRow = new InlineKeyboard();
   CLIP_DURATION_OPTIONS.forEach((d) => {
