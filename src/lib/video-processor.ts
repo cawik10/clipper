@@ -44,86 +44,84 @@ export function detectPlatform(url: string): string {
 export async function downloadVideo(
   url: string,
   jobId: string,
-  onProgress?: (pct: number) => Promise<void>
-): Promise<{ filePath: string; title: string; duration: number }> {
-  ensureDir(TMP_DIR);
-  const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
-  const cmd = [
-      "yt-dlp",
-      "--no-playlist",
-      "--merge-output-format", "mp4",
-      "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
-      "--cookies", "cookies.txt",
-      "--extractor-args", '"youtube:player_client=mweb,web,tv_embedded"',
-      "--progress",
-      "--newline",
-      "-o", `"${outputTemplate}"`,
-      `"${url}"`,
-    ].join(" ");
-
-  console.log(`[download] Starting: ${url}`);
-
-  await execAsync(cmd, { timeout: 600000 });
-
-  if (onProgress) await onProgress(50);
-
-  const files = fs.readdirSync(TMP_DIR).filter((f) => f.startsWith(jobId));
-  if (!files.length) throw new Error("Download selesai tapi file tidak ditemukan");
-
-  const filePath = path.join(TMP_DIR, files[0]);
-
-  const infoCmd = `yt-dlp --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=android,ios" --dump-json --no-playlist "${url}"`;
-  let title = "Video";
-  let duration = 0;
-  try {
-    const { stdout } = await execAsync(infoCmd, { timeout: 30000 });
-    const info = JSON.parse(stdout.trim().split("\n")[0]);
-    title = info.title || "Video";
-    duration = info.duration || 0;
-  } catch {
-    try {
-      const probeCmd = `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${filePath}"`;
-      const { stdout } = await execAsync(probeCmd, { timeout: 15000 });
-      duration = parseFloat(stdout.trim()) || 0;
-    } catch {
-      /* ignore */
-    }
+  onProgress?: (percent: number, rawOutput: string) => void
+): Promise<{ filePath: string; duration: number }> {
+  if (!fs.existsSync(DOWNLOAD_DIR)) {
+    fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
   }
 
-  if (onProgress) await onProgress(100);
-  console.log(`[download] ✅ Done: ${filePath} (${duration}s)`);
-  return { filePath, title, duration };
-}
+  const outputTemplate = path.join(DOWNLOAD_DIR, `${jobId}.%(ext)s`);
+  const hasCookies = fs.existsSync("cookies.txt") && fs.readFileSync("cookies.txt", "utf-8").trim().length > 0;
 
-// =====================================================================
-// TRANSCRIPTION
-// =====================================================================
-export async function transcribeAudio(
-  videoPath: string,
-  language: string = "id"
-): Promise<{ start: number; end: number; text: string }[]> {
-  ensureDir(TMP_DIR);
-  const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
-  const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
-  await execAsync(extractCmd, { timeout: 60000 });
+  // Strategi 1: Coba dengan cookies jika file cookies.txt tersedia
+  const cmdWithCookies = [
+    "yt-dlp",
+    "--no-playlist",
+    "--merge-output-format", "mp4",
+    "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
+    hasCookies ? "--cookies cookies.txt" : "",
+    '--extractor-args "youtube:player_client=mweb,web,web_embedded"',
+    "--progress",
+    "--newline",
+    "-o", `"${outputTemplate}"`,
+    `"${url}"`,
+  ].filter(Boolean).join(" ");
+
+  // Strategi 2 (Fallback): Coba TANPA cookies menggunakan client mobile android,ios,mweb
+  const cmdWithoutCookies = [
+    "yt-dlp",
+    "--no-playlist",
+    "--merge-output-format", "mp4",
+    "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
+    '--extractor-args "youtube:player_client=android,ios,mweb"',
+    "--progress",
+    "--newline",
+    "-o", `"${outputTemplate}"`,
+    `"${url}"`,
+  ].join(" ");
+
+  const executeDownload = async (command: string) => {
+    return new Promise<{ filePath: string; duration: number }>((resolve, reject) => {
+      const process = exec(command, { maxBuffer: 1024 * 1024 * 50 });
+
+      process.stdout?.on("data", (data: Buffer) => {
+        const text = data.toString();
+        const match = text.match(/[download]\s+(\d+\.\d+)%/);
+        if (match && onProgress) {
+          onProgress(parseFloat(match[1]), text);
+        }
+      });
+
+      process.on("close", async (code) => {
+        if (code !== 0) {
+          return reject(new Error(`yt-dlp exited with code ${code}`));
+        }
+        const files = fs.readdirSync(DOWNLOAD_DIR).filter((f) => f.startsWith(jobId));
+        if (!files.length) {
+          return reject(new Error("File hasil download tidak ditemukan"));
+        }
+        const downloadedFile = path.join(DOWNLOAD_DIR, files[0]);
+        try {
+          const duration = await getVideoDuration(downloadedFile);
+          resolve({ filePath: downloadedFile, duration });
+        } catch (err) {
+          reject(err);
+        }
+      });
+
+      process.on("error", (err) => reject(err));
+    });
+  };
 
   try {
-    const openaiKey = process.env.OPENAI_API_KEY;
-    const groqKey = process.env.GROQ_API_KEY;
-
-    if (openaiKey) {
-      return await transcribeWithOpenAI(audioPath, language, openaiKey);
-    } else if (groqKey) {
-      return await transcribeWithGroq(audioPath, language, groqKey);
-    } else {
-      console.warn("[transcribe] Tidak ada API key tersedia, skip transkripsi");
-      return [];
-    }
-  } finally {
+    console.log(`[downloadVideo] Memulai unduhan (Percobaan 1 - Dengan Cookies)...`);
+    return await executeDownload(cmdWithCookies);
+  } catch (firstErr) {
+    console.warn(`[downloadVideo] Percobaan 1 gagal. Mencoba Fallback (Percobaan 2 - Tanpa Cookies via Mobile Client)...`);
     try {
-      if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-    } catch {
-      /* ignore */
+      return await executeDownload(cmdWithoutCookies);
+    } catch (secondErr) {
+      throw new Error(`Gagal mengunduh video setelah percobaan fallback: ${secondErr instanceof Error ? secondErr.message : String(secondErr)}`);
     }
   }
 }
