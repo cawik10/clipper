@@ -96,30 +96,43 @@ bot.command("disconnect", async (ctx) => {
 bot.command("status", async (ctx) => {
   const userId = ctx.from?.id?.toString();
   if (!userId) return;
-  const jobs = await db
+
+  const userJobs = await db
     .select()
     .from(clipJobs)
     .where(eq(clipJobs.telegramUserId, userId))
     .orderBy(desc(clipJobs.createdAt))
     .limit(5);
 
-  if (!jobs.length) {
-    await ctx.reply("📭 Belum ada pekerjaan. Kirim link video untuk memulai!");
+  if (!userJobs.length) {
+    await ctx.reply("📊 Belum ada riwayat pemrosesan video.");
     return;
   }
 
-  const statusEmoji: Record<string, string> = {
-    queued: "⏳", downloading: "⬇️", analyzing: "🧠",
-    clipping: "✂️", uploading: "📤", done: "✅", error: "❌",
-  };
+  let msg = "📊 *Status Pemrosesan Terakhir:*\n\n";
+  userJobs.forEach((job) => {
+    const statusEmoji =
+      job.status === "done"
+        ? "✅"
+        : job.status === "clips_ready"
+        ? "🎬"
+        : job.status === "error"
+        ? "❌"
+        : "⏳";
 
-  let msg = `📊 *Status Terbaru:*\n\n`;
-  jobs.slice(0, 3).forEach((job) => {
-    msg += `${statusEmoji[job.status] || "❓"} *${job.videoTitle?.slice(0, 40) || "Video"}*\n`;
-    msg += `Status: ${job.status}\n`;
-    if (job.status === "error") msg += `Error: ${job.errorMessage?.slice(0, 80)}\n`;
+    // Membersihkan karakter khusus agar Markdown Telegram tidak Error 400
+    const safeError = job.errorMessage
+      ? job.errorMessage.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "")
+      : "";
+
+    msg += `${statusEmoji} *Video*\n`;
+    msg += `Status: \`${job.status}\`\n`;
+    if (safeError) {
+      msg += `Error: ${safeError}\n`;
+    }
     msg += `Waktu: ${new Date(job.createdAt).toLocaleString("id-ID")}\n\n`;
   });
+
   await ctx.reply(msg, { parse_mode: "Markdown" });
 });
 
