@@ -13,6 +13,8 @@ import {
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
 import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
 import fs from "fs";
+import { downloadVideo, cutAndConvertClip } from "./video-processor";
+import path from "path";
 
 // `meta.step` memetakan update ke step real-time progress Telegram (lihat
 // src/lib/progress-config.ts). Opsional — kalau tidak diisi, `status` dipakai
@@ -304,13 +306,49 @@ export async function publishJobClips(
 
   const settings = await getEffectiveSettings(job.telegramUserId);
   const processedClips = (job.clips as ClipResult[] | null) || [];
+
+  if (!processedClips.length) {
+    throw new Error("Tidak ada klip yang bisa dipublish.");
+  }
+
+  // =========================================================================
+  // 🔄 KODE AUTO-RECOVERY (TARUH DI SINI)
+  // Memeriksa dan memotong ulang klip otomatis jika file terhapus di Railway
+  // =========================================================================
+  for (let i = 0; i < processedClips.length; i++) {
+    const clip = processedClips[i];
+    if (!clip.filePath || !fs.existsSync(clip.filePath)) {
+      console.log(`[publishJobClips] File klip ${i + 1} hilang di server, memotong ulang on-the-fly...`);
+      await update("uploading", `🔄 Memotong ulang Klip ${i + 1} dari sumber...`, { step: "recutting" });
+
+      // 1. Unduh ulang video sumber
+      const downloadResult = await downloadVideo(job.sourceUrl, jobId);
+      const newFilePath = path.join("/tmp/autoclip", `clip_recut_${jobId}_${i}.mp4`);
+
+      // 2. Potong ulang sesuai timestamp
+      await cutAndConvertClip(
+        downloadResult.filePath,
+        clip.startTime,
+        clip.endTime,
+        newFilePath,
+        job.aspectRatioMode || "crop"
+      );
+
+      // Perbarui path file klip
+      clip.filePath = newFilePath;
+
+      // Hapus video sumber sementara
+      if (fs.existsSync(downloadResult.filePath)) {
+        try { fs.unlinkSync(downloadResult.filePath); } catch {}
+      }
+    }
+  }
+
+  // Ambil klip yang filenya sudah siap (setelah di-recovery)
   const successfulClips = processedClips.filter((c) => c.filePath && fs.existsSync(c.filePath));
 
   if (!successfulClips.length) {
-    const msg =
-      processedClips.length > 0
-        ? "File klip sudah tidak ditemukan di server (kemungkinan terhapus karena restart/redeploy). Klip tetap tersedia di chat Telegram sebelumnya."
-        : "Tidak ada klip yang bisa dipublish.";
+    const msg = "Gagal memproses atau memotong ulang klip.";
     await db
       .update(clipJobs)
       .set({ status: "error", errorMessage: msg, updatedAt: new Date() })
@@ -319,6 +357,7 @@ export async function publishJobClips(
     throw new Error(msg);
   }
 
+  // === DILANJUTKAN KE PROSES UPLOAD YOUTUBE SEPERTI KODE ASLI ANDA ===
   try {
     await db
       .update(clipJobs)
@@ -326,6 +365,8 @@ export async function publishJobClips(
       .where(eq(clipJobs.jobId, jobId));
 
     let finalClips: ClipResult[] = processedClips;
+
+    // ... (kode upload YouTube ke bawah tetap sama)
 
     // === STEP 5: UPLOAD TO YOUTUBE (jika terhubung) ===
     const tokenRows = await db
