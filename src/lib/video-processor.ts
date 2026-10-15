@@ -51,9 +51,11 @@ export async function downloadVideo(
   }
 
   const outputTemplate = path.join(DOWNLOAD_DIR, `${jobId}.%(ext)s`);
-  const hasCookies = fs.existsSync("cookies.txt") && fs.readFileSync("cookies.txt", "utf-8").trim().length > 0;
+  const hasCookies =
+    fs.existsSync("cookies.txt") &&
+    fs.readFileSync("cookies.txt", "utf-8").trim().length > 0;
 
-  // Strategi 1: Coba dengan cookies jika file cookies.txt tersedia
+  // Strategi 1: Dengan cookies (jika tersedia)
   const cmdWithCookies = [
     "yt-dlp",
     "--no-playlist",
@@ -65,15 +67,18 @@ export async function downloadVideo(
     "--newline",
     "-o", `"${outputTemplate}"`,
     `"${url}"`,
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-  // Strategi 2 (Fallback): Coba TANPA cookies menggunakan client mobile android,ios,mweb
+  // Strategi 2 (Fallback): Tanpa cookies menggunakan Client Mobile + User-Agent
   const cmdWithoutCookies = [
     "yt-dlp",
     "--no-playlist",
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
-    '--extractor-args "youtube:player_client=android,ios,mweb"',
+    '--extractor-args "youtube:player_client=android,mweb,web"',
+    "--user-agent", '"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"',
     "--progress",
     "--newline",
     "-o", `"${outputTemplate}"`,
@@ -82,6 +87,8 @@ export async function downloadVideo(
 
   const executeDownload = async (command: string) => {
     return new Promise<{ filePath: string; duration: number }>((resolve, reject) => {
+      let stderrText = "";
+
       const process = exec(command, { maxBuffer: 1024 * 1024 * 50 });
 
       process.stdout?.on("data", (data: Buffer) => {
@@ -92,11 +99,20 @@ export async function downloadVideo(
         }
       });
 
+      // Tangkap pesan error detail dari yt-dlp
+      process.stderr?.on("data", (data: Buffer) => {
+        stderrText += data.toString();
+      });
+
       process.on("close", async (code) => {
         if (code !== 0) {
-          return reject(new Error(`yt-dlp exited with code ${code}`));
+          return reject(
+            new Error(`yt-dlp exited with code ${code}: ${stderrText.trim()}`)
+          );
         }
-        const files = fs.readdirSync(DOWNLOAD_DIR).filter((f) => f.startsWith(jobId));
+        const files = fs
+          .readdirSync(DOWNLOAD_DIR)
+          .filter((f) => f.startsWith(jobId));
         if (!files.length) {
           return reject(new Error("File hasil download tidak ditemukan"));
         }
@@ -117,11 +133,13 @@ export async function downloadVideo(
     console.log(`[downloadVideo] Memulai unduhan (Percobaan 1 - Dengan Cookies)...`);
     return await executeDownload(cmdWithCookies);
   } catch (firstErr) {
-    console.warn(`[downloadVideo] Percobaan 1 gagal. Mencoba Fallback (Percobaan 2 - Tanpa Cookies via Mobile Client)...`);
+    const firstErrMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    console.warn(`[downloadVideo] Percobaan 1 gagal (${firstErrMsg}). Mencoba Fallback (Percobaan 2)...`);
     try {
       return await executeDownload(cmdWithoutCookies);
     } catch (secondErr) {
-      throw new Error(`Gagal mengunduh video setelah percobaan fallback: ${secondErr instanceof Error ? secondErr.message : String(secondErr)}`);
+      const secondErrMsg = secondErr instanceof Error ? secondErr.message : String(secondErr);
+      throw new Error(`Gagal mengunduh video setelah percobaan fallback: ${secondErrMsg}`);
     }
   }
 }
