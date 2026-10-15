@@ -49,18 +49,16 @@ export async function downloadVideo(
   ensureDir(TMP_DIR);
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
   const cmd = [
-      "yt-dlp",
-      "--no-playlist",
-      "--merge-output-format", "mp4",
-      "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--impersonate", "chrome", // <--- WAJIB ditambahkan agar sidik jari jaringan cocok dengan cookies
-      "--cookies", "cookies.txt",
-      "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"',
-      "--progress",
-      "--newline",
-      "-o", `"${outputTemplate}"`,
-      `"${url}"`,
-    ].join(" ");
+    "yt-dlp",
+    "--no-playlist",
+    "--merge-output-format", "mp4",
+    "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
+    "--extractor-args", '"youtube:player_client=android,ios"',
+    "--progress",
+    "--newline",
+    "-o", `"${outputTemplate}"`,
+    `"${url}"`,
+  ].join(" ");
 
   console.log(`[download] Starting: ${url}`);
 
