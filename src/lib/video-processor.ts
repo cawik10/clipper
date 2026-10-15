@@ -49,17 +49,17 @@ export async function downloadVideo(
   ensureDir(TMP_DIR);
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
   const cmd = [
-      "yt-dlp",
-      "--no-playlist",
-      "--merge-output-format", "mp4",
-      "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--cookies", "cookies.txt",
-      "--extractor-args", '"youtube:player_client=web_safari"',
-      "--progress",
-      "--newline",
-      "-o", `"${outputTemplate}"`,
-      `"${url}"`,
-    ].join(" ");
+    "yt-dlp",
+    "--no-playlist",
+    "--merge-output-format", "mp4",
+    "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
+    "--cookies", "cookies.txt",
+    "--extractor-args", '"youtube:player_client=web_safari,mweb,android_vr"',
+    "--progress",
+    "--newline",
+    "-o", `"${outputTemplate}"`,
+    `"${url}"`,
+  ].join(" ");
 
   console.log(`[download] Starting: ${url}`);
 
