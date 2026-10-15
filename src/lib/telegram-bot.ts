@@ -888,20 +888,14 @@ async function processJobWithUpdates(
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
-  // ===== REAL-TIME PROGRESS JOB DI TELEGRAM (fitur baru) =====
-  // Mengirim 1 pesan "live checklist" yang terus di-edit sesuai step job
-  // (download → transkripsi → analisis AI → potong klip → upload → selesai)
-  // alih-alih hanya notifikasi "selesai/gagal" di akhir.
-  // Tampilan & daftar step bisa diubah lewat src/lib/progress-config.ts
-  // tanpa menyentuh logika di file ini. Bisa dimatikan lewat env var
-  // TELEGRAM_PROGRESS_ENABLED=false (kembali ke perilaku lama).
   const jobRows = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
   const jobForTitle = jobRows[0];
   const trackerTitle = jobForTitle
-    ? `${getPlatformEmoji(jobForTitle.platform)} ${jobForTitle.platform.toUpperCase()}`
+    ? `${getPlatformEmoji(jobForTitle.platform)}${jobForTitle.platform.toUpperCase()}`
     : "Video";
+
   const trackerLabel = jobForTitle?.sourceUrl
-    ? `🔗 \`${jobForTitle.sourceUrl.slice(0, 60)}${jobForTitle.sourceUrl.length > 60 ? "..." : ""}\``
+    ? `  \`${jobForTitle.sourceUrl.slice(0, 60)}${jobForTitle.sourceUrl.length > 60 ? "..." : ""}\``
     : undefined;
 
   const tracker = new TelegramProgressTracker({
@@ -911,6 +905,7 @@ async function processJobWithUpdates(
     title: trackerTitle,
     jobLabel: trackerLabel,
   });
+
   await tracker.start();
 
   const onStatusUpdate = async (
@@ -926,33 +921,35 @@ async function processJobWithUpdates(
   };
 
   try {
-    await processJob(jobId, onStatusUpdate);
+    // 1. Potong klip saja (tanpa langsung upload otomatis)
+    if (isSchedulerEnabled()) {
+      await processClipsOnly(jobId, onStatusUpdate);
+    } else {
+      await processJob(jobId, onStatusUpdate);
+    }
 
     const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
     const job = jobs[0];
 
-    if (job.status === "done" && job.clips) {
+    // 2. Kirim video klip dan thumbnail ke chat Telegram untuk dipreview
+    if ((job.status === "done" || job.status === "clips_ready") && job.clips) {
       const clips = job.clips as ClipResult[];
       const successClips = clips.filter((c) => c.filePath);
-
-      await tracker.finishSuccess(`✅ *${successClips.length} klip berhasil dibuat!* Mengirim ke chat...`);
+      await tracker.finishSuccess(`  *${successClips.length} klip berhasil dibuat!* Mengirim ke chat...`);
 
       for (let i = 0; i < successClips.length; i++) {
         const clip = successClips[i];
         if (!clip.filePath || !fs.existsSync(clip.filePath)) continue;
-
         const caption = [
-          `━━ Klip ${i + 1}/${successClips.length} ━━ `,
+          `  Klip ${i + 1}/${successClips.length}`,
+          `  ${clip.title}`,
           ``,
-          `📝 ${clip.title}`,
-          ``,
-          `⏱ Durasi: ${clip.duration}s`,
-          `🔥 Viral Score: ${clip.viralScore}/10`,
-          `💡 ${clip.reason}`,
-          clip.thumbnailPath ? `🖼 Thumbnail: ✅` : ``,
-          clip.youtubeUrl ? `\n🔗 YouTube: ${clip.youtubeUrl}` : ``,
-          clip.youtubeUrl ? ` (Tersimpan sebagai Draft di YouTube Studio) ` : ``,
-          clip.driveUrl ? `\n☁️ Drive: ${clip.driveUrl}` : ``,
+          `  Durasi: ${clip.duration}s`,
+          `  Viral Score: ${clip.viralScore}/10`,
+          `  ${clip.reason}`,
+          clip.thumbnailPath ? `  Thumbnail: ✅` : ``,
+          clip.youtubeUrl ? `\n  YouTube: ${clip.youtubeUrl}` : ``,
+          clip.driveUrl ? `\n  Drive: ${clip.driveUrl}` : ``,
         ]
           .join("\n")
           .trim();
@@ -960,7 +957,7 @@ async function processJobWithUpdates(
         try {
           if (clip.thumbnailPath && fs.existsSync(clip.thumbnailPath)) {
             await ctx.api.sendPhoto(chatId, new InputFile(clip.thumbnailPath), {
-              caption: `🖼 Thumbnail Klip ${i + 1}`,
+              caption: `  Thumbnail Klip ${i + 1}`,
               parse_mode: "HTML",
             });
           }
@@ -970,69 +967,82 @@ async function processJobWithUpdates(
           });
         } catch (err) {
           console.error(`Failed to send clip ${i + 1}:`, err);
-          await ctx.api.sendMessage(
-            chatId,
-            `✅ Klip ${i + 1}: *${clip.title}*${clip.youtubeUrl ? `\n🔗 ${clip.youtubeUrl}` : ""}${clip.driveUrl ? `\n☁️ ${clip.driveUrl}` : ""}`,
-            { parse_mode: "Markdown" }
-          );
         }
       }
 
-      const hasYoutube = successClips.some((c) => c.youtubeUrl);
-      const summaryKeyboard = new InlineKeyboard();
-      if (hasYoutube) {
-        summaryKeyboard
-          .url("📺 Buka YouTube Studio", "https://studio.youtube.com/channel/videos/upload")
-          .row();
-      }
-      const driveCount = successClips.filter((c) => c.driveUrl).length;
-      if (driveCount > 0) {
-        const st = await getDriveStatus(job.telegramUserId).catch(() => null);
-        if (st?.folderUrl) summaryKeyboard.url("☁️ Buka Folder Google Drive", st.folderUrl).row();
-        await ctx.api
-          .sendMessage(chatId, `☁️ *${driveCount} klip tersimpan di Google Drive.*`, { parse_mode: "Markdown" })
-          .catch(() => {});
-      }
-      summaryKeyboard.text("🎬 Proses Video Lain", "help");
+      // 3. Tampilkan Tombol Penjadwalan Upload ke User
+      if (job.status === "clips_ready") {
+        const userRow = await db
+          .select()
+          .from(userSettings)
+          .where(eq(userSettings.telegramUserId, chatId.toString()));
+        const slotsInfo = await getOptimalSlots(userRow[0]?.nichePrompt, job.platform);
 
-      await ctx.api.sendMessage(
-        chatId,
-        messages.resultSummary(
-          successClips.map((c) => ({
-            title: c.title,
-            duration: c.duration,
-            youtubeUrl: c.youtubeUrl,
-            viralScore: c.viralScore,
-            hasThumbnail: !!(c.thumbnailPath && fs.existsSync(c.thumbnailPath)),
-          }))
-        ),
-        { parse_mode: "Markdown", reply_markup: summaryKeyboard }
-      );
+        const kb = new InlineKeyboard();
+        kb.text("🚀 Post Sekarang", `publish_now_${jobId}`).row();
+        slotsInfo.slots.forEach((slot) => {
+          kb.text(`🤖 AI: ${slot.label}`, `sched_ai_${slot.date.getTime()}_${jobId}`).row();
+        });
 
-      // Cleanup after 30s
+        const safeReason = slotsInfo.reason.replace(/[_*[\]()~`>#+\-=|{}.!]/g, " ");
+
+        await ctx.api.sendMessage(
+          chatId,
+          `✅ *Klip Siap!*\n\n🤖 *Rekomendasi AI (${slotsInfo.nicheLabel}):*\n${safeReason}\n\nKapan klip ingin dipublish ke YouTube?`,
+          { parse_mode: "Markdown", reply_markup: kb }
+        );
+      } else {
+        const hasYoutube = successClips.some((c) => c.youtubeUrl);
+        const summaryKeyboard = new InlineKeyboard();
+        if (hasYoutube) {
+          summaryKeyboard
+            .url("  Buka YouTube Studio", "https://studio.youtube.com/channel/videos/upload")
+            .row();
+        }
+        summaryKeyboard.text("  Proses Video Lain", "help");
+        await ctx.api.sendMessage(
+          chatId,
+          messages.resultSummary(
+            successClips.map((c) => ({
+              title: c.title,
+              duration: c.duration,
+              youtubeUrl: c.youtubeUrl,
+              viralScore: c.viralScore,
+              hasThumbnail: !!(c.thumbnailPath && fs.existsSync(c.thumbnailPath)),
+            }))
+          ),
+          { parse_mode: "Markdown", reply_markup: summaryKeyboard }
+        );
+      }
+
+      // Cleanup file sementara setelah 30 detik
       setTimeout(() => {
         successClips.forEach((c) => {
           if (c.filePath && fs.existsSync(c.filePath)) {
-            try { fs.unlinkSync(c.filePath); } catch { /* ignore */ }
+            try { fs.unlinkSync(c.filePath); } catch {}
           }
           if (c.thumbnailPath && fs.existsSync(c.thumbnailPath)) {
-            try { fs.unlinkSync(c.thumbnailPath); } catch { /* ignore */ }
+            try { fs.unlinkSync(c.thumbnailPath); } catch {}
           }
         });
       }, 30000);
     } else if (job.status === "error") {
-      await tracker.finishError(job.errorMessage || "Terjadi kesalahan tidak diketahui", {
+      const safeErrorMsg = (job.errorMessage || "Terjadi kesalahan tidak diketahui").replace(
+        /[_*[\]()~`>#+\-=|{}.!]/g,
+        " "
+      );
+      await tracker.finishError(safeErrorMsg, {
         reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
       });
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    // Hapus karakter khusus agar Telegram tidak crash saat mengirim pesan error
-    const safeErrorMsg = errorMsg.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '');
-
-    await tracker.finishError(safeErrorMsg, {
+    const safeErrorMsg = errorMsg.replace(/[_*[\]()~`>#+\-=|{}.!]/g, " ");
+    await tracker
+      .finishError(safeErrorMsg, {
         reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
-    }).catch(() => {});
+      })
+      .catch(() => {});
   }
 }
 
@@ -1191,6 +1201,14 @@ async function ensureUserSettings(userId: string): Promise<void> {
     });
   }
 }
+
+// =====================================================================
+// SCHEDULER COMMANDS & CALLBACK HANDLERS
+// =====================================================================
+
+bot.command("jadwal", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!
 
 bot.catch((err) => {
   console.error("Bot error:", err);
