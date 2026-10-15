@@ -1186,14 +1186,15 @@ async function ensureUserSettings(userId: string): Promise<void> {
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, userId));
+
   if (!existing.length) {
     const envMaxClips = getMaxClipsConfig();
     const envClipDuration = getDefaultClipDuration();
     const { min, max } = getDurationRange(envClipDuration);
     await db.insert(userSettings).values({
       telegramUserId: userId,
-      maxClips: envMaxClips, // Use env var as default for new users
-      clipDuration: envClipDuration, // Use env var CLIP_DURATION as default for new users
+      maxClips: envMaxClips,
+      clipDuration: envClipDuration,
       minDuration: min,
       maxDuration: max,
       defaultPrivacy: "private",
@@ -1201,14 +1202,6 @@ async function ensureUserSettings(userId: string): Promise<void> {
     });
   }
 }
-
-// =====================================================================
-// SCHEDULER COMMANDS & CALLBACK HANDLERS
-// =====================================================================
-
-bot.command("jadwal", async (ctx) => {
-  const userId = ctx.from?.id?.toString();
-  if (!
 
 bot.catch((err) => {
   console.error("Bot error:", err);
