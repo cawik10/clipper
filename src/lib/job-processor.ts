@@ -2,7 +2,7 @@ import path from "path";
 import { db } from "@/db";
 import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { downloadVideo, transcribeAudio, processClips, cutAndConvertClip } from "@/lib/video-processor";
+import { downloadVideo, processClips, cutAndConvertClip } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
 import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
 import { getDefaultNichePrompt } from "@/lib/niche-prompt";
