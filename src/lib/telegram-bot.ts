@@ -765,31 +765,9 @@ bot.callbackQuery(/^retry_job_(.+)$/, async (ctx) => {
     .update(clipJobs)
     .set({ status: "queued", errorMessage: null, updatedAt: new Date() })
     .where(eq(clipJobs.jobId, jobId));
-  // 1. Potong klip saja tanpa upload
-    await processClipsOnly(jobId, onStatusUpdate);
 
-    // 2. Cek apakah fitur scheduler aktif
-    if (isSchedulerEnabled()) {
-      const jobRow = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
-      const userRow = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, chatId.toString()));
-      const slotsInfo = await getOptimalSlots(userRow[0]?.nichePrompt, jobRow[0]?.platform);
-
-      const kb = new InlineKeyboard();
-      kb.text("🚀 Post Sekarang", `publish_now_${jobId}`).row();
-      slotsInfo.slots.forEach(slot => {
-          kb.text(`🤖 AI: ${slot.label}`, `sched_ai_${slot.date.getTime()}_${jobId}`).row();
-      });
-
-      await tracker.update("scheduling", { detail: "Menunggu pilihan jadwal upload..." });
-      await ctx.api.sendMessage(chatId,
-          `✅ *Klip siap!*\n\n🤖 *Rekomendasi AI (${slotsInfo.nicheLabel}):*\n_${slotsInfo.reason}_\n\nKapan klip ingin di-upload?`,
-          { parse_mode: "Markdown", reply_markup: kb }
-      );
-      return; // Berhenti di sini, jangan lanjut upload otomatis
-    }
-
-    // 3. Jika scheduler dimatikan, upload langsung
-    await publishJobClips(jobId, onStatusUpdate);
+  // Memanggil ulang fungsi utama dengan benar
+  await processJobWithUpdates(ctx, jobId, true);
 });
 
 // ===== HANDLER FUNCTIONS =====
@@ -1049,11 +1027,12 @@ async function processJobWithUpdates(
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await tracker
-      .finishError(errorMsg, {
+    // Hapus karakter khusus agar Telegram tidak crash saat mengirim pesan error
+    const safeErrorMsg = errorMsg.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '');
+
+    await tracker.finishError(safeErrorMsg, {
         reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
-      })
-      .catch(() => {});
+    }).catch(() => {});
   }
 }
 
