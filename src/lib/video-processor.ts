@@ -20,7 +20,7 @@ import { applyZoomEffect } from "@/lib/zoom-effect";
 import type { ClipResult } from "@/db/schema";
 
 const execAsync = promisify(exec);
-
+const DOWNLOAD_DIR = "/tmp/autoclip";
 const TMP_DIR = process.env.TMP_DIR || "/tmp/autoclip";
 
 function ensureDir(dir: string) {
