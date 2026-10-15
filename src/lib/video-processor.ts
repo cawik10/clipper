@@ -41,6 +41,51 @@ function getVideoDuration(filePath: string): Promise<number> {
   });
 }
 
+export async function transcribeAudio(
+  filePath: string,
+  jobId: string
+): Promise<string> {
+  const audioPath = path.join(DOWNLOAD_DIR, `${jobId}_audio.mp3`);
+  try {
+    // 1. Ekstrak audio monaural ringan (16kHz) dari video menggunakan FFmpeg
+    await new Promise((resolve, reject) => {
+      exec(
+        `ffmpeg -y -i "${filePath}" -vn -ar 16000 -ac 1 -b:a 64k "${audioPath}"`,
+        (err) => (err ? reject(err) : resolve(true))
+      );
+    });
+
+    // 2. Transkripsi via Groq Whisper API jika GROQ_API_KEY tersedia
+    const groqApiKey = process.env.GROQ_API_KEY;
+    if (groqApiKey && fs.existsSync(audioPath)) {
+      const audioBuffer = fs.readFileSync(audioPath);
+      const blob = new Blob([audioBuffer], { type: "audio/mp3" });
+      const formData = new FormData();
+      formData.append("file", blob, "audio.mp3");
+      formData.append("model", "whisper-large-v3-turbo");
+
+      const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${groqApiKey}` },
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as { text?: string };
+        return data.text || "";
+      }
+    }
+  } catch (err) {
+    console.warn("[transcribeAudio] Gagal memproses transkripsi:", err);
+  } finally {
+    // Bersihkan file audio sementara
+    if (fs.existsSync(audioPath)) {
+      try { fs.unlinkSync(audioPath); } catch {}
+    }
+  }
+  return "";
+}
+
 // =====================================================================
 // PLATFORM DETECTION
 // =====================================================================
