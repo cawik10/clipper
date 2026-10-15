@@ -291,7 +291,7 @@ async function processSingleClip(
   };
 }
 
-async function cutAndConvertClip(
+export async function cutAndConvertClip(
   inputPath: string,
   startTime: number,
   endTime: number,

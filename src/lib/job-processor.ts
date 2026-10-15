@@ -1,7 +1,8 @@
+import path from "path";
 import { db } from "@/db";
 import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
+import { downloadVideo, transcribeAudio, processClips, cutAndConvertClip } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
 import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
 import { getDefaultNichePrompt } from "@/lib/niche-prompt";
@@ -13,8 +14,6 @@ import {
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
 import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
 import fs from "fs";
-import { downloadVideo, cutAndConvertClip } from "./video-processor";
-import path from "path";
 
 // `meta.step` memetakan update ke step real-time progress Telegram (lihat
 // src/lib/progress-config.ts). Opsional — kalau tidak diisi, `status` dipakai
