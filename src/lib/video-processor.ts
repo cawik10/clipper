@@ -27,6 +27,20 @@ function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+function getVideoDuration(filePath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    exec(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
+      (err, stdout) => {
+        if (err) return reject(err);
+        const duration = parseFloat(stdout.trim());
+        if (isNaN(duration)) return reject(new Error("Gagal membaca durasi video"));
+        resolve(duration);
+      }
+    );
+  });
+}
+
 // =====================================================================
 // PLATFORM DETECTION
 // =====================================================================
