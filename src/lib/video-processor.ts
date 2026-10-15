@@ -20,70 +20,11 @@ import { applyZoomEffect } from "@/lib/zoom-effect";
 import type { ClipResult } from "@/db/schema";
 
 const execAsync = promisify(exec);
-const DOWNLOAD_DIR = "/tmp/autoclip";
+
 const TMP_DIR = process.env.TMP_DIR || "/tmp/autoclip";
 
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-function getVideoDuration(filePath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    exec(
-      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
-      (err, stdout) => {
-        if (err) return reject(err);
-        const duration = parseFloat(stdout.trim());
-        if (isNaN(duration)) return reject(new Error("Gagal membaca durasi video"));
-        resolve(duration);
-      }
-    );
-  });
-}
-
-export async function transcribeAudio(
-  filePath: string,
-  jobId: string
-): Promise<string> {
-  const audioPath = path.join(DOWNLOAD_DIR, `${jobId}_audio.mp3`);
-  try {
-    // 1. Ekstrak audio monaural ringan (16kHz) dari video menggunakan FFmpeg
-    await new Promise((resolve, reject) => {
-      exec(
-        `ffmpeg -y -i "${filePath}" -vn -ar 16000 -ac 1 -b:a 64k "${audioPath}"`,
-        (err) => (err ? reject(err) : resolve(true))
-      );
-    });
-
-    // 2. Transkripsi via Groq Whisper API jika GROQ_API_KEY tersedia
-    const groqApiKey = process.env.GROQ_API_KEY;
-    if (groqApiKey && fs.existsSync(audioPath)) {
-      const audioBuffer = fs.readFileSync(audioPath);
-      const blob = new Blob([audioBuffer], { type: "audio/mp3" });
-      const formData = new FormData();
-      formData.append("file", blob, "audio.mp3");
-      formData.append("model", "whisper-large-v3-turbo");
-
-      const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${groqApiKey}` },
-        body: formData,
-      });
-
-      if (res.ok) {
-        const data = (await res.json()) as { text?: string };
-        return data.text || "";
-      }
-    }
-  } catch (err) {
-    console.warn("[transcribeAudio] Gagal memproses transkripsi:", err);
-  } finally {
-    // Bersihkan file audio sementara
-    if (fs.existsSync(audioPath)) {
-      try { fs.unlinkSync(audioPath); } catch {}
-    }
-  }
-  return "";
 }
 
 // =====================================================================
@@ -103,102 +44,87 @@ export function detectPlatform(url: string): string {
 export async function downloadVideo(
   url: string,
   jobId: string,
-  onProgress?: (percent: number, rawOutput: string) => void
-): Promise<{ filePath: string; duration: number }> {
-  if (!fs.existsSync(DOWNLOAD_DIR)) {
-    fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+  onProgress?: (pct: number) => Promise<void>
+): Promise<{ filePath: string; title: string; duration: number }> {
+  ensureDir(TMP_DIR);
+  const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
+  const cmd = [
+      "yt-dlp",
+      "--no-playlist",
+      "--merge-output-format", "mp4",
+      "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
+      "--impersonate", "chrome", // <--- WAJIB ditambahkan agar sidik jari jaringan cocok dengan cookies
+      "--cookies", "cookies.txt",
+      "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"',
+      "--progress",
+      "--newline",
+      "-o", `"${outputTemplate}"`,
+      `"${url}"`,
+    ].join(" ");
+
+  console.log(`[download] Starting: ${url}`);
+
+  await execAsync(cmd, { timeout: 600000 });
+
+  if (onProgress) await onProgress(50);
+
+  const files = fs.readdirSync(TMP_DIR).filter((f) => f.startsWith(jobId));
+  if (!files.length) throw new Error("Download selesai tapi file tidak ditemukan");
+
+  const filePath = path.join(TMP_DIR, files[0]);
+
+  const infoCmd = `yt-dlp --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=android,ios" --dump-json --no-playlist "${url}"`;
+  let title = "Video";
+  let duration = 0;
+  try {
+    const { stdout } = await execAsync(infoCmd, { timeout: 30000 });
+    const info = JSON.parse(stdout.trim().split("\n")[0]);
+    title = info.title || "Video";
+    duration = info.duration || 0;
+  } catch {
+    try {
+      const probeCmd = `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${filePath}"`;
+      const { stdout } = await execAsync(probeCmd, { timeout: 15000 });
+      duration = parseFloat(stdout.trim()) || 0;
+    } catch {
+      /* ignore */
+    }
   }
 
-  const outputTemplate = path.join(DOWNLOAD_DIR, `${jobId}.%(ext)s`);
-  const hasCookies =
-    fs.existsSync("cookies.txt") &&
-    fs.readFileSync("cookies.txt", "utf-8").trim().length > 0;
+  if (onProgress) await onProgress(100);
+  console.log(`[download] ✅ Done: ${filePath} (${duration}s)`);
+  return { filePath, title, duration };
+}
 
-  // Strategi 1: Dengan cookies (jika tersedia)
-  const cmdWithCookies = [
-    "yt-dlp",
-    "--no-playlist",
-    "--merge-output-format", "mp4",
-    "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
-    hasCookies ? "--cookies cookies.txt" : "",
-    '--extractor-args "youtube:player_client=mweb,web,web_embedded"',
-    "--progress",
-    "--newline",
-    "-o", `"${outputTemplate}"`,
-    `"${url}"`,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  // Strategi 2 (Fallback): Tanpa cookies menggunakan Client Mobile + User-Agent
-  const cmdWithoutCookies = [
-    "yt-dlp",
-    "--no-playlist",
-    "--merge-output-format", "mp4",
-    "-f", '"bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
-    '--extractor-args "youtube:player_client=android,mweb,web"',
-    "--user-agent", '"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"',
-    "--progress",
-    "--newline",
-    "-o", `"${outputTemplate}"`,
-    `"${url}"`,
-  ].join(" ");
-
-  const executeDownload = async (command: string) => {
-    return new Promise<{ filePath: string; duration: number }>((resolve, reject) => {
-      let stderrText = "";
-
-      const process = exec(command, { maxBuffer: 1024 * 1024 * 50 });
-
-      process.stdout?.on("data", (data: Buffer) => {
-        const text = data.toString();
-        const match = text.match(/[download]\s+(\d+\.\d+)%/);
-        if (match && onProgress) {
-          onProgress(parseFloat(match[1]), text);
-        }
-      });
-
-      // Tangkap pesan error detail dari yt-dlp
-      process.stderr?.on("data", (data: Buffer) => {
-        stderrText += data.toString();
-      });
-
-      process.on("close", async (code) => {
-        if (code !== 0) {
-          return reject(
-            new Error(`yt-dlp exited with code ${code}: ${stderrText.trim()}`)
-          );
-        }
-        const files = fs
-          .readdirSync(DOWNLOAD_DIR)
-          .filter((f) => f.startsWith(jobId));
-        if (!files.length) {
-          return reject(new Error("File hasil download tidak ditemukan"));
-        }
-        const downloadedFile = path.join(DOWNLOAD_DIR, files[0]);
-        try {
-          const duration = await getVideoDuration(downloadedFile);
-          resolve({ filePath: downloadedFile, duration });
-        } catch (err) {
-          reject(err);
-        }
-      });
-
-      process.on("error", (err) => reject(err));
-    });
-  };
+// =====================================================================
+// TRANSCRIPTION
+// =====================================================================
+export async function transcribeAudio(
+  videoPath: string,
+  language: string = "id"
+): Promise<{ start: number; end: number; text: string }[]> {
+  ensureDir(TMP_DIR);
+  const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
+  const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
+  await execAsync(extractCmd, { timeout: 60000 });
 
   try {
-    console.log(`[downloadVideo] Memulai unduhan (Percobaan 1 - Dengan Cookies)...`);
-    return await executeDownload(cmdWithCookies);
-  } catch (firstErr) {
-    const firstErrMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
-    console.warn(`[downloadVideo] Percobaan 1 gagal (${firstErrMsg}). Mencoba Fallback (Percobaan 2)...`);
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const groqKey = process.env.GROQ_API_KEY;
+
+    if (openaiKey) {
+      return await transcribeWithOpenAI(audioPath, language, openaiKey);
+    } else if (groqKey) {
+      return await transcribeWithGroq(audioPath, language, groqKey);
+    } else {
+      console.warn("[transcribe] Tidak ada API key tersedia, skip transkripsi");
+      return [];
+    }
+  } finally {
     try {
-      return await executeDownload(cmdWithoutCookies);
-    } catch (secondErr) {
-      const secondErrMsg = secondErr instanceof Error ? secondErr.message : String(secondErr);
-      throw new Error(`Gagal mengunduh video setelah percobaan fallback: ${secondErrMsg}`);
+      if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+    } catch {
+      /* ignore */
     }
   }
 }
@@ -366,7 +292,7 @@ async function processSingleClip(
   };
 }
 
-export async function cutAndConvertClip(
+async function cutAndConvertClip(
   inputPath: string,
   startTime: number,
   endTime: number,
