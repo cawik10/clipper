@@ -25,6 +25,20 @@ const TMP_DIR = process.env.TMP_DIR || "/tmp/autoclip";
 
 const DOWNLOAD_DIR = "/tmp/autoclip";
 
+function getVideoDuration(filePath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    exec(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
+      (err, stdout) => {
+        if (err) return reject(err);
+        const duration = parseFloat(stdout.trim());
+        if (isNaN(duration)) return reject(new Error("Gagal membaca durasi video"));
+        resolve(duration);
+      }
+    );
+  });
+}
+
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -57,7 +71,6 @@ export async function downloadVideo(
     fs.existsSync("cookies.txt") &&
     fs.readFileSync("cookies.txt", "utf-8").trim().length > 0;
 
-  // Flag dasar untuk mencegah stuck jaringan dan mempercepat proses unduh
   const baseFlags = [
     "--no-playlist",
     "--merge-output-format mp4",
@@ -69,7 +82,7 @@ export async function downloadVideo(
     `-o "${outputTemplate}"`,
   ];
 
-  // Strategi 1: Dengan cookies
+  // Strategi 1: Menggunakan Cookies & Client Web
   const cmdWithCookies = [
     "yt-dlp",
     ...baseFlags,
@@ -80,7 +93,7 @@ export async function downloadVideo(
     .filter(Boolean)
     .join(" ");
 
-  // Strategi 2 (Fallback): Client mobile tanpa cookies
+  // Strategi 2: Fallback Mobile Client
   const cmdWithoutCookies = [
     "yt-dlp",
     ...baseFlags,
@@ -93,7 +106,6 @@ export async function downloadVideo(
     return new Promise<{ filePath: string; duration: number }>((resolve, reject) => {
       let stderrText = "";
 
-      // Pasang timeout 5 menit (300.000 ms) agar Node.js tidak menggantung selamanya
       const process = exec(command, {
         maxBuffer: 1024 * 1024 * 50,
         timeout: 300000,
