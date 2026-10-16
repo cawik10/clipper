@@ -6,7 +6,7 @@ const model = genAI.getGenerativeModel({ model: "gemini-3.8-flash" });
 async function analyzeWithGroq(prompt: string): Promise<string> {
   const groqApiKey = process.env.GROQ_API_KEY;
   if (!groqApiKey) {
-    throw new Error("GROQ_API_KEY belum dikonfigurasi di Environment Variables");
+    throw new Error("GROQ_API_KEY tidak dikonfigurasi");
   }
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -16,7 +16,7 @@ async function analyzeWithGroq(prompt: string): Promise<string> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.1-8b-instant",
+      model: "llama3-8b-8192", // Model aktif & gratis di Groq API
       messages: [
         { role: "system", content: "Kamu adalah AI analisis video. Kembalikan JSON array murni." },
         { role: "user", content: prompt },
@@ -42,6 +42,7 @@ function generateFallbackMoments(
   const validDuration = duration && duration > 0 ? duration : 180;
   const clips = [];
   const interval = Math.floor(validDuration / (maxClips + 1));
+  const uniqueId = Math.floor(1000 + Math.random() * 9000);
 
   for (let i = 1; i <= maxClips; i++) {
     const start = Math.floor(i * interval);
@@ -52,8 +53,8 @@ function generateFallbackMoments(
       clips.push({
         startTime: start,
         endTime: end,
-        title: `Klip Momen ${i}`,
-        summary: `Momen pilihan otomatis bagian ${i}`,
+        title: `Klip Auto #${uniqueId} - Segmen ${i}`,
+        summary: `Momen potongan otomatis interval ${i}`,
       });
     }
   }
@@ -64,8 +65,8 @@ function generateFallbackMoments(
         {
           startTime: 0,
           endTime: Math.min(validDuration, targetDuration),
-          title: "Klip Momen 1",
-          summary: "Momen pilihan otomatis",
+          title: `Klip Auto #${uniqueId} - Segmen Utama`,
+          summary: "Momen potongan otomatis",
         },
       ];
 }
@@ -90,7 +91,7 @@ Kembalikan HANYA JSON Array valid:
     const result = await model.generateContent(prompt);
     responseText = result.response?.text() || "";
   } catch (geminiErr) {
-    console.warn("[ai-analyzer] Gemini API 503/error, mencoba fallback ke Groq...", geminiErr);
+    console.warn("[ai-analyzer] Gemini API error, mencoba fallback ke Groq...", geminiErr);
     // 2. Fallback ke Groq API
     try {
       responseText = await analyzeWithGroq(prompt);
@@ -99,7 +100,7 @@ Kembalikan HANYA JSON Array valid:
     }
   }
 
-  // 3. Safe Parsing (Mencegah crash .slice() secara mutlak)
+  // 3. Safe Parsing
   if (responseText) {
     try {
       const jsonMatch = responseText.match(/\[[\s\S]*\]/) || responseText.match(/\{[\s\S]*\}/);
@@ -127,7 +128,7 @@ Kembalikan HANYA JSON Array valid:
     }
   }
 
-  // 4. Fallback Waktu Merata (Diakses jika Gemini 503 & Groq kosong/gagal)
+  // 4. Fallback Waktu Merata Unik
   console.log("[ai-analyzer] Menggunakan Fallback Pemotongan Durasi Merata.");
   return generateFallbackMoments(duration, maxClips, targetDuration);
 }
