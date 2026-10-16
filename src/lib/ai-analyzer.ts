@@ -24,6 +24,43 @@ export interface VideoAnalysisInput {
   language?: string;
 }
 
+async function analyzeWithGroq(prompt: string): Promise<string> {
+  const groqApiKey = process.env.GROQ_API_KEY;
+  if (!groqApiKey) {
+    throw new Error("GROQ_API_KEY belum dikonfigurasi di Environment Variables");
+  }
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${groqApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content: "Kamu adalah AI analisis video yang mengembalikan respons murni dalam format JSON.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.2,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Groq API Error (${response.status}): ${errText}`);
+  }
+
+  const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return data.choices?.[0]?.message?.content || "";
+}
+
 export async function analyzeVideoForClips(
   input: VideoAnalysisInput,
   maxClips: number = getMaxClipsConfig(),
@@ -135,7 +172,7 @@ async function analyzeWithGemini(
 ): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
   const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON ARRAY.");
   const text = result.response.text();
   const jsonMatch = text.match(/\[[\s\S]*\]/);
