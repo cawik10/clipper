@@ -39,7 +39,7 @@ export interface AiTextResult {
 
 /** Model Gemini yang dipakai untuk semua pemanggilan teks (analisis & rekomendasi). */
 export function getGeminiModel(): string {
-  return (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+  return (process.env.GEMINI_MODEL || "gemini-3.5-flash-lite").trim();
 }
 
 /** Model chat Groq (OpenAI-compatible) yang dipakai sebagai fallback. */
