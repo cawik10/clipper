@@ -23,6 +23,8 @@ const execAsync = promisify(exec);
 
 const TMP_DIR = process.env.TMP_DIR || "/tmp/autoclip";
 
+const DOWNLOAD_DIR = "/tmp/autoclip";
+
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
