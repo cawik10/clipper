@@ -1,17 +1,25 @@
 import { webhookCallback } from "grammy";
 import { bot } from "@/lib/telegram-bot";
 
-export const dynamic = "force-dynamic";
-export const maxDuration = 300;
-
-const handler = webhookCallback(bot, "std/http");
-
-// Contoh di route.ts webhook
 export async function POST(req: Request) {
-  const body = await req.json();
+  try {
+    const body = await req.json();
 
-  // Tangani update bot Grammy/Telegraf...
-  // Jalankan proses pekerjaan latar belakang TANPA 'await' agar webhook langsung merespons
+    // 💡 Inisialisasi botInfo grammY jika belum terinisialisasi
+    if (!bot.isInited()) {
+      await bot.init();
+    }
+
+    // Jalankan pemrosesan update secara asinkron di latar belakang
+    bot.handleUpdate(body).catch((err) => console.error("Webhook process error:", err));
+
+    // Segera beri respons HTTP 200 ke Telegram agar tidak timeout
+    return Response.json({ ok: true });
+  } catch (error) {
+    console.error("Webhook route error:", error);
+    return Response.json({ ok: false }, { status: 500 });
+  }
+}
   bot.handleUpdate(body).catch((err) => console.error("Webhook process error:", err));
 
   // Balas ke Telegram dalam < 1 detik agar tidak Request timed out after 10000 ms
