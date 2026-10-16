@@ -354,12 +354,14 @@ export async function publishJobClips(
   }
 
   // === PROSES UPLOAD TO YOUTUBE ===
+  // === PROSES UPLOAD TO YOUTUBE ===
   try {
     await db
       .update(clipJobs)
       .set({ status: "uploading", updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
 
+    // 💡 PINDAHKAN DEKLARASI KE SINI (sebelum pengecekan tokenRows)
     let finalClips: ClipResult[] = processedClips;
 
     const tokenRows = await db
@@ -428,12 +430,15 @@ export async function publishJobClips(
       .update(clipJobs)
       .set({
         status: "done",
-        clips: finalClips,
+        clips: finalClips, // <-- Aman dipanggil karena scope sudah sesuai
         updatedAt: new Date(),
       })
       .where(eq(clipJobs.jobId, jobId));
 
     await update("done", "🎉 Semua klip berhasil dipublish!", { step: "done" });
+
+    // 🧹 Pembersihan file sementara setelah upload selesai
+    cleanupJobFiles(jobId);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     await db
@@ -443,7 +448,6 @@ export async function publishJobClips(
     await update("error", `❌ Upload gagal: ${errorMsg}`, { step: "error" });
     throw err;
   }
-}
 
 await db
       .update(clipJobs)
