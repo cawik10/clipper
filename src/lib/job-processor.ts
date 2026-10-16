@@ -304,13 +304,47 @@ export async function publishJobClips(
 
   const settings = await getEffectiveSettings(job.telegramUserId);
   const processedClips = (job.clips as ClipResult[] | null) || [];
+
+  if (!processedClips.length) {
+    throw new Error("Tidak ada klip yang bisa dipublish.");
+  }
+
+  // 🔄 AUTO-RECOVERY ON-DEMAND
+  // Memeriksa dan memotong ulang klip otomatis jika file terhapus karena restart/redeploy Railway
+  for (let i = 0; i < processedClips.length; i++) {
+    const clip = processedClips[i];
+    if (!clip.filePath || !fs.existsSync(clip.filePath)) {
+      console.log(`[publishJobClips] File klip ${i + 1} hilang di server, memotong ulang on-the-fly...`);
+      await update("uploading", `🔄 Memotong ulang Klip ${i + 1} dari sumber...`, { step: "recutting" });
+
+      // 1. Unduh ulang video sumber
+      const downloadResult = await downloadVideo(job.sourceUrl, jobId);
+      const newFilePath = path.join("/tmp/autoclip", `clip_recut_${jobId}_${i}.mp4`);
+
+      // 2. Potong ulang sesuai timestamp yang tersimpan di DB
+      await cutAndConvertClip(
+        downloadResult.filePath,
+        clip.startTime,
+        clip.endTime,
+        newFilePath,
+        job.aspectRatioMode || "crop"
+      );
+
+      // Perbarui path file klip
+      clip.filePath = newFilePath;
+
+      // Hapus video sumber sementara
+      if (fs.existsSync(downloadResult.filePath)) {
+        try { fs.unlinkSync(downloadResult.filePath); } catch {}
+      }
+    }
+  }
+
+  // Ambil klip yang filenya sudah dipastikan siap
   const successfulClips = processedClips.filter((c) => c.filePath && fs.existsSync(c.filePath));
 
   if (!successfulClips.length) {
-    const msg =
-      processedClips.length > 0
-        ? "File klip sudah tidak ditemukan di server (kemungkinan terhapus karena restart/redeploy). Klip tetap tersedia di chat Telegram sebelumnya."
-        : "Tidak ada klip yang bisa dipublish.";
+    const msg = "Gagal memproses atau memotong ulang klip.";
     await db
       .update(clipJobs)
       .set({ status: "error", errorMessage: msg, updatedAt: new Date() })
@@ -319,6 +353,7 @@ export async function publishJobClips(
     throw new Error(msg);
   }
 
+  // === PROSES UPLOAD TO YOUTUBE ===
   try {
     await db
       .update(clipJobs)
@@ -327,7 +362,6 @@ export async function publishJobClips(
 
     let finalClips: ClipResult[] = processedClips;
 
-    // === STEP 5: UPLOAD TO YOUTUBE (jika terhubung) ===
     const tokenRows = await db
       .select()
       .from(youtubeTokens)
@@ -380,7 +414,6 @@ export async function publishJobClips(
         }
       );
 
-      // uploadResults sejajar dengan successfulClips (bukan processedClips)
       finalClips = finalClips.map((clip) => {
         const idx = successfulClips.indexOf(clip);
         const uploadResult = idx >= 0 ? uploadResults[idx] : null;
@@ -391,73 +424,40 @@ export async function publishJobClips(
       });
     }
 
-    // === STEP 5b: AUTO-UPLOAD KE GOOGLE DRIVE (jika terhubung & aktif) ===
-    // Kegagalan Drive TIDAK menggagalkan job — klip tetap dikirim ke Telegram.
-    try {
-      const driveSummary = await uploadClipsToDrive({
-        userId: job.telegramUserId,
-        jobId,
-        videoTitle: job.videoTitle || "AutoClip",
-        clips: successfulClips,
-        onProgress: async (clipIndex, total, result, error) => {
-          const percent = Math.round(((clipIndex + 1) / total) * 100);
-          if (result) {
-            await update("uploading", `☁️ Klip ${clipIndex + 1}/${total} masuk Google Drive`, {
-              step: "uploading_drive",
-              percent,
-            });
-          } else {
-            await update("uploading", `⚠️ Drive klip ${clipIndex + 1} gagal: ${error}`, {
-              step: "uploading_drive",
-              percent,
-            });
-          }
-        },
-      });
-
-      if (driveSummary.attempted) {
-        finalClips = finalClips.map((clip) => {
-          const idx = successfulClips.indexOf(clip);
-          const r = idx >= 0 ? driveSummary.results[idx] : null;
-          return r ? { ...clip, driveFileId: r.fileId, driveUrl: r.url } : clip;
-        });
-        const okCount = driveSummary.results.filter(Boolean).length;
-        if (okCount > 0) {
-          await update(
-            "uploading",
-            `☁️ ${okCount}/${successfulClips.length} klip tersimpan di Google Drive` +
-              (driveSummary.folderName ? ` (📁 ${driveSummary.folderName})` : ""),
-            { step: "uploading_drive", percent: 100 }
-          );
-        }
-        if (driveSummary.warning)
-          await update("uploading", `⚠️ ${driveSummary.warning}`, { step: "uploading_drive" });
-        if (driveSummary.error && okCount === 0) {
-          await update("uploading", `⚠️ Upload Google Drive gagal: ${driveSummary.error}`, {
-            step: "uploading_drive",
-          });
-        }
-      }
-    } catch (err) {
-      console.error("[drive] step gagal (diabaikan):", err);
-    }
-
     await db
       .update(clipJobs)
-      .set({ clips: finalClips, status: "done", updatedAt: new Date() })
+      .set({
+        status: "done",
+        clips: finalClips,
+        updatedAt: new Date(),
+      })
       .where(eq(clipJobs.jobId, jobId));
+
+    await update("done", "🎉 Semua klip berhasil dipublish!", { step: "done" });
   } catch (err) {
-    const rawError = err instanceof Error ? err.message : String(err);
-    const errorMsg = rawError.replace(/([_*`\[\]])/g, "\\$1");
-    console.error(`Job ${jobId} failed (publish stage):`, err);
+    const errorMsg = err instanceof Error ? err.message : String(err);
     await db
       .update(clipJobs)
       .set({ status: "error", errorMessage: errorMsg, updatedAt: new Date() })
       .where(eq(clipJobs.jobId, jobId));
-    await update("error", `❌ ${errorMsg}`, { step: "error" });
+    await update("error", `❌ Upload gagal: ${errorMsg}`, { step: "error" });
     throw err;
   }
 }
+
+await db
+      .update(clipJobs)
+      .set({
+        status: "done",
+        clips: finalClips,
+        updatedAt: new Date(),
+      })
+      .where(eq(clipJobs.jobId, jobId));
+
+    await update("done", "🎉 Semua klip berhasil dipublish!", { step: "done" });
+
+    // 🧹 Pembersihan otomatis file sementara di /tmp
+    cleanupJobFiles(jobId);
 
 /**
  * Alur lama (download → ... → upload) dalam satu panggilan — dipertahankan
@@ -467,4 +467,26 @@ export async function publishJobClips(
 export async function processJob(jobId: string, onStatusUpdate?: StatusUpdateFn): Promise<void> {
   await processClipsOnly(jobId, onStatusUpdate);
   await publishJobClips(jobId, onStatusUpdate);
+}
+
+export function cleanupJobFiles(jobId: string): void {
+  const downloadDir = "/tmp/autoclip";
+  try {
+    if (fs.existsSync(downloadDir)) {
+      const files = fs.readdirSync(downloadDir);
+      for (const file of files) {
+        if (file.includes(jobId)) {
+          const filePath = path.join(downloadDir, file);
+          try {
+            fs.unlinkSync(filePath);
+            console.log(`[cleanup] Berhasil menghapus file sementara: ${filePath}`);
+          } catch (e) {
+            console.warn(`[cleanup] Gagal menghapus file ${filePath}:`, e);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[cleanup] Error saat membersihkan file untuk job ${jobId}:`, err);
+  }
 }
