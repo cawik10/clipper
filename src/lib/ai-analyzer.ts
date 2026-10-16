@@ -40,19 +40,33 @@ function generateFallbackMoments(
 ): Array<{ startTime: number; endTime: number; title: string; summary: string }> {
   const validDuration = duration && duration > 0 ? duration : 180;
   const clips = [];
-  const interval = Math.max(10, Math.floor(validDuration / (maxClips + 1)));
+  const interval = Math.floor(validDuration / (maxClips + 1));
 
   for (let i = 1; i <= maxClips; i++) {
-    const start = Math.max(0, i * interval - 5);
-    const end = Math.min(validDuration, start + targetDuration);
-    clips.push({
-      startTime: Math.floor(start),
-      endTime: Math.floor(end),
-      title: `Klip Momen ${i}`,
-      summary: `Momen pilihan otomatis dari bagian ${i}`,
-    });
+    const start = Math.floor(i * interval);
+    const clipDuration = Math.min(targetDuration, validDuration - start);
+    const end = start + clipDuration;
+
+    if (clipDuration > 5) {
+      clips.push({
+        startTime: start,
+        endTime: end,
+        title: `Klip Momen ${i}`,
+        summary: `Momen pilihan otomatis bagian ${i}`,
+      });
+    }
   }
-  return clips;
+
+  return clips.length > 0
+    ? clips
+    : [
+        {
+          startTime: 0,
+          endTime: Math.min(validDuration, targetDuration),
+          title: "Klip Momen 1",
+          summary: "Momen pilihan otomatis",
+        },
+      ];
 }
 
 export async function analyzeVideoForClips(

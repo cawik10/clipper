@@ -366,8 +366,8 @@ async function cutAndConvertClip(
   outputPath: string,
   mode: ReturnType<typeof getAspectRatioMode>
 ): Promise<void> {
-  const duration = endTime - startTime;
-  const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
+  const duration = Math.max(5, Math.abs(endTime - startTime));
+  const ffmpegCmd = `ffmpeg -y -ss ${startTime} -t ${duration} -i "${inputPath}" ...`;
 
   let cmd: string;
   if (useFilterComplex) {
