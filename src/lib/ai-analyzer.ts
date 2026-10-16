@@ -17,7 +17,7 @@ const response = await fetch("https://api.groq.com/openai/v1/chat/completions", 
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
-    model: "llama-3.3-70b-versatile", // 💡 Perbarui ke model aktif Groq
+    model: "gemma2-9b-it", // 💡 Perbarui ke model aktif Groq
     messages: [
       { role: "system", content: "Kamu adalah AI analisis video. Kembalikan JSON array murni." },
       { role: "user", content: prompt },
