@@ -1,9 +1,14 @@
 import { db } from "@/db";
 import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
+import { downloadVideo, transcribeAudio, processClips, cutAndConvertClip } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
-import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
+import {
+  getMaxClipsConfig,
+  getDefaultClipDuration,
+  getDurationRange,
+  getAspectRatioMode,
+} from "@/lib/video-config";
 import { getDefaultNichePrompt } from "@/lib/niche-prompt";
 import {
   uploadClipsToYouTube,
@@ -13,6 +18,7 @@ import {
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
 import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
 import fs from "fs";
+import path from "path";
 
 // `meta.step` memetakan update ke step real-time progress Telegram (lihat
 // src/lib/progress-config.ts). Opsional — kalau tidak diisi, `status` dipakai
@@ -134,7 +140,11 @@ export async function processClipsOnly(
 
     let transcript: { start: number; end: number; text: string }[] = [];
     try {
-      transcript = await transcribeAudio(downloadResult.filePath, settings.language || "id");
+      transcript = await transcribeAudio(
+        downloadResult.filePath,
+        settings.language || "id",
+        downloadResult.duration
+      );
     } catch (err) {
       console.warn("Transcription failed, proceeding without:", err);
     }
@@ -321,13 +331,15 @@ export async function publishJobClips(
       const downloadResult = await downloadVideo(job.sourceUrl, jobId);
       const newFilePath = path.join("/tmp/autoclip", `clip_recut_${jobId}_${i}.mp4`);
 
-      // 2. Potong ulang sesuai timestamp yang tersimpan di DB
+      // 2. Potong ulang sesuai timestamp yang tersimpan di DB. Mode aspect
+      // ratio asli per-job tidak disimpan di tabel clip_jobs, jadi dipotong
+      // ulang memakai konfigurasi ASPECT_RATIO_MODE yang aktif saat ini.
       await cutAndConvertClip(
         downloadResult.filePath,
         clip.startTime,
         clip.endTime,
         newFilePath,
-        job.aspectRatioMode || "crop"
+        getAspectRatioMode()
       );
 
       // Perbarui path file klip
@@ -424,6 +436,43 @@ export async function publishJobClips(
         }
         return clip;
       });
+    }
+
+    // === PROSES UPLOAD KE GOOGLE DRIVE (opsional, kalau user mengaktifkan) ===
+    // Sebelumnya fungsi `uploadClipsToDrive` sudah ada tapi tidak pernah
+    // dipanggil di alur publish — sekarang dihubungkan di sini supaya fitur
+    // "☁️ Google Drive auto-upload" yang ditampilkan di dashboard benar-benar
+    // berjalan. Tidak menghentikan proses kalau Drive gagal/tidak aktif.
+    try {
+      const driveSummary = await uploadClipsToDrive({
+        userId: job.telegramUserId,
+        jobId,
+        videoTitle: job.videoTitle,
+        clips: finalClips,
+        onProgress: async (clipIndex, total, result, error) => {
+          const percent = Math.round(((clipIndex + 1) / total) * 100);
+          if (result) {
+            await update("uploading", `☁️ Klip ${clipIndex + 1} tersimpan di Google Drive!`, {
+              step: "uploading_drive",
+              percent,
+            });
+          } else if (error) {
+            await update("uploading", `⚠️ Drive klip ${clipIndex + 1} gagal: ${error}`, {
+              step: "uploading_drive",
+              percent,
+            });
+          }
+        },
+      });
+
+      if (driveSummary.attempted) {
+        finalClips = finalClips.map((clip, idx) => {
+          const r = driveSummary.results[idx];
+          return r ? { ...clip, driveFileId: r.fileId, driveUrl: r.url } : clip;
+        });
+      }
+    } catch (err) {
+      console.warn(`[publishJobClips] Upload Google Drive gagal untuk job ${jobId}:`, err);
     }
 
     await db

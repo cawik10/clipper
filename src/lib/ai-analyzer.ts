@@ -1,135 +1,205 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+/**
+ * 🧠 AI ANALYSIS — PEMILIHAN MOMEN VIRAL
+ * =====================================================================
+ * Menganalisis transkrip video dan memilih momen-momen terbaik untuk
+ * dijadikan klip Shorts. Menggunakan Gemini sebagai provider utama dan
+ * Groq sebagai fallback otomatis (lihat src/lib/ai-provider.ts) — TIDAK
+ * ada ketergantungan ke ChatGPT/OpenAI sama sekali.
+ *
+ * Kalau kedua provider AI gagal/tidak dikonfigurasi, fungsi ini tetap
+ * mengembalikan hasil lewat `generateFallbackMoments()` (pembagian waktu
+ * merata) supaya bot tetap bisa menghasilkan klip walau AI sedang down.
+ *
+ * 👉 Mudah diubah:
+ *    - Provider & model AI → src/lib/ai-provider.ts
+ *    - Niche prompt / arahan AI → src/lib/niche-prompt.ts
+ */
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-3.8-flash" });
+import type { ClipResult } from "@/db/schema";
+import { generateAiText, extractJson } from "@/lib/ai-provider";
+import { buildNicheInstruction } from "@/lib/niche-prompt";
 
-async function analyzeWithGroq(prompt: string): Promise<string> {
-  const groqApiKey = process.env.GROQ_API_KEY;
-  if (!groqApiKey) {
-    throw new Error("GROQ_API_KEY tidak dikonfigurasi");
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface AnalyzeVideoInput {
+  title?: string | null;
+  duration: number;
+  transcript: TranscriptSegment[];
+  platform?: string;
+  language?: string;
+}
+
+export type ClipCandidate = Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">;
+
+function formatTranscript(segments: TranscriptSegment[]): string {
+  if (!segments.length) return "Tidak ada transkrip tersedia.";
+  return segments
+    .map((s) => `[${Math.round(s.start)}s-${Math.round(s.end)}s] ${s.text}`)
+    .join("\n")
+    .slice(0, 12000); // batasi supaya prompt tidak terlalu besar
+}
+
+function buildPrompt(
+  video: AnalyzeVideoInput,
+  maxClips: number,
+  minDuration: number,
+  maxDuration: number,
+  targetDuration: number,
+  nichePrompt?: string | null
+): { system: string; user: string } {
+  const system =
+    "Kamu adalah AI ahli analisis video & content strategist yang bertugas menemukan momen-momen " +
+    "paling viral dari sebuah video untuk dijadikan klip pendek (Shorts/Reels/TikTok). " +
+    "Selalu balas HANYA dengan JSON array yang valid, tanpa teks tambahan, tanpa markdown code block.";
+
+  const nicheInstruction = buildNicheInstruction(nichePrompt);
+
+  const user =
+    `Judul video: "${video.title || "Tidak diketahui"}"\n` +
+    `Platform asal: ${video.platform || "tidak diketahui"}\n` +
+    `Durasi total video: ${Math.round(video.duration)} detik\n` +
+    `Bahasa: ${video.language || "id"}\n` +
+    nicheInstruction +
+    `\nTranskrip (format [awal-akhir] teks):\n${formatTranscript(video.transcript)}\n\n` +
+    `TUGAS:\n` +
+    `Pilih maksimal ${maxClips} momen TERBAIK & PALING VIRAL untuk dijadikan klip pendek. ` +
+    `Setiap klip HARUS berdurasi antara ${minDuration}-${maxDuration} detik (target ideal ~${targetDuration} detik). ` +
+    `Pilih momen yang punya hook kuat di awal, emosi/insight/drama/komedi yang jelas, dan berdiri sendiri (tidak butuh konteks sebelumnya). ` +
+    `Jangan pilih rentang waktu yang tumpang-tindih satu sama lain.\n\n` +
+    `Balas HANYA dengan JSON array seperti ini (tanpa teks lain):\n` +
+    `[{"startTime": 12, "endTime": 42, "title": "Judul menarik < 60 karakter", ` +
+    `"description": "Deskripsi singkat 1-2 kalimat untuk caption", ` +
+    `"tags": ["tag1", "tag2", "tag3"], "viralScore": 8, "reason": "Alasan singkat kenapa momen ini viral"}]`;
+
+  return { system, user };
+}
+
+function clampDuration(startTime: number, endTime: number, minDuration: number, maxDuration: number, totalDuration: number) {
+  let start = Math.max(0, Math.round(startTime));
+  let end = Math.max(start + 1, Math.round(endTime));
+  let duration = end - start;
+
+  if (duration < minDuration) end = start + minDuration;
+  if (duration > maxDuration) end = start + maxDuration;
+
+  if (totalDuration > 0 && end > totalDuration) {
+    end = Math.round(totalDuration);
+    start = Math.max(0, end - Math.min(maxDuration, Math.max(minDuration, duration)));
   }
 
-  // Di dalam src/lib/ai-analyzer.ts
-const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-  method: "POST",
-  headers: {
-    "Authorization": `Bearer ${groqApiKey}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    model: "gemma2-9b-it", // 💡 Perbarui ke model aktif Groq
-    messages: [
-      { role: "system", content: "Kamu adalah AI analisis video. Kembalikan JSON array murni." },
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.2,
-  }),
-});
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Groq API Error ${response.status}: ${errText}`);
-  }
-
-  const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return data.choices?.[0]?.message?.content || "";
+  return { startTime: start, endTime: Math.max(end, start + 1) };
 }
 
 function generateFallbackMoments(
   duration: number,
   maxClips: number,
   targetDuration: number
-): Array<{ startTime: number; endTime: number; title: string; summary: string }> {
+): ClipCandidate[] {
   const validDuration = duration && duration > 0 ? duration : 180;
-  const clips = [];
-  const interval = Math.floor(validDuration / (maxClips + 1));
+  const clips: ClipCandidate[] = [];
+  const interval = Math.max(1, Math.floor(validDuration / (maxClips + 1)));
   const uniqueId = Math.floor(1000 + Math.random() * 9000);
 
   for (let i = 1; i <= maxClips; i++) {
     const start = Math.floor(i * interval);
-    const clipDuration = Math.min(targetDuration, validDuration - start);
+    const clipDuration = Math.min(targetDuration, Math.max(5, validDuration - start));
     const end = start + clipDuration;
 
-    if (clipDuration > 5) {
+    if (clipDuration > 5 && end <= validDuration + 1) {
       clips.push({
+        index: clips.length,
         startTime: start,
         endTime: end,
-        title: `Klip Auto #${uniqueId} - Segmen ${i}`,
-        summary: `Momen potongan otomatis interval ${i}`,
+        duration: clipDuration,
+        title: `Klip Menarik #${uniqueId}-${i}`,
+        description: `Momen potongan otomatis dari segmen ${i} video.`,
+        tags: ["shorts", "viral", "clip"],
+        viralScore: 6,
+        reason: "Dipilih otomatis (fallback) karena AI analysis tidak tersedia/gagal.",
       });
     }
   }
 
-  return clips.length > 0
-    ? clips
-    : [
-        {
-          startTime: 0,
-          endTime: Math.min(validDuration, targetDuration),
-          title: `Klip Auto #${uniqueId} - Segmen Utama`,
-          summary: "Momen potongan otomatis",
-        },
-      ];
+  if (!clips.length) {
+    const end = Math.min(validDuration, targetDuration);
+    clips.push({
+      index: 0,
+      startTime: 0,
+      endTime: Math.max(end, 5),
+      duration: Math.max(end, 5),
+      title: `Klip Utama #${uniqueId}`,
+      description: "Momen potongan otomatis dari bagian utama video.",
+      tags: ["shorts", "viral", "clip"],
+      viralScore: 6,
+      reason: "Dipilih otomatis (fallback) karena AI analysis tidak tersedia/gagal.",
+    });
+  }
+
+  return clips;
 }
 
+/**
+ * Analisis video (judul + transkrip) dan kembalikan daftar momen terbaik
+ * untuk dijadikan klip. Mencoba Gemini → Groq (lihat ai-provider.ts),
+ * lalu jatuh ke pembagian waktu merata kalau semua provider AI gagal.
+ */
 export async function analyzeVideoForClips(
-  transcript: string,
-  duration: number,
-  maxClips: number = 3,
-  targetDuration: number = 30
-): Promise<Array<{ startTime: number; endTime: number; title: string; summary: string }>> {
-  const prompt = `Analisis video berikut dan pilih maksimal ${maxClips} momen terbaik berdurasi ~${targetDuration} detik.
-Durasi total: ${duration} detik.
-Transkrip: ${transcript || "Tidak ada transkrip."}
+  video: AnalyzeVideoInput,
+  maxClips: number = 5,
+  minDuration: number = 20,
+  maxDuration: number = 40,
+  targetDuration: number = 30,
+  nichePrompt?: string | null
+): Promise<ClipCandidate[]> {
+  const { system, user } = buildPrompt(video, maxClips, minDuration, maxDuration, targetDuration, nichePrompt);
 
-Kembalikan HANYA JSON Array valid:
-[{"startTime": 10, "endTime": 40, "title": "Judul Klip", "summary": "Ringkasan"}]`;
-
-  let responseText = "";
-
-  // 1. Coba Gemini API
+  let rawList: unknown[] = [];
   try {
-    const result = await model.generateContent(prompt);
-    responseText = result.response?.text() || "";
-  } catch (geminiErr) {
-    console.warn("[ai-analyzer] Gemini API error, mencoba fallback ke Groq...", geminiErr);
-    // 2. Fallback ke Groq API
-    try {
-      responseText = await analyzeWithGroq(prompt);
-    } catch (groqErr) {
-      console.warn("[ai-analyzer] Groq API juga gagal/belum diisi:", groqErr);
+    const { text, provider } = await generateAiText(system, user);
+    const parsed = extractJson<unknown>(text);
+    if (Array.isArray(parsed)) {
+      rawList = parsed;
+    } else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { clips?: unknown[] }).clips)) {
+      rawList = (parsed as { clips: unknown[] }).clips;
     }
+    console.log(`[ai-analyzer] Analisis berhasil via provider "${provider}" (${rawList.length} momen mentah).`);
+  } catch (err) {
+    console.warn("[ai-analyzer] Semua provider AI gagal, memakai fallback pembagian waktu merata:", err);
   }
 
-  // 3. Safe Parsing
-  if (responseText) {
-    try {
-      const jsonMatch = responseText.match(/\[[\s\S]*\]/) || responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const rawParsed = JSON.parse(jsonMatch[0]);
-        let list: any[] = [];
+  if (rawList.length > 0) {
+    const mapped: ClipCandidate[] = rawList.slice(0, maxClips).map((raw, idx) => {
+      const item = (raw || {}) as Record<string, unknown>;
+      const { startTime, endTime } = clampDuration(
+        Number(item.startTime) || 0,
+        Number(item.endTime) || targetDuration,
+        minDuration,
+        maxDuration,
+        video.duration
+      );
+      const tagsRaw = item.tags;
+      const tags = Array.isArray(tagsRaw) ? tagsRaw.map((t) => String(t)).slice(0, 8) : ["shorts", "viral"];
 
-        if (Array.isArray(rawParsed)) {
-          list = rawParsed;
-        } else if (rawParsed && Array.isArray(rawParsed.clips)) {
-          list = rawParsed.clips;
-        }
+      return {
+        index: idx,
+        startTime,
+        endTime,
+        duration: endTime - startTime,
+        title: String(item.title || `Klip Momen ${idx + 1}`).slice(0, 100),
+        description: String(item.description || item.summary || `Ringkasan klip ${idx + 1}`).slice(0, 500),
+        tags,
+        viralScore: Math.min(10, Math.max(1, Math.round(Number(item.viralScore) || 7))),
+        reason: String(item.reason || "Momen menarik hasil analisis AI.").slice(0, 300),
+      };
+    });
 
-        if (list.length > 0) {
-          return list.slice(0, maxClips).map((item, idx) => ({
-            startTime: Number(item.startTime) || 0,
-            endTime: Number(item.endTime) || targetDuration,
-            title: String(item.title || `Klip Momen ${idx + 1}`),
-            summary: String(item.summary || `Ringkasan klip ${idx + 1}`),
-          }));
-        }
-      }
-    } catch (parseErr) {
-      console.warn("[ai-analyzer] Parse JSON gagal:", parseErr);
-    }
+    if (mapped.length > 0) return mapped;
   }
 
-  // 4. Fallback Waktu Merata Unik
-  console.log("[ai-analyzer] Menggunakan Fallback Pemotongan Durasi Merata.");
-  return generateFallbackMoments(duration, maxClips, targetDuration);
+  console.log("[ai-analyzer] Menggunakan fallback pemotongan durasi merata.");
+  return generateFallbackMoments(video.duration, maxClips, targetDuration);
 }

@@ -12,11 +12,13 @@ import {
   buildFFmpegFilterArgs,
   TARGET_WIDTH,
   TARGET_HEIGHT,
+  type AspectRatioMode,
 } from "@/lib/video-config";
 import { generateThumbnail } from "@/lib/thumbnail-generator";
 import { applyWatermark } from "@/lib/watermark";
 import { applyIntroOutro } from "@/lib/intro-outro";
 import { applyZoomEffect } from "@/lib/zoom-effect";
+import { hasGroq, hasGemini, getGroqWhisperModel, getGeminiModel } from "@/lib/ai-provider";
 import type { ClipResult } from "@/db/schema";
 
 const execAsync = promisify(exec);
@@ -61,7 +63,7 @@ export async function downloadVideo(
   url: string,
   jobId: string,
   onProgress?: (percent: number, rawOutput: string) => void
-): Promise<{ filePath: string; duration: number }> {
+): Promise<{ filePath: string; title: string; duration: number }> {
   if (!fs.existsSync(DOWNLOAD_DIR)) {
     fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
   }
@@ -71,6 +73,8 @@ export async function downloadVideo(
     fs.existsSync("cookies.txt") &&
     fs.readFileSync("cookies.txt", "utf-8").trim().length > 0;
 
+  // `--print` menuliskan judul video ke stdout dengan prefix unik supaya
+  // mudah diekstrak dari log tanpa perlu request terpisah ke yt-dlp.
   const baseFlags = [
     "--no-playlist",
     "--merge-output-format mp4",
@@ -79,6 +83,7 @@ export async function downloadVideo(
     "--concurrent-fragments 4",
     "--progress",
     "--newline",
+    `--print "AUTOCLIP_TITLE::%(title)s"`,
     `-o "${outputTemplate}"`,
   ];
 
@@ -104,27 +109,29 @@ export async function downloadVideo(
   ].join(" ");
 
   const executeDownload = async (command: string) => {
-    return new Promise<{ filePath: string; duration: number }>((resolve, reject) => {
+    return new Promise<{ filePath: string; title: string; duration: number }>((resolve, reject) => {
       let stderrText = "";
+      let stdoutText = "";
 
-      const process = exec(command, {
+      const proc = exec(command, {
         maxBuffer: 1024 * 1024 * 50,
         timeout: 300000,
       });
 
-      process.stdout?.on("data", (data: Buffer) => {
+      proc.stdout?.on("data", (data: Buffer) => {
         const text = data.toString();
-        const match = text.match(/[download]\s+(\d+\.\d+)%/);
+        stdoutText += text;
+        const match = text.match(/\[download\]\s+(\d+\.\d+)%/);
         if (match && onProgress) {
           onProgress(parseFloat(match[1]), text);
         }
       });
 
-      process.stderr?.on("data", (data: Buffer) => {
+      proc.stderr?.on("data", (data: Buffer) => {
         stderrText += data.toString();
       });
 
-      process.on("close", async (code) => {
+      proc.on("close", async (code) => {
         if (code !== 0) {
           return reject(
             new Error(`yt-dlp exited with code ${code}: ${stderrText.trim()}`)
@@ -137,15 +144,17 @@ export async function downloadVideo(
           return reject(new Error("File hasil download tidak ditemukan"));
         }
         const downloadedFile = path.join(DOWNLOAD_DIR, files[0]);
+        const titleMatch = stdoutText.match(/AUTOCLIP_TITLE::(.+)/);
+        const title = titleMatch ? titleMatch[1].trim().slice(0, 200) : "Video Tanpa Judul";
         try {
           const duration = await getVideoDuration(downloadedFile);
-          resolve({ filePath: downloadedFile, duration });
+          resolve({ filePath: downloadedFile, title, duration });
         } catch (err) {
           reject(err);
         }
       });
 
-      process.on("error", (err) => reject(err));
+      proc.on("error", (err) => reject(err));
     });
   };
 
@@ -169,25 +178,39 @@ export async function downloadVideo(
 // =====================================================================
 export async function transcribeAudio(
   videoPath: string,
-  language: string = "id"
+  language: string = "id",
+  durationSeconds: number = 0
 ): Promise<{ start: number; end: number; text: string }[]> {
   ensureDir(TMP_DIR);
   const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
   const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
   await execAsync(extractCmd, { timeout: 60000 });
 
+  // 🎙️ Prioritas: Groq Whisper (cepat, timestamp akurat per-kalimat) →
+  // fallback Gemini (multimodal audio, timestamp diperkirakan merata).
+  // ChatGPT/OpenAI Whisper TIDAK dipakai lagi (sesuai permintaan) — kalau
+  // ingin ganti provider/model, lihat src/lib/ai-provider.ts.
   try {
-    const openaiKey = process.env.OPENAI_API_KEY;
-    const groqKey = process.env.GROQ_API_KEY;
-
-    if (openaiKey) {
-      return await transcribeWithOpenAI(audioPath, language, openaiKey);
-    } else if (groqKey) {
-      return await transcribeWithGroq(audioPath, language, groqKey);
-    } else {
-      console.warn("[transcribe] Tidak ada API key tersedia, skip transkripsi");
-      return [];
+    if (hasGroq()) {
+      try {
+        const result = await transcribeWithGroq(audioPath, language);
+        if (result.length) return result;
+      } catch (err) {
+        console.warn("[transcribe] Groq Whisper gagal, mencoba Gemini...", err);
+      }
     }
+
+    if (hasGemini()) {
+      try {
+        const result = await transcribeWithGemini(audioPath, language, durationSeconds);
+        if (result.length) return result;
+      } catch (err) {
+        console.warn("[transcribe] Gemini transcription gagal:", err);
+      }
+    }
+
+    console.warn("[transcribe] Tidak ada provider AI yang berhasil, lanjut tanpa transkrip.");
+    return [];
   } finally {
     try {
       if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
@@ -197,43 +220,15 @@ export async function transcribeAudio(
   }
 }
 
-async function transcribeWithOpenAI(
-  audioPath: string,
-  language: string,
-  apiKey: string
-): Promise<{ start: number; end: number; text: string }[]> {
-  const OpenAI = (await import("openai")).default;
-  const client = new OpenAI({ apiKey });
-  const audioBuffer = fs.readFileSync(audioPath);
-  const blob = new Blob([audioBuffer], { type: "audio/mp3" });
-  const file = new File([blob], "audio.mp3", { type: "audio/mp3" });
-  const response = await client.audio.transcriptions.create({
-    model: "whisper-1",
-    file,
-    language: language === "id" ? "id" : language,
-    response_format: "verbose_json",
-    timestamp_granularities: ["segment"],
-  });
-  const data = response as unknown as {
-    segments?: { start: number; end: number; text: string }[];
-  };
-  return (data.segments || []).map((s) => ({
-    start: s.start,
-    end: s.end,
-    text: s.text.trim(),
-  }));
-}
-
 async function transcribeWithGroq(
   audioPath: string,
-  language: string,
-  apiKey: string
+  language: string
 ): Promise<{ start: number; end: number; text: string }[]> {
   const FormData = (await import("form-data")).default;
   const axios = (await import("axios")).default;
   const form = new FormData();
   form.append("file", fs.createReadStream(audioPath), { filename: "audio.mp3" });
-  form.append("model", "whisper-large-v3");
+  form.append("model", getGroqWhisperModel());
   form.append("language", language);
   form.append("response_format", "verbose_json");
 
@@ -241,7 +236,7 @@ async function transcribeWithGroq(
     "https://api.groq.com/openai/v1/audio/transcriptions",
     form,
     {
-      headers: { Authorization: `Bearer ${apiKey}`, ...form.getHeaders() },
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, ...form.getHeaders() },
       timeout: 120000,
     }
   );
@@ -249,45 +244,82 @@ async function transcribeWithGroq(
   return segments.map((s: { start: number; end: number; text: string }) => ({
     start: s.start,
     end: s.end,
-    text: s.text.trim(),
+    text: (s.text || "").trim(),
+  }));
+}
+
+/**
+ * Fallback transkripsi via Gemini (multimodal audio understanding). Gemini
+ * tidak memberi timestamp per-kata seperti Whisper, jadi transkrip dibagi
+ * menjadi beberapa "segmen semu" yang disebar merata sepanjang durasi video
+ * supaya tetap kompatibel dengan AI analyzer yang memakai rentang waktu.
+ */
+async function transcribeWithGemini(
+  audioPath: string,
+  language: string,
+  durationSeconds: number
+): Promise<{ start: number; end: number; text: string }[]> {
+  const { GoogleGenerativeAI } = await import("@google/generative-ai");
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  const model = genAI.getGenerativeModel({ model: getGeminiModel() });
+  const audioBuffer = fs.readFileSync(audioPath);
+
+  const langLabel = language === "id" ? "Indonesia" : language;
+  const result = await model.generateContent([
+    { inlineData: { data: audioBuffer.toString("base64"), mimeType: "audio/mp3" } },
+    {
+      text:
+        `Transkrip audio ini ke teks bahasa ${langLabel} secara lengkap dan akurat, kata demi kata. ` +
+        `Balas HANYA dengan teks transkripnya saja, tanpa komentar/pembuka/penutup tambahan.`,
+    },
+  ]);
+  const text = (result.response?.text() || "").trim();
+  if (!text) return [];
+
+  const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 0);
+  if (!sentences.length) return [];
+
+  const total = durationSeconds > 0 ? durationSeconds : Math.max(30, sentences.length * 4);
+  const step = total / sentences.length;
+
+  return sentences.map((sentence, i) => ({
+    start: Math.round(i * step),
+    end: Math.round(Math.min(total, (i + 1) * step)),
+    text: sentence.trim(),
   }));
 }
 
 // =====================================================================
 // CLIP PROCESSING (Cut → Zoom → Watermark → Intro/Outro → Thumbnail)
 // =====================================================================
+
+/**
+ * Potong & proses semua momen hasil AI analysis menjadi klip final.
+ *   - `makeVertical=true`  → konversi ke 9:16 sesuai ASPECT_RATIO_MODE
+ *     (lihat src/lib/video-config.ts), lalu tambahkan zoom/watermark/
+ *     intro-outro/thumbnail sesuai konfigurasi aktif.
+ *   - `makeVertical=false` → video dibiarkan pada rasio aslinya ("Original
+ *     (Keep Ratio)" di tombol Telegram), tahapan lain tetap berjalan.
+ */
 export async function processClips(
   filePath: string,
-  moments: Array<{ startTime: number; endTime: number; title: string; summary: string }>,
+  moments: Array<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">>,
   jobId: string,
-  aspectRatioMode: string = "crop"
+  makeVertical: boolean = true,
+  onProgress?: (clipIndex: number, total: number) => void | Promise<void>
 ): Promise<ClipResult[]> {
+  ensureDir(TMP_DIR);
+  const mode = makeVertical ? getAspectRatioMode() : "none";
   const results: ClipResult[] = [];
 
   for (let i = 0; i < moments.length; i++) {
-    const moment = moments[i];
-    const outputPath = path.join(DOWNLOAD_DIR, `clip_cut_${jobId}_${i}.mp4`);
-
     try {
-      // 💡 GUNAKAN filePath (BUKAN downloadResult.filePath)
-      await cutAndConvertClip(
-        filePath,
-        moment.startTime,
-        moment.endTime,
-        outputPath,
-        aspectRatioMode
-      );
-
-      results.push({
-        filePath: outputPath,
-        startTime: moment.startTime,
-        endTime: moment.endTime,
-        title: moment.title,
-        summary: moment.summary,
-      });
+      const result = await processSingleClip(filePath, moments[i], mode, jobId, i);
+      results.push(result);
     } catch (err) {
-      console.error(`[clip] ❌ Klip ${i} gagal:`, err);
+      console.error(`[clip] ❌ Klip ${i} gagal diproses:`, err);
     }
+    if (onProgress) await onProgress(i, moments.length);
   }
 
   if (results.length === 0) {
@@ -304,15 +336,9 @@ async function processSingleClip(
   jobId: string,
   clipIndex: number
 ): Promise<ClipResult> {
-  // Step 1: Cut + convert to 9:16
+  // Step 1: Cut + convert aspect ratio
   const cutPath = path.join(TMP_DIR, `clip_cut_${jobId}_${clipIndex}.mp4`);
-  await cutAndConvertClip(
-  downloadResult.filePath,
-  moment.startTime,
-  moment.endTime,
-  outputPath,
-  job.aspectRatioMode || "crop"
-);
+  await cutAndConvertClip(videoPath, clip.startTime, clip.endTime, cutPath, mode);
   console.log(`[clip] ✅ Step 1/4 Cut selesai: klip ${clipIndex}`);
 
   // Step 2: Zoom effect
@@ -377,24 +403,40 @@ async function processSingleClip(
   };
 }
 
+/**
+ * Potong video sumber pada rentang [startTime, endTime] lalu konversi sesuai
+ * `aspectRatioMode` (blur | crop | pad | stretch | none). Logika filter FFmpeg
+ * diambil dari src/lib/video-config.ts (`buildFFmpegFilterArgs`) supaya semua
+ * mode 9:16 konsisten dengan dokumentasi env var `ASPECT_RATIO_MODE`.
+ */
 export async function cutAndConvertClip(
   inputPath: string,
   startTime: number,
   endTime: number,
   outputPath: string,
-  aspectRatioMode: string = "crop"
+  aspectRatioMode: AspectRatioMode | string = "blur"
 ): Promise<string> {
-  const duration = Math.max(5, Math.abs(endTime - startTime));
-  const mode = aspectRatioMode || "crop";
+  const duration = Math.max(1, Math.abs(endTime - startTime));
+  const mode = (Object.prototype.hasOwnProperty.call(
+    { blur: 1, crop: 1, pad: 1, stretch: 1, none: 1 },
+    aspectRatioMode
+  )
+    ? aspectRatioMode
+    : "blur") as AspectRatioMode;
 
-  // Filter kompleks untuk format 9:16 Vertical Shorts
-  const filterComplex = `"[0:v]fps=30,split=2[main][bg];[bg]scale=270:480,boxblur=10:2,scale=1080:1920[blurred];[main]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black@0[fg];[blurred][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[out]"`;
+  const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
 
-  const ffmpegCmd = `ffmpeg -y -ss ${startTime} -t ${duration} -i "${inputPath}" -filter_complex ${filterComplex} -map "[out]" -map 0:a? -threads 2 -c:v libx264 -crf 23 -preset fast -c:a aac -ar 44100 -ac 2 -pix_fmt yuv420p "${outputPath}"`;
+  const videoArgs = useFilterComplex
+    ? `-filter_complex "${filterValue}" -map "[out]" -map 0:a?`
+    : `-vf "${filterValue}" -map 0:v:0 -map 0:a?`;
+
+  const ffmpegCmd =
+    `ffmpeg -y -ss ${startTime} -t ${duration} -i "${inputPath}" ${videoArgs} ` +
+    `-threads 2 -c:v libx264 -crf 23 -preset fast -c:a aac -ar 44100 -ac 2 -pix_fmt yuv420p "${outputPath}"`;
 
   return new Promise((resolve, reject) => {
-    exec(ffmpegCmd, (err) => {
-      if (err) reject(err);
+    exec(ffmpegCmd, { timeout: 120000, maxBuffer: 1024 * 1024 * 20 }, (err, _stdout, stderr) => {
+      if (err) reject(new Error(`ffmpeg gagal memotong klip: ${err.message}\n${String(stderr).slice(-500)}`));
       else resolve(outputPath);
     });
   });

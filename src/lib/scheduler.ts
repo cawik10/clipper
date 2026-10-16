@@ -79,52 +79,29 @@ async function refineHoursWithAI(
   nicheText: string,
   platform: string
 ): Promise<{ hours: number[]; reason: string } | null> {
+  if (!hasAnyAiProvider()) return null;
+
+  const system =
+    "Kamu ahli strategi konten sosial media (YouTube Shorts/TikTok/Reels). " +
+    "Balas HANYA dengan JSON valid, tanpa teks tambahan, tanpa markdown code block.";
   const prompt =
-    `Kamu adalah ahli strategi konten YouTube Shorts/TikTok. ` +
     `Niche/topik konten: "${nicheText || "umum / belum ditentukan"}". Platform: ${platform}. ` +
     `Sebutkan ${getSchedulerSlotCount()} jam terbaik (format angka 0-23, waktu lokal audiens Indonesia WIB) ` +
     `untuk mem-publish video pendek agar mendapat views & engagement maksimal. ` +
     `Balas HANYA dengan JSON: {"hours": [number,...], "reason": "alasan singkat 1-2 kalimat dalam Bahasa Indonesia"}.`;
 
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      const OpenAI = (await import("openai")).default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "Kamu ahli strategi konten sosial media. Balas hanya JSON valid." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.4,
-        max_tokens: 300,
-        response_format: { type: "json_object" },
-      });
-      const content = response.choices[0]?.message?.content || "{}";
-      const parsed = JSON.parse(content);
+  try {
+    const { text, provider } = await generateAiText(system, prompt);
+    const parsed = extractJson<{ hours?: unknown; reason?: unknown }>(text);
+    if (parsed) {
       const hours = normalizeHours(parsed.hours);
-      if (hours.length) return { hours, reason: String(parsed.reason || "").slice(0, 300) };
-    } catch (err) {
-      console.error("[scheduler] OpenAI hour recommendation failed:", err);
-    }
-  }
-
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-      const model = genAI.getGenerativeModel({ model: "gemini-3.8-flash" });
-      const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON.");
-      const text = result.response.text();
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        const hours = normalizeHours(parsed.hours);
-        if (hours.length) return { hours, reason: String(parsed.reason || "").slice(0, 300) };
+      if (hours.length) {
+        console.log(`[scheduler] Rekomendasi jam dari provider "${provider}".`);
+        return { hours, reason: String(parsed.reason || "").slice(0, 300) };
       }
-    } catch (err) {
-      console.error("[scheduler] Gemini hour recommendation failed:", err);
     }
+  } catch (err) {
+    console.warn("[scheduler] Gagal mendapat rekomendasi jam dari AI, memakai fallback statis:", err);
   }
 
   return null;
