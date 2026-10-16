@@ -9,21 +9,22 @@ async function analyzeWithGroq(prompt: string): Promise<string> {
     throw new Error("GROQ_API_KEY tidak dikonfigurasi");
   }
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${groqApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "llama3-8b-8192", // Model aktif & gratis di Groq API
-      messages: [
-        { role: "system", content: "Kamu adalah AI analisis video. Kembalikan JSON array murni." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.2,
-    }),
-  });
+  // Di dalam src/lib/ai-analyzer.ts
+const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  method: "POST",
+  headers: {
+    "Authorization": `Bearer ${groqApiKey}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: "llama-3.3-70b-versatile", // 💡 Perbarui ke model aktif Groq
+    messages: [
+      { role: "system", content: "Kamu adalah AI analisis video. Kembalikan JSON array murni." },
+      { role: "user", content: prompt },
+    ],
+    temperature: 0.2,
+  }),
+});
 
   if (!response.ok) {
     const errText = await response.text();
