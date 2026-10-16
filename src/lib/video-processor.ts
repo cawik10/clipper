@@ -256,30 +256,41 @@ async function transcribeWithGroq(
 // CLIP PROCESSING (Cut → Zoom → Watermark → Intro/Outro → Thumbnail)
 // =====================================================================
 export async function processClips(
-  videoPath: string,
-  clips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[],
+  filePath: string,
+  moments: Array<{ startTime: number; endTime: number; title: string; summary: string }>,
   jobId: string,
-  makeVertical: boolean = true,
-  onProgress?: (clipIndex: number, total: number) => Promise<void>
+  aspectRatioMode: string = "crop"
 ): Promise<ClipResult[]> {
-  ensureDir(TMP_DIR);
-  const mode = makeVertical ? getAspectRatioMode() : "none";
   const results: ClipResult[] = [];
 
-  for (let i = 0; i < clips.length; i++) {
-    if (onProgress) await onProgress(i, clips.length);
+  for (let i = 0; i < moments.length; i++) {
+    const moment = moments[i];
+    const outputPath = path.join(DOWNLOAD_DIR, `clip_cut_${jobId}_${i}.mp4`);
+
     try {
-      const result = await processSingleClip(videoPath, clips[i], mode, jobId, i);
-      results.push(result);
+      // 💡 GUNAKAN filePath (BUKAN downloadResult.filePath)
+      await cutAndConvertClip(
+        filePath,
+        moment.startTime,
+        moment.endTime,
+        outputPath,
+        aspectRatioMode
+      );
+
+      results.push({
+        filePath: outputPath,
+        startTime: moment.startTime,
+        endTime: moment.endTime,
+        title: moment.title,
+        summary: moment.summary,
+      });
     } catch (err) {
       console.error(`[clip] ❌ Klip ${i} gagal:`, err);
-      results.push({
-        ...clips[i],
-        index: i,
-        filePath: undefined,
-        thumbnailPath: undefined,
-      });
     }
+  }
+
+  if (results.length === 0) {
+    throw new Error("Semua klip gagal diproses");
   }
 
   return results;

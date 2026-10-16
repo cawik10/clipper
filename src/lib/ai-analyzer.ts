@@ -10,20 +10,20 @@ async function analyzeWithGroq(prompt: string): Promise<string> {
   }
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${groqApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-     model: "llama-3.1-8b-instant", // Model aktif dan gratis di Groq API
-     messages: [
+  method: "POST",
+  headers: {
+    "Authorization": `Bearer ${groqApiKey}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: "llama-3.1-8b-instant",
+    messages: [
       { role: "system", content: "Kamu adalah AI analisis video. Kembalikan JSON array murni." },
       { role: "user", content: prompt },
-     ],
-     temperature: 0.2,
-    }),
-  });
+    ],
+    temperature: 0.2,
+  }),
+});
 
   if (!response.ok) {
     throw new Error(`Groq API Error: ${response.status}`);
