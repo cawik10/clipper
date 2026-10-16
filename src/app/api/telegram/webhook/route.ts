@@ -6,13 +6,16 @@ export const maxDuration = 300;
 
 const handler = webhookCallback(bot, "std/http");
 
+// Contoh di route.ts webhook
 export async function POST(req: Request) {
-  try {
-    return await handler(req);
-  } catch (err) {
-    console.error("Webhook error:", err);
-    return new Response("OK", { status: 200 });
-  }
+  const body = await req.json();
+
+  // Tangani update bot Grammy/Telegraf...
+  // Jalankan proses pekerjaan latar belakang TANPA 'await' agar webhook langsung merespons
+  bot.handleUpdate(body).catch((err) => console.error("Webhook process error:", err));
+
+  // Balas ke Telegram dalam < 1 detik agar tidak Request timed out after 10000 ms
+  return Response.json({ ok: true });
 }
 
 export async function GET() {
