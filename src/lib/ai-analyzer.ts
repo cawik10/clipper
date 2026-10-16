@@ -6,27 +6,28 @@ const model = genAI.getGenerativeModel({ model: "gemini-3.8-flash" });
 async function analyzeWithGroq(prompt: string): Promise<string> {
   const groqApiKey = process.env.GROQ_API_KEY;
   if (!groqApiKey) {
-    throw new Error("GROQ_API_KEY tidak dikonfigurasi");
+    throw new Error("GROQ_API_KEY belum dikonfigurasi di Environment Variables");
   }
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-  method: "POST",
-  headers: {
-    "Authorization": `Bearer ${groqApiKey}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    model: "llama-3.1-8b-instant",
-    messages: [
-      { role: "system", content: "Kamu adalah AI analisis video. Kembalikan JSON array murni." },
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.2,
-  }),
-});
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${groqApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: "Kamu adalah AI analisis video. Kembalikan JSON array murni." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+    }),
+  });
 
   if (!response.ok) {
-    throw new Error(`Groq API Error: ${response.status}`);
+    const errText = await response.text();
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
   }
 
   const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
