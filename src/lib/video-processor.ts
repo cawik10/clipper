@@ -367,6 +367,8 @@ async function cutAndConvertClip(
   mode: ReturnType<typeof getAspectRatioMode>
 ): Promise<void> {
   const duration = Math.max(5, Math.abs(endTime - startTime));
+  const useFilterComplex = aspectRatioMode === "blur" || aspectRatioMode === "crop" || true;
+  const filterComplex = `"[0:v]fps=30,split=2[main][bg];[bg]scale=270:480,boxblur=10:2,scale=1080:1920[blurred];[main]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black@0[fg];[blurred][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[out]"`;
   const ffmpegCmd = `ffmpeg -y -ss ${startTime} -t ${duration} -i "${inputPath}" ...`;
 
   let cmd: string;
