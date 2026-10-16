@@ -54,7 +54,7 @@ export async function downloadVideo(
     "--merge-output-format", "mp4",
     "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
     "--cookies", "cookies.txt",
-    "--extractor-args", '"youtube:player_client=web_safari,mweb,android_vr"',
+    "--extractor-args", '"youtube:player_client=tv,ios"',
     "--progress",
     "--newline",
     "-o", `"${outputTemplate}"`,
