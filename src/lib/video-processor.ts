@@ -294,7 +294,13 @@ async function processSingleClip(
 ): Promise<ClipResult> {
   // Step 1: Cut + convert to 9:16
   const cutPath = path.join(TMP_DIR, `clip_cut_${jobId}_${clipIndex}.mp4`);
-  await cutAndConvertClip(videoPath, clip.startTime, clip.endTime, cutPath, mode);
+  await cutAndConvertClip(
+  downloadResult.filePath,
+  moment.startTime,
+  moment.endTime,
+  outputPath,
+  job.aspectRatioMode || "crop"
+);
   console.log(`[clip] ✅ Step 1/4 Cut selesai: klip ${clipIndex}`);
 
   // Step 2: Zoom effect
@@ -359,59 +365,25 @@ async function processSingleClip(
   };
 }
 
-async function cutAndConvertClip(
+export async function cutAndConvertClip(
   inputPath: string,
   startTime: number,
   endTime: number,
   outputPath: string,
-  mode: ReturnType<typeof getAspectRatioMode>
-): Promise<void> {
+  aspectRatioMode: string = "crop"
+): Promise<string> {
   const duration = Math.max(5, Math.abs(endTime - startTime));
-  const useFilterComplex = aspectRatioMode === "blur" || aspectRatioMode === "crop" || true;
+  const mode = aspectRatioMode || "crop";
+
+  // Filter kompleks untuk format 9:16 Vertical Shorts
   const filterComplex = `"[0:v]fps=30,split=2[main][bg];[bg]scale=270:480,boxblur=10:2,scale=1080:1920[blurred];[main]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black@0[fg];[blurred][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[out]"`;
-  const ffmpegCmd = `ffmpeg -y -ss ${startTime} -t ${duration} -i "${inputPath}" ...`;
 
-  let cmd: string;
-  if (useFilterComplex) {
-    cmd = [
-      "ffmpeg",
-      "-y",
-      "-ss", startTime.toString(),
-      "-t", duration.toString(),
-      "-i", `"${inputPath}"`,
-      "-filter_complex", `"${filterValue}"`,
-      "-map", '"[out]"',
-      "-map", "0:a?",
-      "-threads", "2",
-      "-c:v", "libx264",
-      "-crf", "23",
-      "-preset", "fast",
-      "-c:a", "aac",
-      "-ar", "44100",
-      "-ac", "2",
-      "-pix_fmt", "yuv420p",
-      `"${outputPath}"`,
-    ].join(" ");
-  } else {
-    cmd = [
-      "ffmpeg",
-      "-y",
-      "-ss", startTime.toString(),
-      "-t", duration.toString(),
-      "-i", `"${inputPath}"`,
-      "-vf", `"${filterValue}"`,
-      "-threads", "2",
-      "-c:v", "libx264",
-      "-crf", "23",
-      "-preset", "fast",
-      "-c:a", "aac",
-      "-ar", "44100",
-      "-ac", "2",
-      "-pix_fmt", "yuv420p",
-      `"${outputPath}"`,
-    ].join(" ");
-  }
+  const ffmpegCmd = `ffmpeg -y -ss ${startTime} -t ${duration} -i "${inputPath}" -filter_complex ${filterComplex} -map "[out]" -map 0:a? -threads 2 -c:v libx264 -crf 23 -preset fast -c:a aac -ar 44100 -ac 2 -pix_fmt yuv420p "${outputPath}"`;
 
-  await execAsync(cmd, { timeout: 300000 });
-  if (!fs.existsSync(outputPath)) throw new Error("Cut clip file tidak terbuat");
+  return new Promise((resolve, reject) => {
+    exec(ffmpegCmd, (err) => {
+      if (err) reject(err);
+      else resolve(outputPath);
+    });
+  });
 }
