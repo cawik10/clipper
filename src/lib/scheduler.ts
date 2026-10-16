@@ -1,295 +1,403 @@
 /**
- * 📅 SCHEDULER / QUEUE POSTING — CORE LOGIC
- * ===========================================
- * Fitur BARU (additive, tidak mengubah src/lib/job-processor.ts yang lama).
+ * 🗓️ SCHEDULER / QUEUE POSTING
+ * =====================================================================
+ * Logika inti fitur penjadwalan upload YouTube:
+ *   - Menghitung rekomendasi jam optimal berdasarkan niche (AI kalau
+ *     tersedia, fallback ke tabel statis di scheduler-config.ts).
+ *   - CRUD baris `scheduled_uploads` (lihat src/db/schema.ts).
  *
- * Alur singkat:
- *   1. User menjalankan /schedule di Telegram setelah sebuah job selesai.
- *   2. Bot menampilkan klip-klip hasil job tsb + pilihan jam (AI rekomendasi
- *      berdasarkan niche, atau manual) → tersimpan sebagai baris di tabel
- *      `scheduled_posts` (lihat src/db/schema.ts) dengan status "pending".
- *   3. Worker background (src/lib/scheduler-worker.ts) memanggil
- *      `runDueScheduledPosts()` setiap interval (lihat scheduler-config.ts)
- *      untuk mengeksekusi antrean yang sudah jatuh tempo.
- *   4. Eksekusi:
- *      - YouTube: kalau klip sudah ter-upload sebagai Draft (private) saat
- *        job diproses, scheduler tinggal mem-publish draft tsb (update
- *        privacyStatus) tepat di jam terjadwal — cepat & tidak butuh file
- *        video lokal lagi. Kalau belum pernah ter-upload tapi file klip
- *        masih ada di disk, scheduler akan meng-upload-nya saat itu juga.
- *      - TikTok: upload klip (butuh file masih ada di disk + akun TikTok
- *        sudah terhubung lewat Content Posting API).
+ * File ini TIDAK bergantung pada `telegram-bot.ts` (supaya tidak terjadi
+ * circular import) — pengiriman notifikasi Telegram & eksekusi upload
+ * dilakukan oleh src/lib/scheduler-worker.ts.
  *
- * Semua helper di file ini dipakai bersama oleh: Telegram bot
- * (src/lib/telegram-bot.ts), API routes (src/app/api/schedule/*), dan
- * dashboard (src/app/page.tsx) — satu sumber kebenaran, mudah dirawat.
+ * Mudah diubah:
+ *   - Jam rekomendasi per niche → src/lib/scheduler-config.ts
+ *   - Interval worker / timezone / batas hari → src/lib/scheduler-config.ts
+ *   - Provider AI yang dipakai → fungsi `refineHoursWithAI()` di bawah
  */
 
-import fs from "fs";
+import { and, asc, eq, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { scheduledPosts, clipJobs, youtubeTokens, ClipResult, ScheduledPostRow } from "@/db/schema";
-import { and, asc, desc, eq, lte, inArray } from "drizzle-orm";
-import { google } from "googleapis";
+import { scheduledUploads, ScheduledUploadRow } from "@/db/schema";
 import {
-  isTokenExpired,
-  refreshAccessToken,
-  uploadClipsToYouTube,
-} from "@/lib/youtube-uploader";
-import {
-  getSchedulerGraceMinutes,
-  getSchedulerMaxAttempts,
-  getSchedulerPublishPrivacy,
-  type SchedulePlatform,
+  getSchedulerMaxDaysAhead,
+  getSchedulerSlotCount,
+  getSchedulerTimezone,
+  matchNicheOptimalHours,
 } from "@/lib/scheduler-config";
 
-export type { SchedulePlatform };
+export type ScheduleMode = "now" | "ai_recommended" | "custom";
 
-// ─── CREATE ───────────────────────────────────────────────────────────────
-
-export interface CreateScheduledPostInput {
-  telegramUserId: string;
-  telegramChatId: string;
-  jobId: string;
-  clipIndex: number;
-  platform: SchedulePlatform;
-  scheduledAt: Date;
-  source: "manual" | "ai" | "preset";
-  niche?: string | null;
+export interface ScheduleSlot {
+  date: Date;
+  label: string;
+  reason: string;
 }
 
-export async function createScheduledPost(input: CreateScheduledPostInput): Promise<ScheduledPostRow> {
-  const jobRows = await db.select().from(clipJobs).where(eq(clipJobs.jobId, input.jobId));
-  const job = jobRows[0];
-  const clip = (job?.clips as ClipResult[] | null)?.[input.clipIndex];
+// ─── TABLE BOOTSTRAP (Railway-friendly, sama pola dengan ensureDriveTable) ──
+// Membuat tabel otomatis saat runtime kalau belum ada (misal admin belum
+// sempat menjalankan `drizzle-kit push`). Idempotent & aman dipanggil
+// berkali-kali / bersamaan.
+let tableReady: Promise<void> | null = null;
+export function ensureScheduledUploadsTable(): Promise<void> {
+  if (!tableReady) {
+    tableReady = (async () => {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS scheduled_uploads (
+          id serial PRIMARY KEY,
+          job_id text NOT NULL,
+          telegram_user_id text NOT NULL,
+          telegram_chat_id text NOT NULL,
+          mode text NOT NULL DEFAULT 'custom',
+          scheduled_at timestamp NOT NULL,
+          status text NOT NULL DEFAULT 'pending',
+          recommendation_reason text,
+          attempts integer NOT NULL DEFAULT 0,
+          error_message text,
+          processed_at timestamp,
+          created_at timestamp NOT NULL DEFAULT now(),
+          updated_at timestamp NOT NULL DEFAULT now()
+        )
+      `);
+    })().catch((err) => {
+      tableReady = null;
+      throw err;
+    });
+  }
+  return tableReady;
+}
 
+// ─── REKOMENDASI JAM OPTIMAL (AI + fallback) ────────────────────────────────
+
+/**
+ * Minta AI (OpenAI/Gemini, kalau API key tersedia) untuk menyarankan jam
+ * terbaik (0-23) untuk posting berdasarkan niche + platform. Kalau AI
+ * tidak tersedia / gagal / hasilnya tidak valid, return null supaya
+ * caller jatuh ke heuristik statis di scheduler-config.ts.
+ */
+async function refineHoursWithAI(
+  nicheText: string,
+  platform: string
+): Promise<{ hours: number[]; reason: string } | null> {
+  const prompt =
+    `Kamu adalah ahli strategi konten YouTube Shorts/TikTok. ` +
+    `Niche/topik konten: "${nicheText || "umum / belum ditentukan"}". Platform: ${platform}. ` +
+    `Sebutkan ${getSchedulerSlotCount()} jam terbaik (format angka 0-23, waktu lokal audiens Indonesia WIB) ` +
+    `untuk mem-publish video pendek agar mendapat views & engagement maksimal. ` +
+    `Balas HANYA dengan JSON: {"hours": [number,...], "reason": "alasan singkat 1-2 kalimat dalam Bahasa Indonesia"}.`;
+
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "Kamu ahli strategi konten sosial media. Balas hanya JSON valid." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.4,
+        max_tokens: 300,
+        response_format: { type: "json_object" },
+      });
+      const content = response.choices[0]?.message?.content || "{}";
+      const parsed = JSON.parse(content);
+      const hours = normalizeHours(parsed.hours);
+      if (hours.length) return { hours, reason: String(parsed.reason || "").slice(0, 300) };
+    } catch (err) {
+      console.error("[scheduler] OpenAI hour recommendation failed:", err);
+    }
+  }
+
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON.");
+      const text = result.response.text();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        const hours = normalizeHours(parsed.hours);
+        if (hours.length) return { hours, reason: String(parsed.reason || "").slice(0, 300) };
+      }
+    } catch (err) {
+      console.error("[scheduler] Gemini hour recommendation failed:", err);
+    }
+  }
+
+  return null;
+}
+
+function normalizeHours(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const hours = raw
+    .map((h) => Math.round(Number(h)))
+    .filter((h) => Number.isFinite(h) && h >= 0 && h <= 23);
+  return Array.from(new Set(hours)).slice(0, getSchedulerSlotCount());
+}
+
+/**
+ * Hitung slot waktu rekomendasi (tanggal+jam) berikutnya berdasarkan niche.
+ * Mengembalikan beberapa pilihan terdekat (urut dari paling cepat) supaya
+ * user bisa memilih langsung dari Telegram.
+ */
+export async function getOptimalSlots(
+  nicheText: string | null | undefined,
+  platform: string = "youtube"
+): Promise<{ slots: ScheduleSlot[]; reason: string; nicheLabel: string }> {
+  const fallback = matchNicheOptimalHours(nicheText);
+  const ai = await refineHoursWithAI(nicheText || "", platform).catch(() => null);
+
+  const hours = ai?.hours?.length ? ai.hours : fallback.hours;
+  const reason =
+    ai?.reason ||
+    `Berdasarkan niche "${fallback.label}", jam-jam ini biasanya punya tingkat engagement tertinggi untuk Shorts.`;
+
+  const slots = buildUpcomingSlots(hours).map((date) => ({
+    date,
+    label: formatScheduleLabel(date),
+    reason,
+  }));
+
+  return { slots, reason, nicheLabel: fallback.label };
+}
+
+/** Bangun daftar Date terdekat (hari ini/besok/lusa) untuk tiap jam yang direkomendasikan. */
+function buildUpcomingSlots(hours: number[]): Date[] {
+  const tz = getSchedulerTimezone();
+  const now = new Date();
+  const maxDays = getSchedulerMaxDaysAhead();
+  const candidates: Date[] = [];
+
+  for (let dayOffset = 0; dayOffset <= Math.min(2, maxDays); dayOffset++) {
+    for (const hour of hours) {
+      const candidate = zonedDateAt(now, tz, dayOffset, hour, 0);
+      if (candidate.getTime() > now.getTime() + 60_000) {
+        candidates.push(candidate);
+      }
+    }
+  }
+
+  candidates.sort((a, b) => a.getTime() - b.getTime());
+  const uniqueSorted: Date[] = [];
+  for (const c of candidates) {
+    if (!uniqueSorted.some((u) => Math.abs(u.getTime() - c.getTime()) < 60_000)) {
+      uniqueSorted.push(c);
+    }
+  }
+  return uniqueSorted.slice(0, getSchedulerSlotCount());
+}
+
+/** Bangun Date absolut untuk "hari ini + dayOffset" pada jam:menit tertentu di timezone target. */
+function zonedDateAt(reference: Date, timeZone: string, dayOffset: number, hour: number, minute: number): Date {
+  const base = new Date(reference.getTime() + dayOffset * 86_400_000);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(base);
+  const y = Number(parts.find((p) => p.type === "year")?.value);
+  const m = Number(parts.find((p) => p.type === "month")?.value);
+  const d = Number(parts.find((p) => p.type === "day")?.value);
+
+  // Cari offset UTC timezone target pada tanggal tsb, lalu bangun instant yang
+  // tepat menunjukkan `hour:minute` di timezone tersebut.
+  const utcGuess = Date.UTC(y, m - 1, d, hour, minute, 0);
+  const tzHourAtGuess = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone, hour: "2-digit", hour12: false }).format(new Date(utcGuess))
+  );
+  let diffHours = hour - tzHourAtGuess;
+  if (diffHours > 12) diffHours -= 24;
+  if (diffHours < -12) diffHours += 24;
+  return new Date(utcGuess + diffHours * 3_600_000);
+}
+
+/** Format tanggal untuk ditampilkan ke user Telegram, sesuai timezone konfigurasi. */
+export function formatScheduleLabel(date: Date): string {
+  const tz = getSchedulerTimezone();
+  return new Intl.DateTimeFormat("id-ID", {
+    timeZone: tz,
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date) + " " + tzAbbreviation(tz);
+}
+
+function tzAbbreviation(tz: string): string {
+  if (tz.includes("Jakarta")) return "WIB";
+  if (tz.includes("Makassar")) return "WITA";
+  if (tz.includes("Jayapura")) return "WIT";
+  return tz;
+}
+
+/** Parse input custom jam dari user, mis. "19:30", "besok 09:00", "2025-06-01 19:30". */
+export function parseCustomScheduleInput(
+  raw: string
+): { date: Date; error?: undefined } | { date?: undefined; error: string } {
+  const text = raw.trim().toLowerCase();
+  const tz = getSchedulerTimezone();
+  const now = new Date();
+  const maxDays = getSchedulerMaxDaysAhead();
+
+  // Format: YYYY-MM-DD HH:MM
+  const fullMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})[ t](\d{1,2}):(\d{2})$/);
+  if (fullMatch) {
+    const [, y, m, d, h, min] = fullMatch;
+    const date = zonedDateAt(
+      new Date(Date.UTC(Number(y), Number(m) - 1, Number(d))),
+      tz,
+      0,
+      Number(h),
+      Number(min)
+    );
+    return validateFutureDate(date, now, maxDays);
+  }
+
+  // Format: "besok HH:MM" atau "besok jam HH:MM"
+  const tomorrowMatch = text.match(/^besok(?:\s+jam)?\s+(\d{1,2})[:.](\d{2})$/);
+  if (tomorrowMatch) {
+    const [, h, min] = tomorrowMatch;
+    const date = zonedDateAt(now, tz, 1, Number(h), Number(min));
+    return validateFutureDate(date, now, maxDays);
+  }
+
+  // Format: "HH:MM" atau "HH.MM" atau "jam HH:MM" → hari ini kalau masih bisa, kalau tidak otomatis besok
+  const hourMatch = text.match(/^(?:jam\s+)?(\d{1,2})[:.](\d{2})$/);
+  if (hourMatch) {
+    const [, h, min] = hourMatch;
+    const hourNum = Number(h);
+    const minNum = Number(min);
+    if (hourNum > 23 || minNum > 59) return { error: "Format jam tidak valid. Gunakan 00:00 - 23:59." };
+    let date = zonedDateAt(now, tz, 0, hourNum, minNum);
+    if (date.getTime() <= now.getTime() + 60_000) {
+      date = zonedDateAt(now, tz, 1, hourNum, minNum);
+    }
+    return validateFutureDate(date, now, maxDays);
+  }
+
+  // Format: "+N jam" / "+N menit"
+  const relativeMatch = text.match(/^\+(\d+)\s*(jam|menit|j|m)$/);
+  if (relativeMatch) {
+    const [, amountRaw, unitRaw] = relativeMatch;
+    const amount = Number(amountRaw);
+    const ms = unitRaw.startsWith("j") ? amount * 3_600_000 : amount * 60_000;
+    const date = new Date(now.getTime() + ms);
+    return validateFutureDate(date, now, maxDays);
+  }
+
+  return {
+    error:
+      "Format tidak dikenali. Contoh yang valid: `19:30`, `besok 09:00`, `2025-06-01 19:30`, atau `+3 jam`.",
+  };
+}
+
+function validateFutureDate(
+  date: Date,
+  now: Date,
+  maxDays: number
+): { date: Date; error?: undefined } | { date?: undefined; error: string } {
+  if (date.getTime() <= now.getTime() + 30_000) {
+    return { error: "Jam yang dipilih sudah lewat. Pilih jam di masa depan." };
+  }
+  if (date.getTime() > now.getTime() + maxDays * 86_400_000) {
+    return { error: `Maksimal penjadwalan adalah ${maxDays} hari ke depan.` };
+  }
+  return { date };
+}
+
+// ─── CRUD scheduled_uploads ──────────────────────────────────────────────
+
+export async function createScheduledUpload(params: {
+  jobId: string;
+  telegramUserId: string;
+  telegramChatId: string;
+  mode: ScheduleMode;
+  scheduledAt: Date;
+  recommendationReason?: string | null;
+}): Promise<ScheduledUploadRow> {
+  await ensureScheduledUploadsTable();
   const rows = await db
-    .insert(scheduledPosts)
+    .insert(scheduledUploads)
     .values({
-      telegramUserId: input.telegramUserId,
-      telegramChatId: input.telegramChatId,
-      jobId: input.jobId,
-      clipIndex: input.clipIndex,
-      platform: input.platform,
-      title: clip?.title || null,
-      niche: input.niche || null,
-      scheduledAt: input.scheduledAt,
-      source: input.source,
+      jobId: params.jobId,
+      telegramUserId: params.telegramUserId,
+      telegramChatId: params.telegramChatId,
+      mode: params.mode,
+      scheduledAt: params.scheduledAt,
+      recommendationReason: params.recommendationReason || null,
       status: "pending",
     })
     .returning();
-
   return rows[0];
 }
 
-// ─── READ ─────────────────────────────────────────────────────────────────
-
-export async function listScheduledPostsForUser(telegramUserId: string): Promise<ScheduledPostRow[]> {
-  return db
-    .select()
-    .from(scheduledPosts)
-    .where(eq(scheduledPosts.telegramUserId, telegramUserId))
-    .orderBy(asc(scheduledPosts.scheduledAt));
+export async function getScheduledUploadByJobId(jobId: string): Promise<ScheduledUploadRow | null> {
+  await ensureScheduledUploadsTable();
+  const rows = await db.select().from(scheduledUploads).where(eq(scheduledUploads.jobId, jobId));
+  return rows[0] || null;
 }
 
-export async function listUpcomingScheduledPosts(limit = 20): Promise<ScheduledPostRow[]> {
+export async function getPendingScheduledUploadsForUser(userId: string): Promise<ScheduledUploadRow[]> {
+  await ensureScheduledUploadsTable();
   return db
     .select()
-    .from(scheduledPosts)
-    .where(eq(scheduledPosts.status, "pending"))
-    .orderBy(asc(scheduledPosts.scheduledAt))
+    .from(scheduledUploads)
+    .where(and(eq(scheduledUploads.telegramUserId, userId), eq(scheduledUploads.status, "pending")))
+    .orderBy(asc(scheduledUploads.scheduledAt));
+}
+
+export async function getDueScheduledUploads(limit: number = 10): Promise<ScheduledUploadRow[]> {
+  await ensureScheduledUploadsTable();
+  return db
+    .select()
+    .from(scheduledUploads)
+    .where(and(eq(scheduledUploads.status, "pending"), lte(scheduledUploads.scheduledAt, new Date())))
+    .orderBy(asc(scheduledUploads.scheduledAt))
     .limit(limit);
 }
 
-export async function getSchedulerQueueStats() {
-  const rows = await db.select().from(scheduledPosts);
-  const byStatus = { pending: 0, processing: 0, posted: 0, failed: 0, cancelled: 0 } as Record<string, number>;
-  for (const row of rows) {
-    byStatus[row.status] = (byStatus[row.status] || 0) + 1;
-  }
-  const recent = [...rows]
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, 8);
-  return { total: rows.length, byStatus, recent };
+/** Tandai sebagai "processing" secara atomik (hanya berhasil kalau masih "pending"). */
+export async function claimScheduledUpload(id: number): Promise<boolean> {
+  const rows = await db
+    .update(scheduledUploads)
+    .set({ status: "processing", attempts: sql`${scheduledUploads.attempts} + 1`, updatedAt: new Date() })
+    .where(and(eq(scheduledUploads.id, id), eq(scheduledUploads.status, "pending")))
+    .returning({ id: scheduledUploads.id });
+  return rows.length > 0;
 }
 
-// ─── CANCEL ───────────────────────────────────────────────────────────────
-
-export async function cancelScheduledPost(id: number, telegramUserId?: string): Promise<boolean> {
-  const where = telegramUserId
-    ? and(eq(scheduledPosts.id, id), eq(scheduledPosts.telegramUserId, telegramUserId))
-    : eq(scheduledPosts.id, id);
-
-  const result = await db
-    .update(scheduledPosts)
-    .set({ status: "cancelled", updatedAt: new Date() })
-    .where(and(where, eq(scheduledPosts.status, "pending")))
-    .returning();
-
-  return result.length > 0;
-}
-
-// ─── EXECUTION ────────────────────────────────────────────────────────────
-
-async function publishOrUploadYouTube(
-  clip: ClipResult,
-  telegramUserId: string
-): Promise<{ url: string }> {
-  const tokenRows = await db
-    .select()
-    .from(youtubeTokens)
-    .where(eq(youtubeTokens.telegramUserId, telegramUserId));
-  const tokenRow = tokenRows[0];
-
-  if (!tokenRow) {
-    throw new Error("Akun YouTube belum terhubung. Jalankan /connect terlebih dahulu.");
-  }
-
-  let { accessToken, refreshToken } = tokenRow;
-  if (isTokenExpired(tokenRow.expiresAt)) {
-    const refreshed = await refreshAccessToken(tokenRow.refreshToken);
-    accessToken = refreshed.accessToken;
-    await db
-      .update(youtubeTokens)
-      .set({ accessToken: refreshed.accessToken, expiresAt: refreshed.expiresAt, updatedAt: new Date() })
-      .where(eq(youtubeTokens.telegramUserId, telegramUserId));
-  }
-
-  // Kasus 1: klip sudah pernah di-upload sebagai Draft (private) oleh
-  // job-processor saat pertama kali diproses → tinggal dipublish.
-  if (clip.youtubeVideoId) {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
-    oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
-    const youtube = google.youtube({ version: "v3", auth: oauth2Client });
-
-    await youtube.videos.update({
-      part: ["status"],
-      requestBody: {
-        id: clip.youtubeVideoId,
-        status: {
-          privacyStatus: getSchedulerPublishPrivacy(),
-          selfDeclaredMadeForKids: false,
-        },
-      },
-    });
-
-    return { url: clip.youtubeUrl || `https://youtu.be/${clip.youtubeVideoId}` };
-  }
-
-  // Kasus 2: belum pernah di-upload (mis. user belum connect YouTube saat
-  // job diproses) tapi file klip masih tersedia di disk → upload sekarang.
-  if (clip.filePath && fs.existsSync(clip.filePath)) {
-    const results = await uploadClipsToYouTube([clip], accessToken, refreshToken, getSchedulerPublishPrivacy());
-    const result = results[0];
-    if (!result) throw new Error("Upload ke YouTube gagal saat eksekusi jadwal.");
-    return { url: result.videoUrl };
-  }
-
-  throw new Error(
-    "File klip sudah tidak tersedia lagi (disk sementara server mungkin sudah dibersihkan) dan belum ada draft YouTube untuk dipublish. Proses ulang video untuk menjadwalkan lagi."
-  );
-}
-
-/** Eksekusi satu antrean (dipanggil oleh worker atau trigger manual/API). */
-export async function executeScheduledPost(row: ScheduledPostRow): Promise<void> {
+export async function completeScheduledUpload(
+  id: number,
+  ok: boolean,
+  errorMessage?: string
+): Promise<void> {
   await db
-    .update(scheduledPosts)
-    .set({ status: "processing", attempts: row.attempts + 1, updatedAt: new Date() })
-    .where(eq(scheduledPosts.id, row.id));
-
-  try {
-    const jobRows = await db.select().from(clipJobs).where(eq(clipJobs.jobId, row.jobId));
-    const job = jobRows[0];
-    const clip = (job?.clips as ClipResult[] | null)?.[row.clipIndex];
-    if (!clip) throw new Error("Klip tidak ditemukan (job mungkin sudah dihapus).");
-
-    let resultUrl: string;
-    if (row.platform === "youtube") {
-      const result = await publishOrUploadYouTube(clip, row.telegramUserId);
-      resultUrl = result.url;
-    } else {
-      throw new Error(
-        `Platform "${row.platform}" belum terhubung (butuh koneksi akun TikTok via Content Posting API).`
-      );
-    }
-
-    await db
-      .update(scheduledPosts)
-      .set({ status: "posted", resultUrl, errorMessage: null, updatedAt: new Date() })
-      .where(eq(scheduledPosts.id, row.id));
-
-    await notifyUser(row, `✅ *Jadwal berhasil diposting!*\n\n🎬 ${row.title || "Klip"}\n🔗 ${resultUrl}`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const maxAttempts = getSchedulerMaxAttempts();
-    const willRetry = row.attempts + 1 < maxAttempts;
-
-    await db
-      .update(scheduledPosts)
-      .set({
-        status: willRetry ? "pending" : "failed",
-        errorMessage: message,
-        updatedAt: new Date(),
-      })
-      .where(eq(scheduledPosts.id, row.id));
-
-    if (!willRetry) {
-      await notifyUser(
-        row,
-        `❌ *Jadwal gagal diposting* (percobaan ke-${row.attempts + 1}/${maxAttempts})\n\n🎬 ${row.title || "Klip"}\nAlasan: ${message}`
-      );
-    }
-  }
+    .update(scheduledUploads)
+    .set({
+      status: ok ? "done" : "error",
+      errorMessage: errorMessage || null,
+      processedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(scheduledUploads.id, id));
 }
 
-/** Ambil semua antrean yang sudah jatuh tempo & masih dalam batas toleransi, lalu eksekusi berurutan. */
-export async function runDueScheduledPosts(): Promise<{ processed: number }> {
-  const now = new Date();
-  const graceMs = getSchedulerGraceMinutes() * 60 * 1000;
-  const cutoff = new Date(now.getTime() - graceMs);
-
-  const due = await db
-    .select()
-    .from(scheduledPosts)
-    .where(and(eq(scheduledPosts.status, "pending"), lte(scheduledPosts.scheduledAt, now)));
-
-  // Tandai yang sudah terlalu lama terlewat (lebih dari grace period) sebagai gagal,
-  // supaya tidak menumpuk/di-retry selamanya (mis. server sempat down lama).
-  const expired = due.filter((row) => new Date(row.scheduledAt).getTime() < cutoff.getTime());
-  if (expired.length) {
-    await db
-      .update(scheduledPosts)
-      .set({ status: "failed", errorMessage: "Lewat batas toleransi waktu (server tidak aktif saat jadwal tiba).", updatedAt: new Date() })
-      .where(inArray(scheduledPosts.id, expired.map((r) => r.id)));
-  }
-
-  const toRun = due.filter((row) => new Date(row.scheduledAt).getTime() >= cutoff.getTime());
-  for (const row of toRun) {
-    await executeScheduledPost(row);
-  }
-
-  return { processed: toRun.length };
-}
-
-// ─── TELEGRAM NOTIFICATION (lazy import untuk hindari circular dependency) ─
-
-async function notifyUser(row: ScheduledPostRow, text: string): Promise<void> {
-  try {
-    const { bot } = await import("@/lib/telegram-bot");
-    await bot.api.sendMessage(row.telegramChatId, text, { parse_mode: "Markdown" });
-  } catch (err) {
-    console.warn("[scheduler] Gagal mengirim notifikasi Telegram:", err);
-  }
-}
-
-export async function getRecentCompletedJobsForUser(telegramUserId: string, limit = 5) {
-  return db
-    .select()
-    .from(clipJobs)
-    .where(and(eq(clipJobs.telegramUserId, telegramUserId), eq(clipJobs.status, "done")))
-    .orderBy(desc(clipJobs.createdAt))
-    .limit(limit);
+export async function cancelScheduledUpload(id: number, userId: string): Promise<boolean> {
+  const rows = await db
+    .update(scheduledUploads)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(
+      and(
+        eq(scheduledUploads.id, id),
+        eq(scheduledUploads.telegramUserId, userId),
+        eq(scheduledUploads.status, "pending")
+      )
+    )
+    .returning({ id: scheduledUploads.id });
+  return rows.length > 0;
 }

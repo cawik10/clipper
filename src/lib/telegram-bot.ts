@@ -6,8 +6,18 @@ import { v4 as uuidv4 } from "uuid";
 import { detectPlatform } from "@/lib/video-processor";
 import { getAuthUrl } from "@/lib/youtube-oauth";
 import { messages, getPlatformEmoji, formatDuration } from "@/lib/bot-messages";
-import { processJob } from "@/lib/job-processor";
+import { processJob, processClipsOnly, publishJobClips } from "@/lib/job-processor";
 import { TelegramProgressTracker } from "@/lib/telegram-progress-tracker";
+// 🗓️ Scheduler / Queue Posting (BARU!) — import terpisah, tidak mengubah import di atas.
+import { isSchedulerEnabled } from "@/lib/scheduler-config";
+import {
+  getOptimalSlots,
+  createScheduledUpload,
+  formatScheduleLabel,
+  parseCustomScheduleInput,
+  getPendingScheduledUploadsForUser,
+  cancelScheduledUpload,
+} from "@/lib/scheduler";
 import {
   getAspectRatioMode,
   getModeLabel,
@@ -40,19 +50,6 @@ import {
   getDuplicateFilterScopeLabel,
 } from "@/lib/duplicate-filter-config";
 import { getDuplicateFilterStats } from "@/lib/duplicate-filter";
-// 📅 Scheduler / Queue Posting (BARU!) — import terpisah, tidak mengubah import di atas.
-import {
-  createScheduledPost,
-  listScheduledPostsForUser,
-  cancelScheduledPost,
-  getRecentCompletedJobsForUser,
-} from "@/lib/scheduler";
-import {
-  getAiOptimalSlots,
-  nextDateForSlot,
-  formatSlotLabel,
-  type OptimalSlot,
-} from "@/lib/scheduler-config";
 import fs from "fs";
 
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
@@ -78,7 +75,7 @@ bot.command("start", async (ctx) => {
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(messages.help + DRIVE_HELP + SCHEDULER_HELP, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help + DRIVE_HELP, { parse_mode: "Markdown" });
 });
 
 bot.command("connect", async (ctx) => {
@@ -358,6 +355,21 @@ bot.command("dupfilter", async (ctx) => {
       `• \`DUPLICATE_FILTER_LOOKBACK_DAYS\` = jumlah hari, \`0\` = tanpa batas (default 30)`,
     { parse_mode: "Markdown" }
   );
+});
+
+bot.command("jadwal", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const pending = await getPendingScheduledUploadsForUser(userId);
+  if (!pending.length) {
+    await ctx.reply("🗓 Belum ada video yang dijadwalkan.");
+    return;
+  }
+  let msg = "🗓 *Antrean Jadwal Upload Anda:*\n\n";
+  pending.forEach((p, i) => {
+    msg += `${i + 1}. Waktu: ${formatScheduleLabel(new Date(p.scheduledAt))} (Mode: ${p.mode})\n`;
+  });
+  await ctx.reply(msg, { parse_mode: "Markdown" });
 });
 
 // ===== INFO COMMANDS =====
@@ -645,216 +657,6 @@ bot.callbackQuery("drive_disconnect", async (ctx) => {
   await ctx.editMessageText("✅ Google Drive berhasil diputus. Hubungkan lagi kapan saja lewat /drive.");
 });
 
-// =====================================================================
-// 📅 SCHEDULER / QUEUE POSTING (BARU!)
-// =====================================================================
-// Fitur tambahan — tidak mengubah alur upload otomatis yang sudah ada di
-// job-processor.ts. User memilih klip dari job yang SUDAH SELESAI (/status
-// menunjukkan ✅ Selesai), lalu menjadwalkan kapan klip itu dipublish
-// (manual atau rekomendasi AI berdasarkan niche). Lihat src/lib/scheduler.ts
-// dan src/lib/scheduler-config.ts — semua jam optimal & provider AI mudah
-// diganti di sana tanpa menyentuh file ini.
-const SCHEDULER_HELP =
-  `\n\n📅 *Scheduler / Queue Posting*\n` +
-  `/schedule — jadwalkan klip dari job terakhir yang selesai\n` +
-  `/queue — lihat & batalkan antrean jadwal kamu\n` +
-  `/besttime <niche> — cek rekomendasi AI jam optimal untuk niche tertentu`;
-
-// UUID v4 standar: 8-4-4-4-12. Dipadatkan (tanpa dash) supaya callback_data
-// Telegram (limit 64 byte) cukup untuk menampung jobId + metadata lain.
-function compactJobId(jobId: string): string {
-  return jobId.replace(/-/g, "");
-}
-function expandJobId(compact: string): string {
-  if (compact.length !== 32) return compact;
-  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
-}
-const DAY_CODE: Record<OptimalSlot["day"], string> = { any: "a", weekday: "w", weekend: "e" };
-const DAY_FROM_CODE: Record<string, OptimalSlot["day"]> = { a: "any", w: "weekday", e: "weekend" };
-
-bot.command("schedule", async (ctx) => {
-  const userId = ctx.from?.id?.toString();
-  if (!userId) return;
-
-  const jobs = await getRecentCompletedJobsForUser(userId, 5);
-  if (!jobs.length) {
-    await ctx.reply(
-      "📭 Belum ada video yang selesai diproses. Kirim link video dulu, tunggu sampai ✅ Selesai, baru jadwalkan klipnya di sini."
-    );
-    return;
-  }
-
-  const kb = new InlineKeyboard();
-  jobs.forEach((job) => {
-    const label = (job.videoTitle || job.sourceUrl).slice(0, 40);
-    kb.text(`🎬 ${label}`, `sched_job_${compactJobId(job.jobId)}`).row();
-  });
-
-  await ctx.reply(
-    "📅 *Scheduler / Queue Posting*\n\nPilih video yang klipnya ingin dijadwalkan untuk diposting:",
-    { parse_mode: "Markdown", reply_markup: kb }
-  );
-});
-
-bot.callbackQuery(/^sched_job_([a-f0-9]{32})$/, async (ctx) => {
-  await ctx.answerCallbackQuery();
-  const jobId = expandJobId(ctx.match[1]);
-  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
-  const job = jobs[0];
-  if (!job) {
-    await ctx.reply("❌ Job tidak ditemukan.");
-    return;
-  }
-  const clips = (job.clips as ClipResult[] | null) || [];
-  if (!clips.length) {
-    await ctx.reply("❌ Job ini tidak punya klip yang bisa dijadwalkan.");
-    return;
-  }
-
-  const kb = new InlineKeyboard();
-  clips.forEach((clip, idx) => {
-    const posted = clip.youtubeUrl ? " (draft YouTube)" : "";
-    kb.text(`✂️ Klip ${idx + 1}: ${clip.title.slice(0, 30)}${posted}`, `sched_clip_${ctx.match[1]}_${idx}`).row();
-  });
-
-  await ctx.reply("Pilih klip yang ingin dijadwalkan:", { reply_markup: kb });
-});
-
-bot.callbackQuery(/^sched_clip_([a-f0-9]{32})_(\d+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery("🧠 Menghitung jam optimal...");
-  const userId = ctx.from.id.toString();
-  const compactId = ctx.match[1];
-  const clipIndex = parseInt(ctx.match[2], 10);
-
-  const settingsRows = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, userId));
-  const niche = settingsRows[0]?.nichePrompt || null;
-
-  const recommendation = await getAiOptimalSlots(niche, "youtube", 3);
-
-  const kb = new InlineKeyboard();
-  recommendation.slots.forEach((slot) => {
-    const when = nextDateForSlot(slot);
-    const dateLabel = when.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jakarta" });
-    kb.text(`⏰ ${formatSlotLabel(slot)}`, `sp_${compactId}_${clipIndex}_${DAY_CODE[slot.day]}_${slot.hour}_${slot.minute}`).row();
-    void dateLabel;
-  });
-  // Opsi cepat tambahan di luar rekomendasi AI/fallback.
-  kb.text("🕐 1 jam dari sekarang", `sp_${compactId}_${clipIndex}_a_${new Date(Date.now() + 3600000).getHours()}_0`).row();
-
-  const slotLines = recommendation.slots
-    .map((slot) => {
-      const when = nextDateForSlot(slot);
-      return `• ${formatSlotLabel(slot)} — _${slot.label}_\n   📆 Eksekusi berikutnya: ${when.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jakarta" })}`;
-    })
-    .join("\n");
-
-  await ctx.reply(
-    `📅 *Rekomendasi jam posting* ${recommendation.aiPowered ? "(🧠 AI, niche: " + recommendation.nicheLabel + ")" : "(📋 preset niche: " + recommendation.nicheLabel + ")"}\n\n${slotLines}\n\nPilih salah satu jam di bawah ini:`,
-    { parse_mode: "Markdown", reply_markup: kb }
-  );
-});
-
-bot.callbackQuery(/^sp_([a-f0-9]{32})_(\d+)_([awe])_(\d+)_(\d+)$/, async (ctx) => {
-  const userId = ctx.from.id.toString();
-  const chatId = ctx.chat?.id?.toString();
-  if (!chatId) return;
-
-  const jobId = expandJobId(ctx.match[1]);
-  const clipIndex = parseInt(ctx.match[2], 10);
-  const day = DAY_FROM_CODE[ctx.match[3]];
-  const hour = parseInt(ctx.match[4], 10);
-  const minute = parseInt(ctx.match[5], 10);
-
-  const scheduledAt = nextDateForSlot({ day, hour, minute, label: "manual" });
-
-  try {
-    const settingsRows = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, userId));
-    await createScheduledPost({
-      telegramUserId: userId,
-      telegramChatId: chatId,
-      jobId,
-      clipIndex,
-      platform: "youtube",
-      scheduledAt,
-      source: "ai",
-      niche: settingsRows[0]?.nichePrompt || null,
-    });
-
-    await ctx.answerCallbackQuery("✅ Berhasil dijadwalkan!");
-    await ctx.editMessageText(
-      `✅ *Klip berhasil dijadwalkan!*\n\n⏰ ${scheduledAt.toLocaleString("id-ID", { dateStyle: "full", timeStyle: "short", timeZone: "Asia/Jakarta" })} WIB\n\nGunakan /queue untuk melihat atau membatalkan jadwal.`,
-      { parse_mode: "Markdown" }
-    );
-  } catch (err) {
-    await ctx.answerCallbackQuery("❌ Gagal menjadwalkan");
-    await ctx.reply(`❌ Gagal menjadwalkan: ${err instanceof Error ? err.message : String(err)}`);
-  }
-});
-
-bot.command("queue", async (ctx) => {
-  const userId = ctx.from?.id?.toString();
-  if (!userId) return;
-
-  const rows = await listScheduledPostsForUser(userId);
-  const pending = rows.filter((r) => r.status === "pending");
-
-  if (!rows.length) {
-    await ctx.reply("📭 Belum ada jadwal posting. Gunakan /schedule untuk membuat jadwal baru.");
-    return;
-  }
-
-  const statusEmoji: Record<string, string> = {
-    pending: "⏳", processing: "🚀", posted: "✅", failed: "❌", cancelled: "🚫",
-  };
-
-  let msg = `📅 *Antrean Posting Kamu*\n\n`;
-  rows.slice(0, 10).forEach((row) => {
-    const when = new Date(row.scheduledAt).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jakarta" });
-    msg += `${statusEmoji[row.status] || "❓"} *${(row.title || "Klip").slice(0, 40)}*\n`;
-    msg += `   ⏰ ${when} WIB · ${row.platform} · ${row.source === "ai" ? "rekomendasi AI" : row.source}\n`;
-    if (row.status === "posted" && row.resultUrl) msg += `   🔗 ${row.resultUrl}\n`;
-    if (row.status === "failed" && row.errorMessage) msg += `   ⚠️ ${row.errorMessage.slice(0, 80)}\n`;
-    msg += "\n";
-  });
-
-  const kb = new InlineKeyboard();
-  pending.slice(0, 10).forEach((row) => {
-    kb.text(`🚫 Batalkan: ${(row.title || "Klip").slice(0, 25)}`, `sched_cancel_${row.id}`).row();
-  });
-
-  await ctx.reply(msg, { parse_mode: "Markdown", reply_markup: pending.length ? kb : undefined });
-});
-
-bot.callbackQuery(/^sched_cancel_(\d+)$/, async (ctx) => {
-  const userId = ctx.from.id.toString();
-  const id = parseInt(ctx.match[1], 10);
-  const ok = await cancelScheduledPost(id, userId);
-  await ctx.answerCallbackQuery(ok ? "🚫 Jadwal dibatalkan" : "❌ Gagal membatalkan (mungkin sudah diproses)");
-  if (ok) {
-    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
-  }
-});
-
-bot.command("besttime", async (ctx) => {
-  const niche = ctx.match?.toString().trim() || null;
-  const recommendation = await getAiOptimalSlots(niche, "youtube", 3);
-
-  const lines = recommendation.slots
-    .map((slot) => {
-      const when = nextDateForSlot(slot);
-      return `• *${formatSlotLabel(slot)}*\n   _${slot.label}_\n   📆 Berikutnya: ${when.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jakarta" })} WIB`;
-    })
-    .join("\n\n");
-
-  await ctx.reply(
-    `🧠 *Rekomendasi Jam Optimal*\n` +
-      `Niche: *${recommendation.nicheLabel}*\n` +
-      `Sumber: ${recommendation.aiPowered ? "🤖 AI (GPT-4o-mini)" : "📋 Tabel preset niche"}\n\n${lines}\n\n` +
-      `💡 Tips: kirim \`/besttime <niche kamu>\`, misal \`/besttime bisnis\` atau \`/besttime komedi\`.`,
-    { parse_mode: "Markdown" }
-  );
-});
-
 // ===== MESSAGE HANDLER =====
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
@@ -963,7 +765,31 @@ bot.callbackQuery(/^retry_job_(.+)$/, async (ctx) => {
     .update(clipJobs)
     .set({ status: "queued", errorMessage: null, updatedAt: new Date() })
     .where(eq(clipJobs.jobId, jobId));
-  await processJobWithUpdates(ctx, jobId);
+  // 1. Potong klip saja tanpa upload
+    await processClipsOnly(jobId, onStatusUpdate);
+
+    // 2. Cek apakah fitur scheduler aktif
+    if (isSchedulerEnabled()) {
+      const jobRow = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+      const userRow = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, chatId.toString()));
+      const slotsInfo = await getOptimalSlots(userRow[0]?.nichePrompt, jobRow[0]?.platform);
+
+      const kb = new InlineKeyboard();
+      kb.text("🚀 Post Sekarang", `publish_now_${jobId}`).row();
+      slotsInfo.slots.forEach(slot => {
+          kb.text(`🤖 AI: ${slot.label}`, `sched_ai_${slot.date.getTime()}_${jobId}`).row();
+      });
+
+      await tracker.update("scheduling", { detail: "Menunggu pilihan jadwal upload..." });
+      await ctx.api.sendMessage(chatId,
+          `✅ *Klip siap!*\n\n🤖 *Rekomendasi AI (${slotsInfo.nicheLabel}):*\n_${slotsInfo.reason}_\n\nKapan klip ingin di-upload?`,
+          { parse_mode: "Markdown", reply_markup: kb }
+      );
+      return; // Berhenti di sini, jangan lanjut upload otomatis
+    }
+
+    // 3. Jika scheduler dimatikan, upload langsung
+    await publishJobClips(jobId, onStatusUpdate);
 });
 
 // ===== HANDLER FUNCTIONS =====
@@ -1393,3 +1219,35 @@ bot.catch((err) => {
 
 export default bot;
 export { formatDuration };
+
+bot.callbackQuery(/^publish_now_(.+)$/, async (ctx) => {
+  const jobId = ctx.match[1];
+  await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
+  await ctx.reply("🚀 Memulai upload ke YouTube...");
+  try {
+    await publishJobClips(jobId);
+    await ctx.reply("✅ Upload selesai! Cek Draft YouTube Studio Anda.");
+  } catch (err) {
+    await ctx.reply("❌ Upload gagal: " + String(err));
+  }
+});
+
+bot.callbackQuery(/^sched_ai_(\d+)_(.+)$/, async (ctx) => {
+  const timestamp = parseInt(ctx.match[1], 10);
+  const jobId = ctx.match[2];
+  const userId = ctx.from.id.toString();
+
+  await ctx.answerCallbackQuery("🗓 Menjadwalkan klip...");
+  await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
+
+  const date = new Date(timestamp);
+  await createScheduledUpload({
+    jobId,
+    telegramUserId: userId,
+    telegramChatId: ctx.chat?.id?.toString() || userId,
+    mode: "ai_recommended",
+    scheduledAt: date,
+  });
+
+  await ctx.reply(`✅ *Berhasil Dijadwalkan!*\n\nKlip akan di-upload otomatis pada:\n🗓 *${formatScheduleLabel(date)}*`, { parse_mode: "Markdown" });
+});
