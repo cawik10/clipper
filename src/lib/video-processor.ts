@@ -83,22 +83,23 @@ export async function downloadVideo(
   ];
 
   // Strategi 1: Menggunakan Cookies & Client Web
+  // Strategi 1: Menggunakan Cookies & Client iOS / Web
   const cmdWithCookies = [
     "yt-dlp",
     ...baseFlags,
     hasCookies ? "--cookies cookies.txt" : "",
-    '--extractor-args "youtube:player_client=mweb,web,web_embedded"',
+    '--extractor-args "youtube:player_client=ios,web,mweb"',
     `"${url}"`,
   ]
     .filter(Boolean)
     .join(" ");
 
-  // Strategi 2: Fallback Mobile Client
+  // Strategi 2 (Fallback): Client iOS / TV tanpa cookies jika cookie kadaluwarsa
   const cmdWithoutCookies = [
     "yt-dlp",
     ...baseFlags,
-    '--extractor-args "youtube:player_client=android,mweb,web"',
-    '--user-agent "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"',
+    '--extractor-args "youtube:player_client=ios,android,tv_embedded"',
+    '--user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"',
     `"${url}"`,
   ].join(" ");
 
