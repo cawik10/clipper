@@ -21,7 +21,6 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 🔍 Zoom effect pada highlight
 🎯 Custom Niche Prompt — arahkan fokus AI Analysis ✨ Baru!
 🧹 Duplicate/Repetitive Clip Filter — hindari klip mirip saat video sama diproses ulang ✨ Baru!
-🗓 Scheduler / Queue Posting — jadwalkan upload otomatis sesuai niche ✨ Baru!
 
 *Perintah:*
 /start - Menu utama
@@ -39,7 +38,6 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 /mode - Info aspect ratio
 /niche - Atur Custom Niche Prompt untuk AI Analysis ✨ Baru!
 /dupfilter - Info Duplicate/Repetitive Clip Filter ✨ Baru!
-/jadwal - Lihat & batalkan antrean jadwal upload ✨ Baru!
 
 Kirim link video untuk mulai! 🎬`,
 
@@ -75,7 +73,6 @@ Kirim link video untuk mulai! 🎬`,
 /introoutro - Info intro/outro config
 /niche - Atur Custom Niche Prompt (fokus AI Analysis) ✨ Baru!
 /dupfilter - Info Duplicate/Repetitive Clip Filter (anti klip mirip/berulang) ✨ Baru!
-/jadwal - Lihat antrean jadwal upload otomatis ✨ Baru!
 
 *Ketentuan:*
 • Durasi klip: pilih salah satu dari 15 / 20 / 30 / 40 / 60 detik (lihat /duration)

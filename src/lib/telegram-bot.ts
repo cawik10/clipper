@@ -6,18 +6,8 @@ import { v4 as uuidv4 } from "uuid";
 import { detectPlatform } from "@/lib/video-processor";
 import { getAuthUrl } from "@/lib/youtube-oauth";
 import { messages, getPlatformEmoji, formatDuration } from "@/lib/bot-messages";
-import { processJob, processClipsOnly, publishJobClips } from "@/lib/job-processor";
+import { processJob } from "@/lib/job-processor";
 import { TelegramProgressTracker } from "@/lib/telegram-progress-tracker";
-// 🗓️ Scheduler / Queue Posting (BARU!) — import terpisah, tidak mengubah import di atas.
-import { isSchedulerEnabled } from "@/lib/scheduler-config";
-import {
-  getOptimalSlots,
-  createScheduledUpload,
-  formatScheduleLabel,
-  parseCustomScheduleInput,
-  getPendingScheduledUploadsForUser,
-  cancelScheduledUpload,
-} from "@/lib/scheduler";
 import {
   getAspectRatioMode,
   getModeLabel,
@@ -50,6 +40,19 @@ import {
   getDuplicateFilterScopeLabel,
 } from "@/lib/duplicate-filter-config";
 import { getDuplicateFilterStats } from "@/lib/duplicate-filter";
+// 📅 Scheduler / Queue Posting (BARU!) — import terpisah, tidak mengubah import di atas.
+import {
+  createScheduledPost,
+  listScheduledPostsForUser,
+  cancelScheduledPost,
+  getRecentCompletedJobsForUser,
+} from "@/lib/scheduler";
+import {
+  getAiOptimalSlots,
+  nextDateForSlot,
+  formatSlotLabel,
+  type OptimalSlot,
+} from "@/lib/scheduler-config";
 import fs from "fs";
 
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
@@ -75,7 +78,7 @@ bot.command("start", async (ctx) => {
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(messages.help + DRIVE_HELP, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help + DRIVE_HELP + SCHEDULER_HELP, { parse_mode: "Markdown" });
 });
 
 bot.command("connect", async (ctx) => {
@@ -96,43 +99,30 @@ bot.command("disconnect", async (ctx) => {
 bot.command("status", async (ctx) => {
   const userId = ctx.from?.id?.toString();
   if (!userId) return;
-
-  const userJobs = await db
+  const jobs = await db
     .select()
     .from(clipJobs)
     .where(eq(clipJobs.telegramUserId, userId))
     .orderBy(desc(clipJobs.createdAt))
     .limit(5);
 
-  if (!userJobs.length) {
-    await ctx.reply("📊 Belum ada riwayat pemrosesan video.");
+  if (!jobs.length) {
+    await ctx.reply("📭 Belum ada pekerjaan. Kirim link video untuk memulai!");
     return;
   }
 
-  let msg = "📊 *Status Pemrosesan Terakhir:*\n\n";
-  userJobs.forEach((job) => {
-    const statusEmoji =
-      job.status === "done"
-        ? "✅"
-        : job.status === "clips_ready"
-        ? "🎬"
-        : job.status === "error"
-        ? "❌"
-        : "⏳";
+  const statusEmoji: Record<string, string> = {
+    queued: "⏳", downloading: "⬇️", analyzing: "🧠",
+    clipping: "✂️", uploading: "📤", done: "✅", error: "❌",
+  };
 
-    // Membersihkan karakter khusus agar Markdown Telegram tidak Error 400
-    const safeError = job.errorMessage
-      ? job.errorMessage.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "")
-      : "";
-
-    msg += `${statusEmoji} *Video*\n`;
-    msg += `Status: \`${job.status}\`\n`;
-    if (safeError) {
-      msg += `Error: ${safeError}\n`;
-    }
+  let msg = `📊 *Status Terbaru:*\n\n`;
+  jobs.slice(0, 3).forEach((job) => {
+    msg += `${statusEmoji[job.status] || "❓"} *${job.videoTitle?.slice(0, 40) || "Video"}*\n`;
+    msg += `Status: ${job.status}\n`;
+    if (job.status === "error") msg += `Error: ${job.errorMessage?.slice(0, 80)}\n`;
     msg += `Waktu: ${new Date(job.createdAt).toLocaleString("id-ID")}\n\n`;
   });
-
   await ctx.reply(msg, { parse_mode: "Markdown" });
 });
 
@@ -368,21 +358,6 @@ bot.command("dupfilter", async (ctx) => {
       `• \`DUPLICATE_FILTER_LOOKBACK_DAYS\` = jumlah hari, \`0\` = tanpa batas (default 30)`,
     { parse_mode: "Markdown" }
   );
-});
-
-bot.command("jadwal", async (ctx) => {
-  const userId = ctx.from?.id?.toString();
-  if (!userId) return;
-  const pending = await getPendingScheduledUploadsForUser(userId);
-  if (!pending.length) {
-    await ctx.reply("🗓 Belum ada video yang dijadwalkan.");
-    return;
-  }
-  let msg = "🗓 *Antrean Jadwal Upload Anda:*\n\n";
-  pending.forEach((p, i) => {
-    msg += `${i + 1}. Waktu: ${formatScheduleLabel(new Date(p.scheduledAt))} (Mode: ${p.mode})\n`;
-  });
-  await ctx.reply(msg, { parse_mode: "Markdown" });
 });
 
 // ===== INFO COMMANDS =====
@@ -670,6 +645,216 @@ bot.callbackQuery("drive_disconnect", async (ctx) => {
   await ctx.editMessageText("✅ Google Drive berhasil diputus. Hubungkan lagi kapan saja lewat /drive.");
 });
 
+// =====================================================================
+// 📅 SCHEDULER / QUEUE POSTING (BARU!)
+// =====================================================================
+// Fitur tambahan — tidak mengubah alur upload otomatis yang sudah ada di
+// job-processor.ts. User memilih klip dari job yang SUDAH SELESAI (/status
+// menunjukkan ✅ Selesai), lalu menjadwalkan kapan klip itu dipublish
+// (manual atau rekomendasi AI berdasarkan niche). Lihat src/lib/scheduler.ts
+// dan src/lib/scheduler-config.ts — semua jam optimal & provider AI mudah
+// diganti di sana tanpa menyentuh file ini.
+const SCHEDULER_HELP =
+  `\n\n📅 *Scheduler / Queue Posting*\n` +
+  `/schedule — jadwalkan klip dari job terakhir yang selesai\n` +
+  `/queue — lihat & batalkan antrean jadwal kamu\n` +
+  `/besttime <niche> — cek rekomendasi AI jam optimal untuk niche tertentu`;
+
+// UUID v4 standar: 8-4-4-4-12. Dipadatkan (tanpa dash) supaya callback_data
+// Telegram (limit 64 byte) cukup untuk menampung jobId + metadata lain.
+function compactJobId(jobId: string): string {
+  return jobId.replace(/-/g, "");
+}
+function expandJobId(compact: string): string {
+  if (compact.length !== 32) return compact;
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
+}
+const DAY_CODE: Record<OptimalSlot["day"], string> = { any: "a", weekday: "w", weekend: "e" };
+const DAY_FROM_CODE: Record<string, OptimalSlot["day"]> = { a: "any", w: "weekday", e: "weekend" };
+
+bot.command("schedule", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+
+  const jobs = await getRecentCompletedJobsForUser(userId, 5);
+  if (!jobs.length) {
+    await ctx.reply(
+      "📭 Belum ada video yang selesai diproses. Kirim link video dulu, tunggu sampai ✅ Selesai, baru jadwalkan klipnya di sini."
+    );
+    return;
+  }
+
+  const kb = new InlineKeyboard();
+  jobs.forEach((job) => {
+    const label = (job.videoTitle || job.sourceUrl).slice(0, 40);
+    kb.text(`🎬 ${label}`, `sched_job_${compactJobId(job.jobId)}`).row();
+  });
+
+  await ctx.reply(
+    "📅 *Scheduler / Queue Posting*\n\nPilih video yang klipnya ingin dijadwalkan untuk diposting:",
+    { parse_mode: "Markdown", reply_markup: kb }
+  );
+});
+
+bot.callbackQuery(/^sched_job_([a-f0-9]{32})$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const jobId = expandJobId(ctx.match[1]);
+  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  const job = jobs[0];
+  if (!job) {
+    await ctx.reply("❌ Job tidak ditemukan.");
+    return;
+  }
+  const clips = (job.clips as ClipResult[] | null) || [];
+  if (!clips.length) {
+    await ctx.reply("❌ Job ini tidak punya klip yang bisa dijadwalkan.");
+    return;
+  }
+
+  const kb = new InlineKeyboard();
+  clips.forEach((clip, idx) => {
+    const posted = clip.youtubeUrl ? " (draft YouTube)" : "";
+    kb.text(`✂️ Klip ${idx + 1}: ${clip.title.slice(0, 30)}${posted}`, `sched_clip_${ctx.match[1]}_${idx}`).row();
+  });
+
+  await ctx.reply("Pilih klip yang ingin dijadwalkan:", { reply_markup: kb });
+});
+
+bot.callbackQuery(/^sched_clip_([a-f0-9]{32})_(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery("🧠 Menghitung jam optimal...");
+  const userId = ctx.from.id.toString();
+  const compactId = ctx.match[1];
+  const clipIndex = parseInt(ctx.match[2], 10);
+
+  const settingsRows = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, userId));
+  const niche = settingsRows[0]?.nichePrompt || null;
+
+  const recommendation = await getAiOptimalSlots(niche, "youtube", 3);
+
+  const kb = new InlineKeyboard();
+  recommendation.slots.forEach((slot) => {
+    const when = nextDateForSlot(slot);
+    const dateLabel = when.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jakarta" });
+    kb.text(`⏰ ${formatSlotLabel(slot)}`, `sp_${compactId}_${clipIndex}_${DAY_CODE[slot.day]}_${slot.hour}_${slot.minute}`).row();
+    void dateLabel;
+  });
+  // Opsi cepat tambahan di luar rekomendasi AI/fallback.
+  kb.text("🕐 1 jam dari sekarang", `sp_${compactId}_${clipIndex}_a_${new Date(Date.now() + 3600000).getHours()}_0`).row();
+
+  const slotLines = recommendation.slots
+    .map((slot) => {
+      const when = nextDateForSlot(slot);
+      return `• ${formatSlotLabel(slot)} — _${slot.label}_\n   📆 Eksekusi berikutnya: ${when.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jakarta" })}`;
+    })
+    .join("\n");
+
+  await ctx.reply(
+    `📅 *Rekomendasi jam posting* ${recommendation.aiPowered ? "(🧠 AI, niche: " + recommendation.nicheLabel + ")" : "(📋 preset niche: " + recommendation.nicheLabel + ")"}\n\n${slotLines}\n\nPilih salah satu jam di bawah ini:`,
+    { parse_mode: "Markdown", reply_markup: kb }
+  );
+});
+
+bot.callbackQuery(/^sp_([a-f0-9]{32})_(\d+)_([awe])_(\d+)_(\d+)$/, async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const chatId = ctx.chat?.id?.toString();
+  if (!chatId) return;
+
+  const jobId = expandJobId(ctx.match[1]);
+  const clipIndex = parseInt(ctx.match[2], 10);
+  const day = DAY_FROM_CODE[ctx.match[3]];
+  const hour = parseInt(ctx.match[4], 10);
+  const minute = parseInt(ctx.match[5], 10);
+
+  const scheduledAt = nextDateForSlot({ day, hour, minute, label: "manual" });
+
+  try {
+    const settingsRows = await db.select().from(userSettings).where(eq(userSettings.telegramUserId, userId));
+    await createScheduledPost({
+      telegramUserId: userId,
+      telegramChatId: chatId,
+      jobId,
+      clipIndex,
+      platform: "youtube",
+      scheduledAt,
+      source: "ai",
+      niche: settingsRows[0]?.nichePrompt || null,
+    });
+
+    await ctx.answerCallbackQuery("✅ Berhasil dijadwalkan!");
+    await ctx.editMessageText(
+      `✅ *Klip berhasil dijadwalkan!*\n\n⏰ ${scheduledAt.toLocaleString("id-ID", { dateStyle: "full", timeStyle: "short", timeZone: "Asia/Jakarta" })} WIB\n\nGunakan /queue untuk melihat atau membatalkan jadwal.`,
+      { parse_mode: "Markdown" }
+    );
+  } catch (err) {
+    await ctx.answerCallbackQuery("❌ Gagal menjadwalkan");
+    await ctx.reply(`❌ Gagal menjadwalkan: ${err instanceof Error ? err.message : String(err)}`);
+  }
+});
+
+bot.command("queue", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+
+  const rows = await listScheduledPostsForUser(userId);
+  const pending = rows.filter((r) => r.status === "pending");
+
+  if (!rows.length) {
+    await ctx.reply("📭 Belum ada jadwal posting. Gunakan /schedule untuk membuat jadwal baru.");
+    return;
+  }
+
+  const statusEmoji: Record<string, string> = {
+    pending: "⏳", processing: "🚀", posted: "✅", failed: "❌", cancelled: "🚫",
+  };
+
+  let msg = `📅 *Antrean Posting Kamu*\n\n`;
+  rows.slice(0, 10).forEach((row) => {
+    const when = new Date(row.scheduledAt).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jakarta" });
+    msg += `${statusEmoji[row.status] || "❓"} *${(row.title || "Klip").slice(0, 40)}*\n`;
+    msg += `   ⏰ ${when} WIB · ${row.platform} · ${row.source === "ai" ? "rekomendasi AI" : row.source}\n`;
+    if (row.status === "posted" && row.resultUrl) msg += `   🔗 ${row.resultUrl}\n`;
+    if (row.status === "failed" && row.errorMessage) msg += `   ⚠️ ${row.errorMessage.slice(0, 80)}\n`;
+    msg += "\n";
+  });
+
+  const kb = new InlineKeyboard();
+  pending.slice(0, 10).forEach((row) => {
+    kb.text(`🚫 Batalkan: ${(row.title || "Klip").slice(0, 25)}`, `sched_cancel_${row.id}`).row();
+  });
+
+  await ctx.reply(msg, { parse_mode: "Markdown", reply_markup: pending.length ? kb : undefined });
+});
+
+bot.callbackQuery(/^sched_cancel_(\d+)$/, async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const id = parseInt(ctx.match[1], 10);
+  const ok = await cancelScheduledPost(id, userId);
+  await ctx.answerCallbackQuery(ok ? "🚫 Jadwal dibatalkan" : "❌ Gagal membatalkan (mungkin sudah diproses)");
+  if (ok) {
+    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => {});
+  }
+});
+
+bot.command("besttime", async (ctx) => {
+  const niche = ctx.match?.toString().trim() || null;
+  const recommendation = await getAiOptimalSlots(niche, "youtube", 3);
+
+  const lines = recommendation.slots
+    .map((slot) => {
+      const when = nextDateForSlot(slot);
+      return `• *${formatSlotLabel(slot)}*\n   _${slot.label}_\n   📆 Berikutnya: ${when.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jakarta" })} WIB`;
+    })
+    .join("\n\n");
+
+  await ctx.reply(
+    `🧠 *Rekomendasi Jam Optimal*\n` +
+      `Niche: *${recommendation.nicheLabel}*\n` +
+      `Sumber: ${recommendation.aiPowered ? "🤖 AI (GPT-4o-mini)" : "📋 Tabel preset niche"}\n\n${lines}\n\n` +
+      `💡 Tips: kirim \`/besttime <niche kamu>\`, misal \`/besttime bisnis\` atau \`/besttime komedi\`.`,
+    { parse_mode: "Markdown" }
+  );
+});
+
 // ===== MESSAGE HANDLER =====
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
@@ -778,9 +963,7 @@ bot.callbackQuery(/^retry_job_(.+)$/, async (ctx) => {
     .update(clipJobs)
     .set({ status: "queued", errorMessage: null, updatedAt: new Date() })
     .where(eq(clipJobs.jobId, jobId));
-
-  // Memanggil ulang fungsi utama dengan benar
-  await processJobWithUpdates(ctx, jobId, true);
+  await processJobWithUpdates(ctx, jobId);
 });
 
 // ===== HANDLER FUNCTIONS =====
@@ -901,14 +1084,20 @@ async function processJobWithUpdates(
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
+  // ===== REAL-TIME PROGRESS JOB DI TELEGRAM (fitur baru) =====
+  // Mengirim 1 pesan "live checklist" yang terus di-edit sesuai step job
+  // (download → transkripsi → analisis AI → potong klip → upload → selesai)
+  // alih-alih hanya notifikasi "selesai/gagal" di akhir.
+  // Tampilan & daftar step bisa diubah lewat src/lib/progress-config.ts
+  // tanpa menyentuh logika di file ini. Bisa dimatikan lewat env var
+  // TELEGRAM_PROGRESS_ENABLED=false (kembali ke perilaku lama).
   const jobRows = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
   const jobForTitle = jobRows[0];
   const trackerTitle = jobForTitle
-    ? `${getPlatformEmoji(jobForTitle.platform)}${jobForTitle.platform.toUpperCase()}`
+    ? `${getPlatformEmoji(jobForTitle.platform)} ${jobForTitle.platform.toUpperCase()}`
     : "Video";
-
   const trackerLabel = jobForTitle?.sourceUrl
-    ? `  \`${jobForTitle.sourceUrl.slice(0, 60)}${jobForTitle.sourceUrl.length > 60 ? "..." : ""}\``
+    ? `🔗 \`${jobForTitle.sourceUrl.slice(0, 60)}${jobForTitle.sourceUrl.length > 60 ? "..." : ""}\``
     : undefined;
 
   const tracker = new TelegramProgressTracker({
@@ -918,7 +1107,6 @@ async function processJobWithUpdates(
     title: trackerTitle,
     jobLabel: trackerLabel,
   });
-
   await tracker.start();
 
   const onStatusUpdate = async (
@@ -934,35 +1122,33 @@ async function processJobWithUpdates(
   };
 
   try {
-    // 1. Potong klip saja (tanpa langsung upload otomatis)
-    if (isSchedulerEnabled()) {
-      await processClipsOnly(jobId, onStatusUpdate);
-    } else {
-      await processJob(jobId, onStatusUpdate);
-    }
+    await processJob(jobId, onStatusUpdate);
 
     const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
     const job = jobs[0];
 
-    // 2. Kirim video klip dan thumbnail ke chat Telegram untuk dipreview
-    if ((job.status === "done" || job.status === "clips_ready") && job.clips) {
+    if (job.status === "done" && job.clips) {
       const clips = job.clips as ClipResult[];
       const successClips = clips.filter((c) => c.filePath);
-      await tracker.finishSuccess(`  *${successClips.length} klip berhasil dibuat!* Mengirim ke chat...`);
+
+      await tracker.finishSuccess(`✅ *${successClips.length} klip berhasil dibuat!* Mengirim ke chat...`);
 
       for (let i = 0; i < successClips.length; i++) {
         const clip = successClips[i];
         if (!clip.filePath || !fs.existsSync(clip.filePath)) continue;
+
         const caption = [
-          `  Klip ${i + 1}/${successClips.length}`,
-          `  ${clip.title}`,
+          `━━ Klip ${i + 1}/${successClips.length} ━━ `,
           ``,
-          `  Durasi: ${clip.duration}s`,
-          `  Viral Score: ${clip.viralScore}/10`,
-          `  ${clip.reason}`,
-          clip.thumbnailPath ? `  Thumbnail: ✅` : ``,
-          clip.youtubeUrl ? `\n  YouTube: ${clip.youtubeUrl}` : ``,
-          clip.driveUrl ? `\n  Drive: ${clip.driveUrl}` : ``,
+          `📝 ${clip.title}`,
+          ``,
+          `⏱ Durasi: ${clip.duration}s`,
+          `🔥 Viral Score: ${clip.viralScore}/10`,
+          `💡 ${clip.reason}`,
+          clip.thumbnailPath ? `🖼 Thumbnail: ✅` : ``,
+          clip.youtubeUrl ? `\n🔗 YouTube: ${clip.youtubeUrl}` : ``,
+          clip.youtubeUrl ? ` (Tersimpan sebagai Draft di YouTube Studio) ` : ``,
+          clip.driveUrl ? `\n☁️ Drive: ${clip.driveUrl}` : ``,
         ]
           .join("\n")
           .trim();
@@ -970,7 +1156,7 @@ async function processJobWithUpdates(
         try {
           if (clip.thumbnailPath && fs.existsSync(clip.thumbnailPath)) {
             await ctx.api.sendPhoto(chatId, new InputFile(clip.thumbnailPath), {
-              caption: `  Thumbnail Klip ${i + 1}`,
+              caption: `🖼 Thumbnail Klip ${i + 1}`,
               parse_mode: "HTML",
             });
           }
@@ -980,79 +1166,65 @@ async function processJobWithUpdates(
           });
         } catch (err) {
           console.error(`Failed to send clip ${i + 1}:`, err);
+          await ctx.api.sendMessage(
+            chatId,
+            `✅ Klip ${i + 1}: *${clip.title}*${clip.youtubeUrl ? `\n🔗 ${clip.youtubeUrl}` : ""}${clip.driveUrl ? `\n☁️ ${clip.driveUrl}` : ""}`,
+            { parse_mode: "Markdown" }
+          );
         }
       }
 
-      // 3. Tampilkan Tombol Penjadwalan Upload ke User
-      if (job.status === "clips_ready") {
-        const userRow = await db
-          .select()
-          .from(userSettings)
-          .where(eq(userSettings.telegramUserId, chatId.toString()));
-        const slotsInfo = await getOptimalSlots(userRow[0]?.nichePrompt, job.platform);
-
-        const kb = new InlineKeyboard();
-        kb.text("🚀 Post Sekarang", `publish_now_${jobId}`).row();
-        slotsInfo.slots.forEach((slot) => {
-          kb.text(`🤖 AI: ${slot.label}`, `sched_ai_${slot.date.getTime()}_${jobId}`).row();
-        });
-
-        const safeReason = slotsInfo.reason.replace(/[_*[\]()~`>#+\-=|{}.!]/g, " ");
-
-        await ctx.api.sendMessage(
-          chatId,
-          `✅ *Klip Siap!*\n\n🤖 *Rekomendasi AI (${slotsInfo.nicheLabel}):*\n${safeReason}\n\nKapan klip ingin dipublish ke YouTube?`,
-          { parse_mode: "Markdown", reply_markup: kb }
-        );
-      } else {
-        const hasYoutube = successClips.some((c) => c.youtubeUrl);
-        const summaryKeyboard = new InlineKeyboard();
-        if (hasYoutube) {
-          summaryKeyboard
-            .url("  Buka YouTube Studio", "https://studio.youtube.com/channel/videos/upload")
-            .row();
-        }
-        summaryKeyboard.text("  Proses Video Lain", "help");
-        await ctx.api.sendMessage(
-          chatId,
-          messages.resultSummary(
-            successClips.map((c) => ({
-              title: c.title,
-              duration: c.duration,
-              youtubeUrl: c.youtubeUrl,
-              viralScore: c.viralScore,
-              hasThumbnail: !!(c.thumbnailPath && fs.existsSync(c.thumbnailPath)),
-            }))
-          ),
-          { parse_mode: "Markdown", reply_markup: summaryKeyboard }
-        );
+      const hasYoutube = successClips.some((c) => c.youtubeUrl);
+      const summaryKeyboard = new InlineKeyboard();
+      if (hasYoutube) {
+        summaryKeyboard
+          .url("📺 Buka YouTube Studio", "https://studio.youtube.com/channel/videos/upload")
+          .row();
       }
+      const driveCount = successClips.filter((c) => c.driveUrl).length;
+      if (driveCount > 0) {
+        const st = await getDriveStatus(job.telegramUserId).catch(() => null);
+        if (st?.folderUrl) summaryKeyboard.url("☁️ Buka Folder Google Drive", st.folderUrl).row();
+        await ctx.api
+          .sendMessage(chatId, `☁️ *${driveCount} klip tersimpan di Google Drive.*`, { parse_mode: "Markdown" })
+          .catch(() => {});
+      }
+      summaryKeyboard.text("🎬 Proses Video Lain", "help");
 
-      // Cleanup file sementara setelah 30 detik
+      await ctx.api.sendMessage(
+        chatId,
+        messages.resultSummary(
+          successClips.map((c) => ({
+            title: c.title,
+            duration: c.duration,
+            youtubeUrl: c.youtubeUrl,
+            viralScore: c.viralScore,
+            hasThumbnail: !!(c.thumbnailPath && fs.existsSync(c.thumbnailPath)),
+          }))
+        ),
+        { parse_mode: "Markdown", reply_markup: summaryKeyboard }
+      );
+
+      // Cleanup after 30s
       setTimeout(() => {
         successClips.forEach((c) => {
           if (c.filePath && fs.existsSync(c.filePath)) {
-            try { fs.unlinkSync(c.filePath); } catch {}
+            try { fs.unlinkSync(c.filePath); } catch { /* ignore */ }
           }
           if (c.thumbnailPath && fs.existsSync(c.thumbnailPath)) {
-            try { fs.unlinkSync(c.thumbnailPath); } catch {}
+            try { fs.unlinkSync(c.thumbnailPath); } catch { /* ignore */ }
           }
         });
       }, 30000);
     } else if (job.status === "error") {
-      const safeErrorMsg = (job.errorMessage || "Terjadi kesalahan tidak diketahui").replace(
-        /[_*[\]()~`>#+\-=|{}.!]/g,
-        " "
-      );
-      await tracker.finishError(safeErrorMsg, {
+      await tracker.finishError(job.errorMessage || "Terjadi kesalahan tidak diketahui", {
         reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
       });
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    const safeErrorMsg = errorMsg.replace(/[_*[\]()~`>#+\-=|{}.!]/g, " ");
     await tracker
-      .finishError(safeErrorMsg, {
+      .finishError(errorMsg, {
         reply_markup: new InlineKeyboard().text("🔄 Coba Lagi", `retry_job_${jobId}`),
       })
       .catch(() => {});
@@ -1199,15 +1371,14 @@ async function ensureUserSettings(userId: string): Promise<void> {
     .select()
     .from(userSettings)
     .where(eq(userSettings.telegramUserId, userId));
-
   if (!existing.length) {
     const envMaxClips = getMaxClipsConfig();
     const envClipDuration = getDefaultClipDuration();
     const { min, max } = getDurationRange(envClipDuration);
     await db.insert(userSettings).values({
       telegramUserId: userId,
-      maxClips: envMaxClips,
-      clipDuration: envClipDuration,
+      maxClips: envMaxClips, // Use env var as default for new users
+      clipDuration: envClipDuration, // Use env var CLIP_DURATION as default for new users
       minDuration: min,
       maxDuration: max,
       defaultPrivacy: "private",
@@ -1222,35 +1393,3 @@ bot.catch((err) => {
 
 export default bot;
 export { formatDuration };
-
-bot.callbackQuery(/^publish_now_(.+)$/, async (ctx) => {
-  const jobId = ctx.match[1];
-  await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
-  await ctx.reply("🚀 Memulai upload ke YouTube...");
-  try {
-    await publishJobClips(jobId);
-    await ctx.reply("✅ Upload selesai! Cek Draft YouTube Studio Anda.");
-  } catch (err) {
-    await ctx.reply("❌ Upload gagal: " + String(err));
-  }
-});
-
-bot.callbackQuery(/^sched_ai_(\d+)_(.+)$/, async (ctx) => {
-  const timestamp = parseInt(ctx.match[1], 10);
-  const jobId = ctx.match[2];
-  const userId = ctx.from.id.toString();
-
-  await ctx.answerCallbackQuery("🗓 Menjadwalkan klip...");
-  await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
-
-  const date = new Date(timestamp);
-  await createScheduledUpload({
-    jobId,
-    telegramUserId: userId,
-    telegramChatId: ctx.chat?.id?.toString() || userId,
-    mode: "ai_recommended",
-    scheduledAt: date,
-  });
-
-  await ctx.reply(`✅ *Berhasil Dijadwalkan!*\n\nKlip akan di-upload otomatis pada:\n🗓 *${formatScheduleLabel(date)}*`, { parse_mode: "Markdown" });
-});

@@ -188,8 +188,8 @@ export function buildFFmpegFilterArgs(mode: AspectRatioMode): {
 } {
   if (mode === "blur") {
     const filterComplex = [
-      `[0:v]fps=30,split=2[main][bg]`,
-      `[bg]scale=270:480,boxblur=10:2,scale=${TARGET_WIDTH}:${TARGET_HEIGHT}[blurred]`,
+      `[0:v]split=2[main][bg]`,
+      `[bg]scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},boxblur=20:5[blurred]`,
       `[main]scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black@0[fg]`,
       `[blurred][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[out]`,
     ].join(";");

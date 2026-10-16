@@ -187,48 +187,52 @@ export const duplicateClipSkips = pgTable("duplicate_clip_skips", {
 });
 
 // =====================================================================
-// 🗓️ SCHEDULER / QUEUE POSTING (BARU!)
+// 📅 SCHEDULER / QUEUE POSTING (BARU!)
 // =====================================================================
 // Tabel tambahan — TIDAK mengubah tabel/kolom yang sudah ada di atas,
-// jadi dashboard web (src/app/page.tsx) dan alur job lama sama sekali
-// tidak terpengaruh.
+// jadi dashboard web (src/app/page.tsx) dan alur job yang sudah ada
+// (src/lib/job-processor.ts) sama sekali tidak terpengaruh.
 //
-// Sebelum upload ke YouTube, user sekarang ditanya lewat Telegram:
-//   1) 📤 Post sekarang           → upload langsung (perilaku lama)
-//   2) 🤖 Jadwalkan (rekomendasi AI) → upload otomatis di jam optimal
-//      hasil analisis AI berdasarkan niche (lihat src/lib/scheduler.ts)
-//   3) 🕐 Atur jam custom         → user menentukan sendiri jam uploadnya
+// Setiap baris di sini mewakili SATU klip (dari sebuah job yang sudah
+// selesai diproses) yang di-antre untuk "diposting" (dipublikasikan)
+// pada jam tertentu — bisa jam pilihan manual, atau jam hasil rekomendasi
+// AI berdasarkan niche (lihat src/lib/scheduler-config.ts &
+// src/lib/scheduler.ts). Worker background (src/lib/scheduler-worker.ts)
+// mengecek tabel ini setiap beberapa menit dan mengeksekusi antrean yang
+// sudah jatuh tempo.
 //
-// Pilihan #2 dan #3 akan membuat satu baris di tabel ini (status=pending).
-// Worker di src/lib/scheduler-worker.ts berjalan berkala (lihat
-// src/lib/scheduler-config.ts untuk interval & konfigurasi lain yang mudah
-// diubah) dan akan mem-publish klip (upload YouTube + Google Drive) begitu
-// `scheduled_at` tercapai, lalu mengirim notifikasi hasilnya ke Telegram.
-export const scheduledUploads = pgTable("scheduled_uploads", {
+// 👉 SEMUA KONFIGURASI (interval polling, timezone, jam optimal per niche,
+//    provider AI) ADA DI src/lib/scheduler-config.ts SUPAYA MUDAH DIGANTI
+//    TANPA MENYENTUH FILE LAIN.
+export const scheduledPosts = pgTable("scheduled_posts", {
   id: serial("id").primaryKey(),
-  jobId: text("job_id").notNull(),
   telegramUserId: text("telegram_user_id").notNull(),
   telegramChatId: text("telegram_chat_id").notNull(),
-  // now | ai_recommended | custom
-  mode: text("mode").notNull().default("custom"),
+  jobId: text("job_id").notNull(),
+  clipIndex: integer("clip_index").notNull(),
+  platform: text("platform").notNull().default("youtube"), // youtube | tiktok
+  // Judul/deskripsi di-snapshot dari ClipResult saat dijadwalkan, supaya tetap
+  // tampil di dashboard/Telegram walau job aslinya sudah lama.
+  title: text("title"),
+  niche: text("niche"), // niche prompt yang dipakai untuk rekomendasi AI (boleh kosong)
   scheduledAt: timestamp("scheduled_at").notNull(),
-  // pending | processing | done | error | cancelled
-  status: text("status").notNull().default("pending"),
-  // Alasan/insight singkat dari AI (jika mode = ai_recommended), ditampilkan ke user.
-  recommendationReason: text("recommendation_reason"),
+  // manual = user pilih jam sendiri, ai = hasil rekomendasi AI, preset = pilih dari tabel jam optimal bawaan
+  source: text("source").notNull().default("manual"),
+  status: text("status").notNull().default("pending"), // pending | processing | posted | failed | cancelled
   attempts: integer("attempts").notNull().default(0),
+  resultUrl: text("result_url"),
   errorMessage: text("error_message"),
-  processedAt: timestamp("processed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+export type ScheduledPostRow = typeof scheduledPosts.$inferSelect;
 
 // Types
 export type UserSettingsRow = typeof userSettings.$inferSelect;
 export type DriveTokenRow = typeof driveTokens.$inferSelect;
 export type ClipFingerprintRow = typeof clipFingerprints.$inferSelect;
 export type DuplicateClipSkipRow = typeof duplicateClipSkips.$inferSelect;
-export type ScheduledUploadRow = typeof scheduledUploads.$inferSelect;
 
 export interface ClipResult {
   index: number;
