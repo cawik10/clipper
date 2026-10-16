@@ -430,7 +430,7 @@ export async function publishJobClips(
       .update(clipJobs)
       .set({
         status: "done",
-        clips: finalClips, // <-- Aman dipanggil karena scope sudah sesuai
+        clips: finalClips,
         updatedAt: new Date(),
       })
       .where(eq(clipJobs.jobId, jobId));
@@ -448,30 +448,7 @@ export async function publishJobClips(
     await update("error", `❌ Upload gagal: ${errorMsg}`, { step: "error" });
     throw err;
   }
-
-await db
-      .update(clipJobs)
-      .set({
-        status: "done",
-        clips: finalClips,
-        updatedAt: new Date(),
-      })
-      .where(eq(clipJobs.jobId, jobId));
-
-    await update("done", "🎉 Semua klip berhasil dipublish!", { step: "done" });
-
-    // 🧹 Pembersihan otomatis file sementara di /tmp
-    cleanupJobFiles(jobId);
-
-/**
- * Alur lama (download → ... → upload) dalam satu panggilan — dipertahankan
- * untuk kompatibilitas (dipakai kalau SCHEDULER_ENABLED=false atau YouTube
- * belum terhubung sama sekali, lihat src/lib/telegram-bot.ts).
- */
-export async function processJob(jobId: string, onStatusUpdate?: StatusUpdateFn): Promise<void> {
-  await processClipsOnly(jobId, onStatusUpdate);
-  await publishJobClips(jobId, onStatusUpdate);
-}
+} // <-- PASTIKAN TERDAPAT KURUNG TUTUP UTAMA DARI publishJobClips DI SINI
 
 export function cleanupJobFiles(jobId: string): void {
   const downloadDir = "/tmp/autoclip";
@@ -493,4 +470,12 @@ export function cleanupJobFiles(jobId: string): void {
   } catch (err) {
     console.warn(`[cleanup] Error saat membersihkan file untuk job ${jobId}:`, err);
   }
+}
+
+export async function processJob(
+  jobId: string,
+  onStatusUpdate?: StatusUpdateFn
+): Promise<void> {
+  await processClipsOnly(jobId, onStatusUpdate);
+  await publishJobClips(jobId, onStatusUpdate);
 }
