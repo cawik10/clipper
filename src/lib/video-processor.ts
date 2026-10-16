@@ -44,56 +44,109 @@ export function detectPlatform(url: string): string {
 export async function downloadVideo(
   url: string,
   jobId: string,
-  onProgress?: (pct: number) => Promise<void>
-): Promise<{ filePath: string; title: string; duration: number }> {
-  ensureDir(TMP_DIR);
-  const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
-  const cmd = [
-      "yt-dlp",
-      "--no-playlist",
-      "--merge-output-format", "mp4",
-      "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--impersonate", "chrome", // <--- WAJIB ditambahkan agar sidik jari jaringan cocok dengan cookies
-      "--cookies", "cookies.txt",
-      "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"',
-      "--progress",
-      "--newline",
-      "-o", `"${outputTemplate}"`,
-      `"${url}"`,
-    ].join(" ");
-
-  console.log(`[download] Starting: ${url}`);
-
-  await execAsync(cmd, { timeout: 600000 });
-
-  if (onProgress) await onProgress(50);
-
-  const files = fs.readdirSync(TMP_DIR).filter((f) => f.startsWith(jobId));
-  if (!files.length) throw new Error("Download selesai tapi file tidak ditemukan");
-
-  const filePath = path.join(TMP_DIR, files[0]);
-
-  const infoCmd = `yt-dlp --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=android,ios" --dump-json --no-playlist "${url}"`;
-  let title = "Video";
-  let duration = 0;
-  try {
-    const { stdout } = await execAsync(infoCmd, { timeout: 30000 });
-    const info = JSON.parse(stdout.trim().split("\n")[0]);
-    title = info.title || "Video";
-    duration = info.duration || 0;
-  } catch {
-    try {
-      const probeCmd = `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${filePath}"`;
-      const { stdout } = await execAsync(probeCmd, { timeout: 15000 });
-      duration = parseFloat(stdout.trim()) || 0;
-    } catch {
-      /* ignore */
-    }
+  onProgress?: (percent: number, rawOutput: string) => void
+): Promise<{ filePath: string; duration: number }> {
+  if (!fs.existsSync(DOWNLOAD_DIR)) {
+    fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
   }
 
-  if (onProgress) await onProgress(100);
-  console.log(`[download] ✅ Done: ${filePath} (${duration}s)`);
-  return { filePath, title, duration };
+  const outputTemplate = path.join(DOWNLOAD_DIR, `${jobId}.%(ext)s`);
+  const hasCookies =
+    fs.existsSync("cookies.txt") &&
+    fs.readFileSync("cookies.txt", "utf-8").trim().length > 0;
+
+  // Flag dasar untuk mencegah stuck jaringan dan mempercepat proses unduh
+  const baseFlags = [
+    "--no-playlist",
+    "--merge-output-format mp4",
+    '-f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"',
+    "--socket-timeout 30",
+    "--concurrent-fragments 4",
+    "--progress",
+    "--newline",
+    `-o "${outputTemplate}"`,
+  ];
+
+  // Strategi 1: Dengan cookies
+  const cmdWithCookies = [
+    "yt-dlp",
+    ...baseFlags,
+    hasCookies ? "--cookies cookies.txt" : "",
+    '--extractor-args "youtube:player_client=mweb,web,web_embedded"',
+    `"${url}"`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  // Strategi 2 (Fallback): Client mobile tanpa cookies
+  const cmdWithoutCookies = [
+    "yt-dlp",
+    ...baseFlags,
+    '--extractor-args "youtube:player_client=android,mweb,web"',
+    '--user-agent "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"',
+    `"${url}"`,
+  ].join(" ");
+
+  const executeDownload = async (command: string) => {
+    return new Promise<{ filePath: string; duration: number }>((resolve, reject) => {
+      let stderrText = "";
+
+      // Pasang timeout 5 menit (300.000 ms) agar Node.js tidak menggantung selamanya
+      const process = exec(command, {
+        maxBuffer: 1024 * 1024 * 50,
+        timeout: 300000,
+      });
+
+      process.stdout?.on("data", (data: Buffer) => {
+        const text = data.toString();
+        const match = text.match(/[download]\s+(\d+\.\d+)%/);
+        if (match && onProgress) {
+          onProgress(parseFloat(match[1]), text);
+        }
+      });
+
+      process.stderr?.on("data", (data: Buffer) => {
+        stderrText += data.toString();
+      });
+
+      process.on("close", async (code) => {
+        if (code !== 0) {
+          return reject(
+            new Error(`yt-dlp exited with code ${code}: ${stderrText.trim()}`)
+          );
+        }
+        const files = fs
+          .readdirSync(DOWNLOAD_DIR)
+          .filter((f) => f.startsWith(jobId));
+        if (!files.length) {
+          return reject(new Error("File hasil download tidak ditemukan"));
+        }
+        const downloadedFile = path.join(DOWNLOAD_DIR, files[0]);
+        try {
+          const duration = await getVideoDuration(downloadedFile);
+          resolve({ filePath: downloadedFile, duration });
+        } catch (err) {
+          reject(err);
+        }
+      });
+
+      process.on("error", (err) => reject(err));
+    });
+  };
+
+  try {
+    console.log(`[downloadVideo] Memulai unduhan (Percobaan 1)...`);
+    return await executeDownload(cmdWithCookies);
+  } catch (firstErr) {
+    const firstErrMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    console.warn(`[downloadVideo] Percobaan 1 gagal (${firstErrMsg}). Mencoba Fallback (Percobaan 2)...`);
+    try {
+      return await executeDownload(cmdWithoutCookies);
+    } catch (secondErr) {
+      const secondErrMsg = secondErr instanceof Error ? secondErr.message : String(secondErr);
+      throw new Error(`Gagal mengunduh video setelah percobaan fallback: ${secondErrMsg}`);
+    }
+  }
 }
 
 // =====================================================================
