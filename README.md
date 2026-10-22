@@ -244,4 +244,4 @@ MIT License — Bebas digunakan dan dimodifikasi.
 
 ---
 
-Made with ❤️ using Next.js, Grammy.js, FFmpeg & OpenAI.
+Made with ❤️ using Next.js, Grammy.js, FFmpeg & OpenAI. 
