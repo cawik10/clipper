@@ -53,7 +53,6 @@ export async function downloadVideo(
       "--no-playlist",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
-      "--impersonate", "chrome", // <--- WAJIB ditambahkan agar sidik jari jaringan cocok dengan cookies
       "--cookies", "cookies.txt",
       "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"',
       "--progress",
@@ -73,7 +72,7 @@ export async function downloadVideo(
 
   const filePath = path.join(TMP_DIR, files[0]);
 
-  const infoCmd = `yt-dlp --cookies cookies.txt --impersonate chrome --extractor-args "youtube:player_client=android,ios" --dump-json --no-playlist "${url}"`;
+  const infoCmd = `yt-dlp --cookies cookies.txt --extractor-args "youtube:player_client=android,ios" --dump-json --no-playlist "${url}"`;
   let title = "Video";
   let duration = 0;
   try {
