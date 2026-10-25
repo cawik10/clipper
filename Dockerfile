@@ -1,26 +1,27 @@
-FROM node:20-alpine AS base
+FROM node:20-bookworm-slim AS builder
 
-# Install system dependencies (ffmpeg, python, curl, deno)
-RUN apk add --no-cache \
+# Perbarui daftar paket dan instal dependensi
+RUN apt-get update && apt-get install -y \
     ffmpeg \
     python3 \
-    py3-pip \
+    python3-pip \
+    python3-venv \
     curl \
     ca-certificates \
-    ttf-dejavu \
-    deno \
-    py3-numpy \
-    build-base \
-    cmake \
-    ninja
-# ↑ py3-opencv / py3-numpy (BARU!) — dipakai oleh fitur Auto-Reframe
-#   Speaker Tracking (scripts/face_track.py, lihat src/lib/speaker-tracker.ts).
-#   Tidak mengubah/menghapus dependency lain yang sudah ada di atas.
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instal Deno secara manual (karena Debian tidak memiliki paket default deno)
+RUN curl -fsSL https://deno.land/x/install/install.sh | sh
+ENV PATH="/root/.deno/bin:$PATH"
+
+# Instal OpenCV versi server dengan pip
+# Flag tambahan ini diperlukan di Debian/Ubuntu modern
+RUN pip3 install --no-cache-dir opencv-python-headless numpy --break-system-packages
 
 # Install yt-dlp versi nightly terbaru untuk bypass proteksi YouTube terbaru
 RUN pip3 install --no-cache-dir -U --pre "yt-dlp[default]" curl-cffi --break-system-packages || true
 RUN pip3 install --no-cache-dir -U --pre --extra-index-url https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/ "yt-dlp[default]" --break-system-packages || true
-RUN pip3 install --no-cache-dir "opencv-python-headless<5.0" --break-system-packages
 
 # Dependencies stage
 FROM base AS deps
