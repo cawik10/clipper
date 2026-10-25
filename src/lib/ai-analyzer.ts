@@ -135,15 +135,29 @@ async function analyzeWithGemini(
 ): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite",
+        generationConfig: {
+          responseMimeType: "application/json",
+        }
+   });
   const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON ARRAY.");
   const text = result.response.text();
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (jsonMatch) {
+const jsonMatch = text.match(/\[[\s\S]*\]/);
+
+if (jsonMatch) {
+  try {
+    // Coba parse teks hasil ekstraksi regex
     const clips = JSON.parse(jsonMatch[0]);
     return validateAndFixClips(clips, input.duration, minDuration, maxDuration, maxClips);
+  } catch (parseError: any) {
+    // Jika JSON dari Gemini cacat, log error dan biarkan berlanjut ke fallback
+    console.error("[Gemini AI] Gagal memparsing JSON yang dikembalikan AI:", parseError.message);
   }
-  return fallbackAnalysis(input, maxClips, minDuration, maxDuration);
+}
+
+// Jika regex tidak cocok ATAU parseError terjadi, gunakan fallback
+console.log("[Gemini AI] Menggunakan fallback analysis...");
+return fallbackAnalysis(input, maxClips, minDuration, maxDuration);
 }
 
 function fallbackAnalysis(
