@@ -1,6 +1,7 @@
-FROM node:20-bookworm-slim AS builder
+# 1. Definisikan tahap 'base' menggunakan Debian
+FROM node:20-bookworm-slim AS base
 
-# Perbarui daftar paket dan instal dependensi
+# 2. Instal pustaka OS (Debian)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     python3 \
@@ -11,12 +12,11 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Instal Deno secara manual (karena Debian tidak memiliki paket default deno)
+# 3. Instal ekstensi Deno (jika bot Anda membutuhkannya)
 RUN curl -fsSL https://deno.land/x/install/install.sh | sh
 ENV PATH="/root/.deno/bin:$PATH"
 
-# Instal OpenCV versi server dengan pip
-# Flag tambahan ini diperlukan di Debian/Ubuntu modern
+# 4. Instal Python package (OpenCV akan terinstal sangat cepat di sini)
 RUN pip3 install --no-cache-dir opencv-python-headless numpy --break-system-packages
 
 # Install yt-dlp versi nightly terbaru untuk bypass proteksi YouTube terbaru
