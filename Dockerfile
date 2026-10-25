@@ -1,7 +1,6 @@
-# 1. Definisikan tahap 'base' menggunakan Debian
 FROM node:20-bookworm-slim AS base
 
-# 2. Instal pustaka OS (Debian)
+# Tambahkan 'unzip' ke dalam daftar paket
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     python3 \
@@ -10,13 +9,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     fonts-dejavu-core \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Instal ekstensi Deno (jika bot Anda membutuhkannya)
+# Instal Deno (sekarang akan berhasil karena unzip sudah tersedia)
 RUN curl -fsSL https://deno.land/x/install/install.sh | sh
 ENV PATH="/root/.deno/bin:$PATH"
 
-# 4. Instal Python package (OpenCV akan terinstal sangat cepat di sini)
+# Instal OpenCV dan Numpy
 RUN pip3 install --no-cache-dir opencv-python-headless numpy --break-system-packages
 
 # Install yt-dlp versi nightly terbaru untuk bypass proteksi YouTube terbaru
