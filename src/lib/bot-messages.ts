@@ -22,7 +22,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 🎯 Custom Niche Prompt — arahkan fokus AI Analysis ✨ Baru!
 🧹 Duplicate/Repetitive Clip Filter — hindari klip mirip saat video sama diproses ulang ✨ Baru!
 🗓 Scheduler / Queue Posting — jadwalkan upload otomatis sesuai niche ✨ Baru!
-🎯 Auto-Reframe Speaker Tracking — crop dinamis mengikuti wajah/pembicara aktif (`ASPECT_RATIO_MODE=speaker_track`) ✨ Baru!
+🎯 Auto-Reframe Speaker Tracking — crop dinamis mengikuti wajah/pembicara aktif (\`ASPECT_RATIO_MODE=speaker_track\`) ✨ Baru!
 
 *Perintah:*
 /start - Menu utama
