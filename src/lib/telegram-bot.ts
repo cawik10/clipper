@@ -50,6 +50,8 @@ import {
   getDuplicateFilterScopeLabel,
 } from "@/lib/duplicate-filter-config";
 import { getDuplicateFilterStats } from "@/lib/duplicate-filter";
+// 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak mengubah import di atas.
+import { getAutoReframeConfig, getAutoReframeBackendLabel } from "@/lib/reframe-config";
 import fs from "fs";
 
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
@@ -468,6 +470,37 @@ bot.command("zoom", async (ctx) => {
     `• \`ZOOM_EFFECT_INTENSITY\` = \`1.05\` (subtle) sampai \`1.3\` (strong)\n` +
     `• \`ZOOM_EFFECT_DURATION\` = durasi dalam detik (default: 2.0)\n` +
     `• \`ZOOM_EFFECT_MIN_SCORE\` = min viral score 1-10 (default: 7)`,
+    { parse_mode: "Markdown" }
+  );
+});
+
+// 🎯 Auto-Reframe Speaker Tracking (BARU!) — command terpisah, tidak
+// mengubah command lain di atas. Lihat src/lib/reframe-config.ts untuk
+// detail konfigurasi lengkap.
+bot.command("autoreframe", async (ctx) => {
+  const cfg = getAutoReframeConfig();
+  const backendLabel = getAutoReframeBackendLabel(cfg.backend);
+  await ctx.reply(
+    `🎯 *Auto-Reframe Speaker Tracking:*\n\n` +
+    `Status: ${cfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+    `Backend deteksi wajah: *${backendLabel}*\n` +
+    `Sample rate: ${cfg.sampleFps} fps\n` +
+    `Smoothing: ${cfg.smoothing} (0=responsif, 0.95=sangat halus)\n` +
+    `Padding wajah: ${cfg.padding}\n` +
+    `Fallback kalau wajah tidak terdeteksi: \`${cfg.fallbackMode}\`\n\n` +
+    `ℹ️ Fitur ini menggantikan *center crop statis* dengan crop dinamis ` +
+    `yang mengikuti wajah/pembicara aktif — HANYA berlaku saat ` +
+    `\`ASPECT_RATIO_MODE=crop\`.\n\n` +
+    `*Cara Aktifkan (Railway Variables):*\n` +
+    `• \`ASPECT_RATIO_MODE\` = \`crop\`\n` +
+    `• \`AUTO_REFRAME_ENABLED\` = \`true\`\n\n` +
+    `*Konfigurasi Lanjutan (opsional):*\n` +
+    `• \`AUTO_REFRAME_BACKEND\` = \`opencv\` | \`none\`\n` +
+    `• \`AUTO_REFRAME_SAMPLE_FPS\` = angka (default: 2)\n` +
+    `• \`AUTO_REFRAME_SMOOTHING\` = 0.0-0.95 (default: 0.8)\n` +
+    `• \`AUTO_REFRAME_PADDING\` = 0.0-1.5 (default: 0.35)\n` +
+    `• \`AUTO_REFRAME_FALLBACK_MODE\` = \`blur\`|\`crop\`|\`pad\`|\`stretch\`|\`none\`\n\n` +
+    `💡 Tidak ada wajah terdeteksi / backend error → otomatis fallback ke crop statis, proses tetap aman.`,
     { parse_mode: "Markdown" }
   );
 });

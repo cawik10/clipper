@@ -1,170 +1,115 @@
 /**
- * 🎯 AUTO-REFRAME SPEAKER TRACKING — CONFIGURATION
+ * 🎯 AUTO-REFRAME SPEAKER TRACKING (FITUR BARU!)
  * =====================================================================
- * Fitur TAMBAHAN (tidak mengubah fitur/mode yang sudah ada). Sebelumnya
- * `ASPECT_RATIO_MODE=crop` hanya melakukan CENTER CROP STATIS (titik crop
- * selalu di tengah video, sepanjang durasi klip). Mode baru ini,
- * `ASPECT_RATIO_MODE=speaker_track`, mendeteksi wajah/pembicara aktif di
- * setiap klip dan membuat jendela crop 9:16 yang BERGERAK mengikuti posisi
- * pembicara (dynamic crop / auto-reframe), mirip fitur "Auto Reframe" di
- * Opus Clip / Submagic.
+ * Semua konfigurasi dikontrol via environment variables (Railway
+ * Variables), sama seperti fitur-fitur lain di video-config.ts — TIDAK
+ * mengubah fitur/kode yang sudah ada sama sekali, murni tambahan.
  *
- * Cara pakai: set di Railway Variables (sama seperti fitur lain):
- *   ASPECT_RATIO_MODE=speaker_track
+ * Apa fiturnya?
+ * -------------
+ * Ketika `ASPECT_RATIO_MODE=crop`, bot biasanya memakai "center crop"
+ * statis (selalu memotong persis di tengah frame). Dengan Auto-Reframe
+ * aktif, bot akan mendeteksi wajah/pembicara aktif pada video lalu
+ * menggeser kotak crop 9:16 mengikuti posisi pembicara dari waktu ke
+ * waktu (dengan smoothing supaya tidak "patah-patah"/jitter), sehingga
+ * pembicara tetap berada di dalam frame vertikal walau dia bergerak atau
+ * posisinya tidak persis di tengah video sumber.
  *
- * Semua konfigurasi di bawah ini OPSIONAL dan punya default yang aman.
- * Semua bisa diubah lewat Railway Dashboard → Variables tanpa redeploy
- * kode (restart service saja cukup).
- *
- * =====================================================================
- * AUTO_REFRAME_ENABLED (default: true)
- * =====================================================================
- * Saklar darurat. Kalau di-set "false", mode `speaker_track` otomatis
- * fallback ke `REFRAME_FALLBACK_MODE` (lihat bawah) walaupun
- * ASPECT_RATIO_MODE=speaker_track dipilih. Berguna untuk mematikan fitur
- * tanpa perlu mengganti ASPECT_RATIO_MODE.
+ * Kalau deteksi wajah gagal (video gelap, tidak ada wajah terdeteksi,
+ * backend deteksi error, dsb) bot otomatis fallback ke mode crop statis
+ * seperti biasa — proses TIDAK PERNAH gagal gara-gara fitur ini.
  *
  * =====================================================================
- * REFRAME_FACE_PROVIDER (default: heuristic)
+ * CARA MENGAKTIFKAN (Railway Variables)
  * =====================================================================
- * Menentukan "engine" deteksi wajah/pembicara yang dipakai. Didesain agar
- * MUDAH DIGANTI — cukup ganti env var ini, tanpa mengubah kode lain:
- *
- *   heuristic ← Default, 100% on-device, tanpa API key/model eksternal.
- *               Memakai analisis warna kulit (skin-tone) + perubahan
- *               antar-frame (motion) dari FFmpeg untuk memperkirakan
- *               posisi wajah/pembicara aktif. Ringan & jalan di mana saja
- *               (termasuk Railway tanpa GPU).
- *   external  ← Hubungkan ke layanan deteksi wajah eksternal (mis. AWS
- *               Rekognition, Google Vision, Azure Face, atau model
- *               custom milikmu sendiri) lewat REFRAME_EXTERNAL_API_URL.
- *               Lihat src/lib/reframe/face-detectors/external-detector.ts
- *               untuk kontrak request/response-nya.
- *
- * Untuk menambah engine baru (mis. face-api.js, Mediapipe, dll), cukup
- * buat file baru di src/lib/reframe/face-detectors/ yang meng-implement
- * interface `FaceDetector` (src/lib/reframe/types.ts), lalu daftarkan di
- * src/lib/reframe/face-detector-factory.ts. Tidak ada bagian lain dari
- * aplikasi yang perlu diubah.
+ * ASPECT_RATIO_MODE=crop          ← WAJIB: fitur ini hanya berlaku di mode "crop"
+ * AUTO_REFRAME_ENABLED=true       ← Nyalakan Auto-Reframe (default: false)
  *
  * =====================================================================
- * REFRAME_EXTERNAL_API_URL / REFRAME_EXTERNAL_API_KEY
+ * KONFIGURASI LANJUTAN (opsional, semua punya default aman)
  * =====================================================================
- * Dipakai hanya kalau REFRAME_FACE_PROVIDER=external. URL endpoint HTTP
- * yang menerima frame video (JSON, lihat external-detector.ts) dan
- * mengembalikan koordinat wajah/pembicara aktif.
- *
- * =====================================================================
- * REFRAME_SAMPLE_COUNT (default: 24, rentang 8-40)
- * =====================================================================
- * Jumlah titik sampel (keyframe) yang dianalisis sepanjang durasi klip
- * untuk melacak posisi pembicara. Makin besar = tracking makin halus
- * tapi makin lama diproses.
- *
- * =====================================================================
- * REFRAME_SMOOTHING (default: 0.35, rentang 0.0-0.9)
- * =====================================================================
- * Seberapa "halus/lambat" kamera virtual mengikuti pembicara. 0 = ikuti
- * posisi mentah apa adanya (bisa terlihat patah-patah/jitter), mendekati
- * 0.9 = sangat halus tapi responnya lebih lambat.
- *
- * =====================================================================
- * REFRAME_MAX_PAN_PER_SAMPLE (default: 0.18, rentang 0.02-1.0)
- * =====================================================================
- * Batas maksimum pergeseran jendela crop antar-titik sampel (dalam skala
- * 0.0-1.0 dari total ruang gerak crop). Mencegah crop "lompat" tiba-tiba
- * saat deteksi wajah meleset di satu frame.
- *
- * =====================================================================
- * REFRAME_MIN_SIGNAL_RATIO (default: 0.25, rentang 0.0-1.0)
- * =====================================================================
- * Minimal rasio frame yang berhasil mendeteksi wajah/pembicara dari
- * total sampel. Kalau di bawah ini (mis. video animasi tanpa wajah
- * manusia, layar gelap, dll), sistem otomatis fallback ke
- * REFRAME_FALLBACK_MODE supaya tetap menghasilkan klip yang valid.
- *
- * =====================================================================
- * REFRAME_ANALYZE_WIDTH / REFRAME_ANALYZE_HEIGHT (default: 64 / 36)
- * =====================================================================
- * Resolusi internal (sangat kecil) yang dipakai untuk analisis per-frame.
- * Tidak memengaruhi resolusi output klip — output tetap 1080x1920 seperti
- * mode lain. Dibuat kecil supaya cepat & ringan di CPU Railway.
- *
- * =====================================================================
- * REFRAME_FALLBACK_MODE (default: crop)
- * =====================================================================
- * Mode aspect-ratio statis (blur | crop | pad | stretch | none) yang
- * dipakai sebagai fallback otomatis kalau auto-reframe gagal/dimatikan.
+ * AUTO_REFRAME_BACKEND=opencv     ← Backend deteksi wajah. Lihat
+ *                                    src/lib/speaker-tracker.ts untuk
+ *                                    cara MENGGANTI backend (mis. ke
+ *                                    model deteksi lain yang lebih
+ *                                    akurat) tanpa menyentuh file lain.
+ *                                    Pilihan: opencv | none
+ * AUTO_REFRAME_SAMPLE_FPS=2        ← Berapa kali per detik frame di-scan
+ *                                    untuk deteksi wajah (default: 2)
+ * AUTO_REFRAME_SMOOTHING=0.8       ← 0.0-0.95, makin besar makin halus
+ *                                    tapi makin lambat "mengejar" gerakan
+ *                                    pembicara (default: 0.8)
+ * AUTO_REFRAME_PADDING=0.35        ← Ruang ekstra di sekitar wajah supaya
+ *                                    tidak terlalu mepet (default: 0.35
+ *                                    = 35% dari lebar wajah)
+ * AUTO_REFRAME_MIN_FACE_SIZE=0.03  ← Abaikan wajah yang terlalu kecil
+ *                                    (rasio terhadap lebar frame, default
+ *                                    0.03 = 3%)
+ * AUTO_REFRAME_MAX_FACES=1         ← Jumlah wajah yang dipertimbangkan
+ *                                    sebagai "pembicara aktif" (default:
+ *                                    1 = wajah paling dominan/terbesar)
+ * AUTO_REFRAME_FALLBACK_MODE=crop  ← Mode yang dipakai kalau deteksi
+ *                                    gagal/tidak ada wajah (default: crop,
+ *                                    tidak boleh "reframe"/dirinya sendiri)
+ * AUTO_REFRAME_TIMEOUT_MS=45000    ← Batas waktu proses deteksi per klip
+ *                                    sebelum fallback otomatis (default:
+ *                                    45 detik)
  */
+import type { AspectRatioMode } from "@/lib/video-config";
 
-export type ReframeFaceProvider = "heuristic" | "external";
+export type AutoReframeBackend = "opencv" | "none";
 
-export type ReframeFallbackMode = "blur" | "crop" | "pad" | "stretch" | "none";
-
-export interface ReframeConfig {
+export interface AutoReframeConfig {
   enabled: boolean;
-  faceProvider: ReframeFaceProvider;
-  externalApiUrl: string | null;
-  externalApiKey: string | null;
-  sampleCount: number;
+  backend: AutoReframeBackend;
+  sampleFps: number;
   smoothing: number;
-  maxPanPerSample: number;
-  minSignalRatio: number;
-  analyzeWidth: number;
-  analyzeHeight: number;
-  fallbackMode: ReframeFallbackMode;
+  padding: number;
+  minFaceSize: number;
+  maxFaces: number;
+  fallbackMode: Exclude<AspectRatioMode, never>;
+  timeoutMs: number;
 }
 
 function parseBool(raw: string | undefined, fallback: boolean): boolean {
   if (raw === undefined || raw.trim() === "") return fallback;
-  return raw.trim().toLowerCase() === "true";
+  return raw.toLowerCase().trim() === "true";
 }
 
-function parseIntInRange(raw: string | undefined, fallback: number, min: number, max: number): number {
-  if (!raw) return fallback;
-  const parsed = parseInt(raw.trim(), 10);
-  if (!isNaN(parsed) && parsed >= min && parsed <= max) return parsed;
-  console.warn(`[reframe-config] Nilai "${raw}" di luar rentang ${min}-${max}. Menggunakan default ${fallback}.`);
-  return fallback;
-}
-
-function parseFloatInRange(raw: string | undefined, fallback: number, min: number, max: number): number {
+function parseNumber(raw: string | undefined, fallback: number, min: number, max: number): number {
   if (!raw) return fallback;
   const parsed = parseFloat(raw.trim());
-  if (!isNaN(parsed) && parsed >= min && parsed <= max) return parsed;
-  console.warn(`[reframe-config] Nilai "${raw}" di luar rentang ${min}-${max}. Menggunakan default ${fallback}.`);
-  return fallback;
+  if (isNaN(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
-export function getReframeConfig(): ReframeConfig {
-  const provider = (process.env.REFRAME_FACE_PROVIDER || "heuristic").trim().toLowerCase();
-  const faceProvider: ReframeFaceProvider = provider === "external" ? "external" : "heuristic";
+/** Satu-satunya tempat membaca env var untuk fitur ini — mudah diganti/diaudit. */
+export function getAutoReframeConfig(): AutoReframeConfig {
+  const enabled = parseBool(process.env.AUTO_REFRAME_ENABLED, false);
 
-  const fallbackRaw = (process.env.REFRAME_FALLBACK_MODE || "crop").trim().toLowerCase();
-  const validFallbacks: ReframeFallbackMode[] = ["blur", "crop", "pad", "stretch", "none"];
-  const fallbackMode = validFallbacks.includes(fallbackRaw as ReframeFallbackMode)
-    ? (fallbackRaw as ReframeFallbackMode)
-    : "crop";
+  const rawBackend = (process.env.AUTO_REFRAME_BACKEND || "opencv").toLowerCase().trim();
+  const backend: AutoReframeBackend = rawBackend === "none" ? "none" : "opencv";
 
-  return {
-    enabled: parseBool(process.env.AUTO_REFRAME_ENABLED, true),
-    faceProvider,
-    externalApiUrl: process.env.REFRAME_EXTERNAL_API_URL?.trim() || null,
-    externalApiKey: process.env.REFRAME_EXTERNAL_API_KEY?.trim() || null,
-    sampleCount: parseIntInRange(process.env.REFRAME_SAMPLE_COUNT, 24, 8, 40),
-    smoothing: parseFloatInRange(process.env.REFRAME_SMOOTHING, 0.35, 0, 0.9),
-    maxPanPerSample: parseFloatInRange(process.env.REFRAME_MAX_PAN_PER_SAMPLE, 0.18, 0.02, 1),
-    minSignalRatio: parseFloatInRange(process.env.REFRAME_MIN_SIGNAL_RATIO, 0.25, 0, 1),
-    analyzeWidth: parseIntInRange(process.env.REFRAME_ANALYZE_WIDTH, 64, 16, 160),
-    analyzeHeight: parseIntInRange(process.env.REFRAME_ANALYZE_HEIGHT, 36, 9, 160),
-    fallbackMode,
-  };
+  const sampleFps = parseNumber(process.env.AUTO_REFRAME_SAMPLE_FPS, 2, 0.5, 10);
+  const smoothing = parseNumber(process.env.AUTO_REFRAME_SMOOTHING, 0.8, 0, 0.95);
+  const padding = parseNumber(process.env.AUTO_REFRAME_PADDING, 0.35, 0, 1.5);
+  const minFaceSize = parseNumber(process.env.AUTO_REFRAME_MIN_FACE_SIZE, 0.03, 0.005, 0.5);
+  const maxFaces = Math.round(parseNumber(process.env.AUTO_REFRAME_MAX_FACES, 1, 1, 5));
+  const timeoutMs = Math.round(parseNumber(process.env.AUTO_REFRAME_TIMEOUT_MS, 45000, 5000, 180000));
+
+  const rawFallback = (process.env.AUTO_REFRAME_FALLBACK_MODE || "crop").toLowerCase().trim();
+  const validFallbacks = ["blur", "crop", "pad", "stretch", "none"];
+  const fallbackMode = (
+    validFallbacks.includes(rawFallback) ? rawFallback : "crop"
+  ) as AutoReframeConfig["fallbackMode"];
+
+  return { enabled, backend, sampleFps, smoothing, padding, minFaceSize, maxFaces, fallbackMode, timeoutMs };
 }
 
-export function getReframeProviderLabel(provider: ReframeFaceProvider): string {
-  const labels: Record<ReframeFaceProvider, string> = {
-    heuristic: "🧠 Heuristik (skin-tone + motion, on-device)",
-    external: "🌐 External API (custom/cloud face detection)",
+export function getAutoReframeBackendLabel(backend: AutoReframeBackend): string {
+  const labels: Record<AutoReframeBackend, string> = {
+    opencv: "OpenCV Haar Cascade (default, ringan, tanpa GPU)",
+    none: "Nonaktif (selalu fallback ke crop statis)",
   };
-  return labels[provider];
+  return labels[backend] || backend;
 }

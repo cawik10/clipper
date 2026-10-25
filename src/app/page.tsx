@@ -35,6 +35,8 @@ import {
   getSchedulerSlotCount,
   NICHE_OPTIMAL_HOURS,
 } from "@/lib/scheduler-config";
+// 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak mengubah import di atas.
+import { getAutoReframeConfig, getAutoReframeBackendLabel } from "@/lib/reframe-config";
 
 export const dynamic = "force-dynamic";
 
@@ -222,6 +224,8 @@ export default async function HomePage() {
   const dupFilter = await getDupFilterData();
   const schedulerData = await getSchedulerData();
   const defaultNichePrompt = getDefaultNichePrompt();
+  // 🎯 Auto-Reframe Speaker Tracking (BARU!) — data terpisah, tidak mengubah variabel di atas.
+  const reframeCfg = getAutoReframeConfig();
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 px-4 py-10">
@@ -948,6 +952,89 @@ export default async function HomePage() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════
+            🎯 AUTO-REFRAME SPEAKER TRACKING (FITUR BARU!)
+            Section baru murni — tidak mengubah section lain manapun.
+        ══════════════════════════════════════════════════════════ */}
+        <section className="bg-gradient-to-br from-fuchsia-500/10 to-rose-600/10 border-2 border-fuchsia-500/40 rounded-2xl p-6 space-y-5">
+          <div className="flex items-start justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-fuchsia-400 flex items-center gap-2">
+                🎯 Auto-Reframe Speaker Tracking
+                <span className="text-xs bg-fuchsia-500/20 border border-fuchsia-500/40 text-fuchsia-300 px-2 py-0.5 rounded-full">
+                  Fitur Baru!
+                </span>
+              </h2>
+              <p className="text-slate-400 text-sm mt-1">
+                Deteksi wajah/pembicara aktif untuk crop 9:16 dinamis yang mengikuti pembicara —
+                menggantikan center-crop statis saat <code className="text-slate-300">ASPECT_RATIO_MODE=crop</code>.
+              </p>
+            </div>
+            <span className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${reframeCfg.enabled ? "bg-green-500/20 border-green-500/40 text-green-400" : "bg-red-500/20 border-red-500/40 text-red-400"}`}>
+              {reframeCfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+            <div className="bg-slate-900/60 rounded-xl p-3">
+              <div className="text-slate-500">Backend Deteksi</div>
+              <div className="text-fuchsia-300 font-semibold mt-1">{reframeCfg.backend}</div>
+            </div>
+            <div className="bg-slate-900/60 rounded-xl p-3">
+              <div className="text-slate-500">Sample Rate</div>
+              <div className="text-fuchsia-300 font-semibold mt-1">{reframeCfg.sampleFps} fps</div>
+            </div>
+            <div className="bg-slate-900/60 rounded-xl p-3">
+              <div className="text-slate-500">Smoothing</div>
+              <div className="text-fuchsia-300 font-semibold mt-1">{reframeCfg.smoothing}</div>
+            </div>
+            <div className="bg-slate-900/60 rounded-xl p-3">
+              <div className="text-slate-500">Fallback Mode</div>
+              <div className="text-fuchsia-300 font-semibold mt-1">{reframeCfg.fallbackMode}</div>
+            </div>
+          </div>
+
+          <div className="bg-fuchsia-950/40 border border-fuchsia-500/20 rounded-xl p-4 space-y-3">
+            <div className="text-sm font-semibold text-fuchsia-300">🔧 Cara Aktifkan di Railway Variables:</div>
+            <div className="font-mono text-sm bg-slate-900/80 rounded-lg p-3 space-y-1">
+              <div>
+                <span className="text-yellow-300">ASPECT_RATIO_MODE</span>
+                <span className="text-slate-500"> = </span>
+                <span className="text-emerald-400">crop</span>
+                <span className="text-slate-600">  ← wajib, fitur hanya berlaku di mode ini</span>
+              </div>
+              <div>
+                <span className="text-yellow-300">AUTO_REFRAME_ENABLED</span>
+                <span className="text-slate-500"> = </span>
+                <span className="text-emerald-400">true</span>
+                <span className="text-slate-600">  ← nyalakan fitur (default: false)</span>
+              </div>
+              <div className="text-slate-500 text-xs mt-2"># Opsional (sudah punya default aman):</div>
+              <div>
+                <span className="text-yellow-300">AUTO_REFRAME_BACKEND</span>
+                <span className="text-slate-500"> = </span>
+                <span className="text-purple-400">opencv</span>
+                <span className="text-slate-600"> | </span>
+                <span className="text-purple-400">none</span>
+              </div>
+              <div>
+                <span className="text-yellow-300">AUTO_REFRAME_SMOOTHING</span>
+                <span className="text-slate-500"> = </span>
+                <span className="text-purple-400">0.8</span>
+              </div>
+            </div>
+            <div className="text-xs text-slate-400 space-y-1">
+              <div>🧠 Deteksi wajah pakai OpenCV Haar Cascade (ringan, tanpa GPU) — backend bisa diganti kapan saja lewat <code className="text-fuchsia-300">AUTO_REFRAME_BACKEND</code> tanpa mengubah kode lain (lihat <code className="text-slate-300">src/lib/speaker-tracker.ts</code>).</div>
+              <div>🛡️ Kalau wajah tidak terdeteksi / backend error, otomatis fallback ke center-crop statis — proses clipping tidak pernah gagal karena fitur ini.</div>
+              <div>🤖 Telegram command: <code className="text-fuchsia-300">/autoreframe</code> untuk cek status & konfigurasi</div>
+            </div>
+          </div>
+
+          <div className="text-[11px] text-slate-500 bg-slate-900/40 rounded-xl p-3">
+            Backend aktif: <span className="text-fuchsia-300">{getAutoReframeBackendLabel(reframeCfg.backend)}</span>
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════
             PIPELINE FLOW
         ══════════════════════════════════════════════════════════ */}
         <section className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6">
@@ -1026,6 +1113,7 @@ export default async function HomePage() {
               { cmd: "/thumbnail",  desc: "Info & ubah thumbnail config",          isNew: false },
               { cmd: "/watermark",  desc: "Info & ubah watermark config",          isNew: false },
               { cmd: "/zoom",       desc: "Info & ubah zoom effect config",        isNew: false },
+              { cmd: "/autoreframe", desc: "Info & ubah Auto-Reframe Speaker Tracking ← BARU!", isNew: true },
               { cmd: "/introoutro", desc: "Info & ubah intro/outro config",        isNew: false },
               { cmd: "/niche",      desc: "Atur Custom Niche Prompt untuk AI Analysis ← BARU!", isNew: true },
               { cmd: "/dupfilter",  desc: "Info Duplicate/Repetitive Clip Filter ← BARU!", isNew: true },
@@ -1098,6 +1186,13 @@ export default async function HomePage() {
               { key: "SCHEDULER_SLOT_COUNT", desc: "jumlah pilihan jam rekomendasi AI (default: 3) ← BARU!", isNew: true },
               { section: "# === ASPECT RATIO ===" },
               { key: "ASPECT_RATIO_MODE", desc: "blur | crop | pad | stretch | none (default: blur)" },
+              { section: "# === 🎯 AUTO-REFRAME SPEAKER TRACKING (BARU!) ===" },
+              { key: "AUTO_REFRAME_ENABLED", desc: "true | false — aktifkan dynamic crop mengikuti wajah (default: false, hanya berlaku saat ASPECT_RATIO_MODE=crop) ← BARU!", isNew: true },
+              { key: "AUTO_REFRAME_BACKEND", desc: "opencv | none — backend deteksi wajah, mudah diganti (default: opencv) ← BARU!", isNew: true },
+              { key: "AUTO_REFRAME_SAMPLE_FPS", desc: "frame sampel per detik untuk deteksi wajah (default: 2) ← BARU!", isNew: true },
+              { key: "AUTO_REFRAME_SMOOTHING", desc: "0.0-0.95 kehalusan gerakan crop (default: 0.8) ← BARU!", isNew: true },
+              { key: "AUTO_REFRAME_PADDING", desc: "0.0-1.5 ruang ekstra di sekitar wajah (default: 0.35) ← BARU!", isNew: true },
+              { key: "AUTO_REFRAME_FALLBACK_MODE", desc: "mode fallback kalau wajah tidak terdeteksi (default: crop) ← BARU!", isNew: true },
               { section: "# === THUMBNAIL ===" },
               { key: "THUMBNAIL_ENABLED", desc: "true | false (default: true)" },
               { key: "THUMBNAIL_MODE",    desc: "middle | best | start | custom (default: middle)" },

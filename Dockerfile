@@ -8,7 +8,12 @@ RUN apk add --no-cache \
     curl \
     ca-certificates \
     ttf-dejavu \
-    deno
+    deno \
+    py3-opencv \
+    py3-numpy
+# ↑ py3-opencv / py3-numpy (BARU!) — dipakai oleh fitur Auto-Reframe
+#   Speaker Tracking (scripts/face_track.py, lihat src/lib/speaker-tracker.ts).
+#   Tidak mengubah/menghapus dependency lain yang sudah ada di atas.
 
 # Install yt-dlp versi nightly terbaru untuk bypass proteksi YouTube terbaru
 RUN pip3 install --no-cache-dir -U --pre "yt-dlp[default]" curl-cffi --break-system-packages || true
@@ -42,6 +47,9 @@ RUN mkdir -p /tmp/autoclip
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/cookies.txt ./
+# 🎯 Auto-Reframe Speaker Tracking (BARU!) — script Python dipanggil at
+# runtime oleh src/lib/speaker-tracker.ts, tidak mengubah copy lain di atas.
+COPY --from=builder /app/scripts ./scripts
 
 EXPOSE 3000
 

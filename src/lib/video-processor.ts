@@ -18,6 +18,11 @@ import { applyWatermark } from "@/lib/watermark";
 import { applyIntroOutro } from "@/lib/intro-outro";
 import { applyZoomEffect } from "@/lib/zoom-effect";
 import type { ClipResult } from "@/db/schema";
+// 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak
+// mengubah import/fitur lain di atas. Lihat src/lib/auto-reframe.ts +
+// src/lib/reframe-config.ts untuk detail & cara ganti/konfigurasi.
+import { getAutoReframeConfig } from "@/lib/reframe-config";
+import { buildReframeFilter } from "@/lib/auto-reframe";
 
 const execAsync = promisify(exec);
 
@@ -299,7 +304,26 @@ async function cutAndConvertClip(
   mode: ReturnType<typeof getAspectRatioMode>
 ): Promise<void> {
   const duration = endTime - startTime;
-  const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
+
+  // 🎯 Auto-Reframe Speaker Tracking (BARU!) — hanya aktif ketika mode
+  // "crop" DAN AUTO_REFRAME_ENABLED=true. Semua mode lain (blur/pad/
+  // stretch/none) berjalan persis seperti sebelumnya, tidak tersentuh.
+  // Kalau deteksi wajah gagal/tidak ada wajah, otomatis fallback ke
+  // crop statis yang sudah ada — proses tidak pernah gagal karena ini.
+  let useFilterComplex: boolean;
+  let filterValue: string;
+  if (mode === "crop" && getAutoReframeConfig().enabled) {
+    const reframed = await buildReframeFilter(inputPath, startTime, endTime);
+    useFilterComplex = reframed.useFilterComplex;
+    filterValue = reframed.filterValue;
+    if (reframed.usedFallback) {
+      console.log(`[auto-reframe] ⏭ Fallback ke crop statis (${reframed.reason})`);
+    } else {
+      console.log(`[auto-reframe] ✅ Dynamic crop mengikuti pembicara aktif`);
+    }
+  } else {
+    ({ useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode));
+  }
 
   let cmd: string;
   if (useFilterComplex) {

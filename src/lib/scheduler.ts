@@ -401,3 +401,47 @@ export async function cancelScheduledUpload(id: number, userId: string): Promise
     .returning({ id: scheduledUploads.id });
   return rows.length > 0;
 }
+
+// ─── WORKER ENTRYPOINT ───────────────────────────────────────────────
+// Dipanggil oleh src/lib/scheduler-worker.ts (polling berkala) maupun oleh
+// endpoint src/app/api/scheduler/run/route.ts (trigger manual / cron
+// eksternal). Logikanya sama persis dengan route.ts: ambil antrean yang
+// sudah waktunya → klaim → publish klip → tandai selesai/gagal → kirim
+// notifikasi Telegram. Diletakkan di sini (bukan di scheduler-worker.ts)
+// supaya kedua pemanggil (worker dalam-proses & endpoint HTTP) berbagi
+// satu implementasi yang sama tanpa duplikasi.
+export async function runDueScheduledPosts(
+  limit: number = 5
+): Promise<{ processed: number; results: Array<{ id: number; status: "success" | "error"; error?: string }> }> {
+  // Import dinamis untuk menghindari circular import (bot & job-processor
+  // juga meng-import beberapa util dari file ini secara tidak langsung).
+  const { publishJobClips } = await import("@/lib/job-processor");
+  const { bot } = await import("@/lib/telegram-bot");
+
+  const dueJobs = await getDueScheduledUploads(limit);
+  const results: Array<{ id: number; status: "success" | "error"; error?: string }> = [];
+
+  for (const job of dueJobs) {
+    if (!(await claimScheduledUpload(job.id))) continue;
+    try {
+      await publishJobClips(job.jobId);
+      await completeScheduledUpload(job.id, true);
+      await bot.api.sendMessage(
+        job.telegramChatId,
+        `✅ *Jadwal Terlaksana!*\nVideo berhasil dipublish otomatis!`,
+        { parse_mode: "Markdown" }
+      );
+      results.push({ id: job.id, status: "success" });
+    } catch (err) {
+      await completeScheduledUpload(job.id, false, String(err));
+      await bot.api.sendMessage(
+        job.telegramChatId,
+        `❌ *Jadwal Gagal!*\nVideo gagal dipublish: ${String(err)}`,
+        { parse_mode: "Markdown" }
+      );
+      results.push({ id: job.id, status: "error", error: String(err) });
+    }
+  }
+
+  return { processed: results.length, results };
+}
