@@ -203,6 +203,20 @@ export async function processClips(
   onProgress?: (clipIndex: number, total: number) => Promise<void>
 ): Promise<ClipResult[]> {
   ensureDir(TMP_DIR);
+  // Ambil durasi total video dari metadata (misalnya 170 detik)
+const videoDuration = videoMetadata.duration; 
+const targetClipDuration = Number(process.env.CLIP_DURATION) || 30;
+
+// 1. Pastikan startTime tidak melebihi (Total Durasi - Durasi Klip)
+let safeStartTime = Math.min(rawStartTimeFromAI, videoDuration - targetClipDuration);
+
+// 2. Cegah nilai negatif jika video asli ternyata lebih pendek dari durasi klip
+safeStartTime = Math.max(0, safeStartTime);
+
+// 3. Pastikan durasi potong (-t) tidak pernah negatif 
+const safeDuration = Math.max(1, Math.min(targetClipDuration, videoDuration - safeStartTime));
+
+// Lanjutkan memanggil command FFmpeg menggunakan variabel safeStartTime dan safeDuration
   const mode = makeVertical ? getAspectRatioMode() : "none";
   const results: ClipResult[] = [];
 
