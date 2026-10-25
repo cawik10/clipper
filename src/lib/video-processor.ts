@@ -112,7 +112,7 @@ export async function transcribeAudio(
 ): Promise<{ start: number; end: number; text: string }[]> {
   ensureDir(TMP_DIR);
   const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
-  const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 64k "${audioPath}"`;
+  const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
   await execAsync(extractCmd, { timeout: 60000 });
 
   try {
