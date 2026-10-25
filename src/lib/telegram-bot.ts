@@ -397,8 +397,7 @@ bot.command("mode", async (ctx) => {
     `• \`crop\` → ✂️ Center crop\n` +
     `• \`pad\` → ⬛ Black bars\n` +
     `• \`stretch\` → ↔️ Stretch paksa\n` +
-    `• \`none\` → 📐 Original ratio\n` +
-    `• \`speaker_track\` → 🎯 Auto-Reframe Speaker Tracking (crop dinamis ikuti pembicara) ✨ Baru!\n\n` +
+    `• \`none\` → 📐 Original ratio\n\n` +
     `Ubah: set \`ASPECT_RATIO_MODE=blur\` di Railway Variables`,
     { parse_mode: "Markdown" }
   );

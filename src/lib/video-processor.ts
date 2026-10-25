@@ -18,14 +18,6 @@ import { applyWatermark } from "@/lib/watermark";
 import { applyIntroOutro } from "@/lib/intro-outro";
 import { applyZoomEffect } from "@/lib/zoom-effect";
 import type { ClipResult } from "@/db/schema";
-// 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak mengubah
-// import di atas. Lihat src/lib/reframe/ untuk implementasi lengkap (mudah
-// diganti/di-upgrade tanpa menyentuh file ini lebih jauh) dan
-// src/lib/reframe-config.ts untuk semua env var konfigurasinya.
-import { getReframeConfig } from "@/lib/reframe-config";
-import { probeVideoResolution } from "@/lib/reframe/frame-sampler";
-import { analyzeSpeakerTrack } from "@/lib/reframe/speaker-tracker";
-import { buildDynamicCropFilter } from "@/lib/reframe/ffmpeg-dynamic-crop";
 
 const execAsync = promisify(exec);
 
@@ -112,7 +104,7 @@ export async function transcribeAudio(
 ): Promise<{ start: number; end: number; text: string }[]> {
   ensureDir(TMP_DIR);
   const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
-  const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
+  const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 64k "${audioPath}"`;
   await execAsync(extractCmd, { timeout: 60000 });
 
   try {
@@ -306,18 +298,7 @@ async function cutAndConvertClip(
   outputPath: string,
   mode: ReturnType<typeof getAspectRatioMode>
 ): Promise<void> {
-  // 🎯 Auto-Reframe Speaker Tracking (BARU!) — satu-satunya tambahan di
-  // fungsi ini. Semua mode lain (blur/crop/pad/stretch/none) berjalan
-  // 100% sama seperti sebelumnya lewat kode di bawah, tidak diubah sama
-  // sekali.
-  if (mode === "speaker_track") {
-    await cutAndConvertClipWithSpeakerTracking(inputPath, startTime, endTime, outputPath);
-    return;
-  }
-
-  const safeStartTime = Math.max(0, startTime);
-  const duration = Math.max(1, endTime - safeStartTime); // Set minimal 1 detik jika error
-  
+  const duration = endTime - startTime;
   const { useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode);
 
   let cmd: string;
@@ -325,7 +306,7 @@ async function cutAndConvertClip(
     cmd = [
       "ffmpeg",
       "-y",
-      "-ss", safeStartTime.toString(), // Gunakan safeStartTime
+      "-ss", startTime.toString(),
       "-t", duration.toString(),
       "-i", `"${inputPath}"`,
       "-filter_complex", `"${filterValue}"`,
@@ -363,94 +344,4 @@ async function cutAndConvertClip(
 
   await execAsync(cmd, { timeout: 300000 });
   if (!fs.existsSync(outputPath)) throw new Error("Cut clip file tidak terbuat");
-}
-
-// =====================================================================
-// 🎯 AUTO-REFRAME SPEAKER TRACKING (BARU!)
-// =====================================================================
-// Fitur tambahan — TIDAK mengubah fungsi `cutAndConvertClip` di atas untuk
-// mode lain (blur/crop/pad/stretch/none), yang berjalan persis seperti
-// sebelumnya. Dipakai hanya ketika ASPECT_RATIO_MODE=speaker_track.
-//
-// Alur kerja:
-//   1. Potong klip dari video sumber TANPA mengubah rasio (mode "none"),
-//      memakai fungsi cutAndConvertClip yang sudah ada — supaya durasi &
-//      cara potongnya 100% konsisten dengan mode lain.
-//   2. Analisis klip hasil potongan untuk melacak posisi wajah/pembicara
-//      aktif sepanjang waktu (lihat src/lib/reframe/speaker-tracker.ts —
-//      engine deteksinya MUDAH DIGANTI lewat REFRAME_FACE_PROVIDER).
-//   3. Bangun filter FFmpeg crop dinamis (titik crop bergerak mengikuti
-//      pembicara) dan render ulang ke resolusi target 9:16.
-//   4. Kalau LANGKAH MANAPUN gagal (atau sinyal deteksi terlalu lemah,
-//      misal video tanpa wajah manusia), otomatis fallback ke mode statis
-//      (default: center crop) lewat REFRAME_FALLBACK_MODE — supaya klip
-//      TETAP selalu berhasil dihasilkan, tidak pernah gagal total hanya
-//      karena auto-reframe tidak menemukan wajah.
-async function cutAndConvertClipWithSpeakerTracking(
-  inputPath: string,
-  startTime: number,
-  endTime: number,
-  outputPath: string
-): Promise<void> {
-  const config = getReframeConfig();
-  const safeStartTime = Math.max(0, startTime);
-  const duration = Math.max(1, endTime - safeStartTime);
-  const intermediatePath = outputPath.replace(/\.mp4$/, "_reframe_src.mp4");
-
-  const fallback = async (reason: string) => {
-    console.warn(`[reframe] Fallback ke mode "${config.fallbackMode}": ${reason}`);
-    await cutAndConvertClip(inputPath, startTime, endTime, outputPath, config.fallbackMode);
-  };
-
-  if (!config.enabled) {
-    await fallback("AUTO_REFRAME_ENABLED=false");
-    return;
-  }
-
-  try {
-    // Step 1: potong dulu tanpa ubah rasio, jadi bahan analisis + render ulang.
-    await cutAndConvertClip(inputPath, startTime, endTime, intermediatePath, "none");
-
-    // Step 2: analisis posisi pembicara aktif sepanjang klip.
-    const { width: srcWidth, height: srcHeight } = await probeVideoResolution(intermediatePath);
-    const track = await analyzeSpeakerTrack(intermediatePath, duration);
-
-    if (!track.usable) {
-      await fallback(`sinyal tracking tidak cukup (${track.reason || "unknown"})`);
-      return;
-    }
-
-    // Step 3: bangun & render filter crop dinamis.
-    const { filter } = buildDynamicCropFilter(track.keyframes, srcWidth, srcHeight, TARGET_WIDTH, TARGET_HEIGHT);
-    const cmd = [
-      "ffmpeg",
-      "-y",
-      "-i", `"${intermediatePath}"`,
-      "-vf", `"${filter}"`,
-      "-threads", "2",
-      "-c:v", "libx264",
-      "-crf", "23",
-      "-preset", "fast",
-      "-c:a", "aac",
-      "-ar", "44100",
-      "-ac", "2",
-      "-pix_fmt", "yuv420p",
-      `"${outputPath}"`,
-    ].join(" ");
-
-    await execAsync(cmd, { timeout: 300000 });
-    if (!fs.existsSync(outputPath)) throw new Error("Auto-reframe render gagal, file output tidak terbuat");
-
-    console.log(
-      `[reframe] ✅ Auto-reframe speaker tracking aktif (provider: ${track.providerUsed}, ${track.keyframes.length} keyframe)`
-    );
-  } catch (err) {
-    await fallback(err instanceof Error ? err.message : String(err));
-  } finally {
-    try {
-      if (fs.existsSync(intermediatePath)) fs.unlinkSync(intermediatePath);
-    } catch {
-      /* ignore */
-    }
-  }
 }

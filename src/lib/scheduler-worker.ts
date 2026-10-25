@@ -32,23 +32,9 @@ export function startSchedulerWorker(): void {
 
   const tick = async () => {
     try {
-      const { processed, results } = await runDueScheduledPosts();
+      const { processed } = await runDueScheduledPosts();
       if (processed > 0) {
         console.log(`[scheduler-worker] ${processed} antrean terjadwal berhasil diproses.`);
-        // Impor dinamis supaya tidak membentuk circular import dengan
-        // telegram-bot.ts (yang juga memakai fungsi dari scheduler.ts).
-        try {
-          const { bot } = await import("@/lib/telegram-bot");
-          for (const r of results) {
-            const text =
-              r.status === "success"
-                ? `✅ *Jadwal Terlaksana!*\nVideo berhasil dipublish otomatis!`
-                : `❌ *Jadwal Gagal!*\nVideo gagal dipublish: ${r.error || "unknown error"}`;
-            await bot.api.sendMessage(r.telegramChatId, text, { parse_mode: "Markdown" }).catch(() => {});
-          }
-        } catch (notifyErr) {
-          console.warn("[scheduler-worker] Gagal mengirim notifikasi Telegram:", notifyErr);
-        }
       }
     } catch (err) {
       console.error("[scheduler-worker] Gagal menjalankan pengecekan antrean:", err);

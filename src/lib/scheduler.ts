@@ -387,52 +387,6 @@ export async function completeScheduledUpload(
     .where(eq(scheduledUploads.id, id));
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// WORKER ENTRYPOINT — dipanggil oleh src/lib/scheduler-worker.ts (polling
-// interval) maupun src/app/api/scheduler/run/route.ts (trigger manual /
-// cron eksternal). Diletakkan di sini (bukan di scheduler-worker.ts)
-// supaya logikanya satu sumber kebenaran untuk keduanya.
-//
-// `publishJobClips` diimpor secara dinamis (bukan `import` statis di atas)
-// supaya tidak membentuk circular import dengan job-processor.ts/
-// telegram-bot.ts (lihat catatan di kepala file ini).
-// ─────────────────────────────────────────────────────────────────────
-export interface RunDueScheduledPostsResult {
-  id: number;
-  jobId: string;
-  telegramChatId: string;
-  status: "success" | "error";
-  error?: string;
-}
-
-export async function runDueScheduledPosts(
-  limit: number = 5
-): Promise<{ processed: number; results: RunDueScheduledPostsResult[] }> {
-  const { publishJobClips } = await import("@/lib/job-processor");
-  const dueJobs = await getDueScheduledUploads(limit);
-  const results: RunDueScheduledPostsResult[] = [];
-
-  for (const job of dueJobs) {
-    if (!(await claimScheduledUpload(job.id))) continue;
-    try {
-      await publishJobClips(job.jobId);
-      await completeScheduledUpload(job.id, true);
-      results.push({ id: job.id, jobId: job.jobId, telegramChatId: job.telegramChatId, status: "success" });
-    } catch (err) {
-      await completeScheduledUpload(job.id, false, String(err));
-      results.push({
-        id: job.id,
-        jobId: job.jobId,
-        telegramChatId: job.telegramChatId,
-        status: "error",
-        error: String(err),
-      });
-    }
-  }
-
-  return { processed: results.length, results };
-}
-
 export async function cancelScheduledUpload(id: number, userId: string): Promise<boolean> {
   const rows = await db
     .update(scheduledUploads)

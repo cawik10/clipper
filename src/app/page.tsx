@@ -22,8 +22,6 @@ import {
 import type { ClipResult } from "@/db/schema";
 // 🎯 Custom Niche Prompt (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getDefaultNichePrompt, NICHE_PRESETS, MAX_NICHE_PROMPT_LENGTH } from "@/lib/niche-prompt";
-// 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak mengubah import di atas.
-import { getReframeConfig, getReframeProviderLabel } from "@/lib/reframe-config";
 import { isNull, not } from "drizzle-orm";
 // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getDuplicateFilterConfig, getDuplicateFilterScopeLabel } from "@/lib/duplicate-filter-config";
@@ -151,8 +149,6 @@ const modeDescriptions: Record<
   pad:     { icon: "⬛", label: "Black Bars",     desc: "Letterbox / pillarbox" },
   stretch: { icon: "↔️", label: "Stretch",        desc: "Stretch paksa ke 9:16" },
   none:    { icon: "📐", label: "Original Ratio", desc: "Pertahankan rasio asli" },
-  // 🎯 Auto-Reframe Speaker Tracking (BARU!) — entri tambahan, tidak mengubah entri lain di atas.
-  speaker_track: { icon: "🎯", label: "Auto-Reframe", desc: "Crop dinamis mengikuti wajah/pembicara aktif ✨ Baru!" },
 };
 
 const thumbnailModeDescriptions: Record<
@@ -226,8 +222,6 @@ export default async function HomePage() {
   const dupFilter = await getDupFilterData();
   const schedulerData = await getSchedulerData();
   const defaultNichePrompt = getDefaultNichePrompt();
-  // 🎯 Auto-Reframe Speaker Tracking (BARU!) — data terpisah, tidak mengubah variabel di atas.
-  const reframeConfig = getReframeConfig();
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 px-4 py-10">
@@ -875,7 +869,7 @@ export default async function HomePage() {
             ))}
           </div>
 
-          <div className="text-xs text-slate-500">�� Telegram: <code className="text-blue-300">/introoutro</code></div>
+          <div className="text-xs text-slate-500">💡 Telegram: <code className="text-blue-300">/introoutro</code></div>
         </section>
 
         {/* ══════════════════════════════════════════════════════════
@@ -951,75 +945,6 @@ export default async function HomePage() {
           <div className="font-mono text-xs text-slate-400 bg-slate-800/60 rounded-xl p-3">
             <span className="text-yellow-300">ASPECT_RATIO_MODE</span> = <span className="text-emerald-400">blur</span>  <span className="text-slate-600">← 🌀 REKOMENDASI</span>
           </div>
-        </section>
-
-        {/* ══════════════════════════════════════════════════════════
-            🎯 AUTO-REFRAME SPEAKER TRACKING (FITUR BARU!)
-            Section 100% baru — tidak mengubah/menghapus section lain
-            manapun di dashboard ini. Lihat src/lib/reframe-config.ts &
-            src/lib/reframe/ untuk implementasi (didesain mudah diganti).
-        ══════════════════════════════════════════════════════════ */}
-        <section className="bg-gradient-to-br from-fuchsia-500/10 to-indigo-600/10 border-2 border-fuchsia-500/40 rounded-2xl p-6 space-y-5">
-          <div className="flex items-start justify-between flex-wrap gap-3">
-            <div>
-              <h2 className="text-xl font-bold text-fuchsia-400 flex items-center gap-2">
-                🎯 Auto-Reframe Speaker Tracking <span className="text-xs bg-fuchsia-500/20 border border-fuchsia-500/40 rounded-full px-2 py-0.5">✨ Baru!</span>
-              </h2>
-              <p className="text-slate-400 text-sm mt-1 max-w-xl">
-                Deteksi wajah/pembicara aktif untuk crop dinamis yang mengikuti pembicara —
-                bukan sekadar center-crop statis. Aktifkan dengan{" "}
-                <code className="text-emerald-400">ASPECT_RATIO_MODE=speaker_track</code>.
-              </p>
-            </div>
-            <div className="text-right">
-              <span
-                className={`text-xs px-2 py-1 rounded-full border ${
-                  currentMode === "speaker_track"
-                    ? "bg-green-500/20 border-green-500/40 text-green-400"
-                    : "bg-slate-700/40 border-slate-600/50 text-slate-400"
-                }`}
-              >
-                {currentMode === "speaker_track" ? "✅ Mode Aktif" : "⏸ Mode Belum Dipilih"}
-              </span>
-              <div className="text-xs text-slate-500 mt-1">
-                {reframeConfig.enabled ? "Engine: Aktif" : "Engine: Dimatikan (AUTO_REFRAME_ENABLED=false)"}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="bg-slate-800/60 rounded-xl p-3 space-y-1">
-              <div className="text-slate-500">Face/Speaker Detector</div>
-              <div className="text-slate-200 font-medium">{getReframeProviderLabel(reframeConfig.faceProvider)}</div>
-            </div>
-            <div className="bg-slate-800/60 rounded-xl p-3 space-y-1">
-              <div className="text-slate-500">Smoothing / Max Pan</div>
-              <div className="text-slate-200 font-medium">
-                {reframeConfig.smoothing} / {reframeConfig.maxPanPerSample}
-              </div>
-            </div>
-            <div className="bg-slate-800/60 rounded-xl p-3 space-y-1">
-              <div className="text-slate-500">Fallback Otomatis</div>
-              <div className="text-slate-200 font-medium">{reframeConfig.fallbackMode} (kalau wajah tidak terdeteksi)</div>
-            </div>
-          </div>
-
-          <div className="font-mono text-xs text-slate-400 bg-slate-800/60 rounded-xl p-3 space-y-1">
-            <div><span className="text-yellow-300">ASPECT_RATIO_MODE</span> = <span className="text-emerald-400">speaker_track</span> <span className="text-slate-600">← aktifkan auto-reframe</span></div>
-            <div><span className="text-yellow-300">REFRAME_FACE_PROVIDER</span> = <span className="text-emerald-400">{reframeConfig.faceProvider}</span> <span className="text-slate-600">(heuristic | external — mudah diganti)</span></div>
-            <div><span className="text-yellow-300">REFRAME_SAMPLE_COUNT</span> = <span className="text-emerald-400">{reframeConfig.sampleCount}</span></div>
-            <div><span className="text-yellow-300">REFRAME_FALLBACK_MODE</span> = <span className="text-emerald-400">{reframeConfig.fallbackMode}</span></div>
-          </div>
-
-          <p className="text-[11px] text-slate-500 leading-relaxed">
-            Cara kerja: setiap klip dianalisis untuk melacak posisi wajah/pembicara aktif
-            sepanjang waktu, lalu FFmpeg merender jendela crop 9:16 yang bergerak mengikuti
-            posisi tersebut (bukan titik statis). Kalau sinyal deteksi terlalu lemah (mis.
-            video tanpa wajah manusia), sistem otomatis fallback ke mode statis di atas
-            supaya klip tetap selalu berhasil dibuat. Engine deteksi mudah diganti lewat{" "}
-            <code className="text-slate-400">REFRAME_FACE_PROVIDER</code> tanpa mengubah kode
-            lain — lihat <code className="text-slate-400">src/lib/reframe/</code>.
-          </p>
         </section>
 
         {/* ══════════════════════════════════════════════════════════

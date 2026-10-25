@@ -68,12 +68,7 @@
  * ZOOM_EFFECT_TYPE=in             ← in | out | in-out | pulse (default: in)
  */
 
-// 🎯 Auto-Reframe Speaker Tracking (BARU!) — "speaker_track" ditambahkan ke
-// union ini secara ADITIF. Mode lain (blur/crop/pad/stretch/none) tidak
-// diubah/dihapus sama sekali. Lihat src/lib/reframe-config.ts &
-// src/lib/reframe/ untuk implementasi lengkapnya — didesain mudah diganti
-// tanpa menyentuh tipe/daftar mode ini lagi di masa depan.
-export type AspectRatioMode = "blur" | "crop" | "pad" | "stretch" | "none" | "speaker_track";
+export type AspectRatioMode = "blur" | "crop" | "pad" | "stretch" | "none";
 export type ThumbnailMode = "middle" | "best" | "start" | "custom";
 export type WatermarkPosition =
   | "topleft"
@@ -178,7 +173,7 @@ export function getClipDurationLabel(duration: number): string {
 // ===== ASPECT RATIO =====
 export function getAspectRatioMode(): AspectRatioMode {
   const mode = (process.env.ASPECT_RATIO_MODE || "blur").toLowerCase().trim();
-  const valid: AspectRatioMode[] = ["blur", "crop", "pad", "stretch", "none", "speaker_track"];
+  const valid: AspectRatioMode[] = ["blur", "crop", "pad", "stretch", "none"];
   if (valid.includes(mode as AspectRatioMode)) return mode as AspectRatioMode;
   console.warn(`[video-config] ASPECT_RATIO_MODE="${mode}" tidak valid. Menggunakan "blur".`);
   return "blur";
@@ -228,8 +223,6 @@ export function getModeLabel(mode: AspectRatioMode): string {
     pad: "Black Bars (Letterbox)",
     stretch: "Stretch to Fill",
     none: "Original Ratio",
-    // 🎯 Auto-Reframe Speaker Tracking (BARU!) — ditambahkan tanpa mengubah label lain.
-    speaker_track: "Auto-Reframe Speaker Tracking (Dynamic Crop)",
   };
   return labels[mode] || mode;
 }
