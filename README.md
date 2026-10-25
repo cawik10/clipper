@@ -44,6 +44,7 @@ Dashboard web menampilkan statistik job, konfigurasi fitur (jumlah klip, durasi 
 | 🔥 **Viral Score** | Rating 1–10 untuk setiap klip hasil analisis AI |
 | ⚡ **Realtime Progress** | Update status step-by-step secara real-time di Telegram |
 | 🔒 **Privacy** | Draft upload bersifat private secara default |
+| 🎯 **Auto-Reframe Speaker Tracking** ✨ Baru! | Deteksi wajah/pembicara aktif untuk crop 9:16 dinamis yang mengikuti pembicara (bukan center-crop statis) |
 
 ---
 
@@ -140,8 +141,9 @@ curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
 | `ZOOM_EFFECT_ENABLED` / `ZOOM_EFFECT_MODE` / `ZOOM_EFFECT_TYPE` | ⚪ | Pengaturan efek zoom otomatis |
 | `INTRO_ENABLED` / `OUTRO_ENABLED` | ⚪ | Pengaturan intro & outro otomatis |
 | `THUMBNAIL_ENABLED` / `THUMBNAIL_MODE` | ⚪ | Pengaturan thumbnail otomatis |
-| `ASPECT_RATIO_MODE` | ⚪ | `blur` \| `crop` \| `pad` \| `stretch` \| `none` (default `blur`) |
+| `ASPECT_RATIO_MODE` | ⚪ | `blur` \| `crop` \| `pad` \| `stretch` \| `none` \| `speaker_track` ✨ Baru! (default `blur`) |
 | `GOOGLE_DRIVE_ENABLED` / `GOOGLE_DRIVE_FOLDER_ID` | ⚪ | Pengaturan auto-upload Google Drive |
+| `AUTO_REFRAME_ENABLED` / `REFRAME_FACE_PROVIDER` / `REFRAME_FALLBACK_MODE` | ⚪ | ✨ Baru! Konfigurasi Auto-Reframe Speaker Tracking — lihat `src/lib/reframe-config.ts` untuk daftar lengkap |
 
 > ✅ Wajib | 🔶 Wajib untuk fitur upload YouTube/Drive | ⚪ Opsional (ada nilai default)
 >
