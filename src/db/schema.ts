@@ -23,6 +23,11 @@ export const clipJobs = pgTable("clip_jobs", {
   transcriptPath: text("transcript_path"),
   clips: jsonb("clips").$type<ClipResult[]>(),
   errorMessage: text("error_message"),
+  // 📡 Auto-Monitor Channel/Playlist (BARU!) — kolom tambahan nullable, TIDAK
+  // mengubah kolom lain di atas. Diisi otomatis kalau job ini dibuat oleh
+  // worker monitoring (bukan dari link manual yang dikirim user ke bot).
+  // Lihat src/db/schema.ts → monitoredChannels & src/lib/channel-monitor.ts.
+  sourceMonitorId: integer("source_monitor_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -229,6 +234,74 @@ export type DriveTokenRow = typeof driveTokens.$inferSelect;
 export type ClipFingerprintRow = typeof clipFingerprints.$inferSelect;
 export type DuplicateClipSkipRow = typeof duplicateClipSkips.$inferSelect;
 export type ScheduledUploadRow = typeof scheduledUploads.$inferSelect;
+
+// =====================================================================
+// 📡 AUTO-MONITOR CHANNEL/PLAYLIST (BARU!)
+// =====================================================================
+// Tabel tambahan — TIDAK mengubah tabel/kolom lain yang sudah ada di atas,
+// jadi dashboard web (src/app/page.tsx) dan alur job manual (kirim link ke
+// bot Telegram) sama sekali tidak terpengaruh / tidak berubah perilakunya.
+//
+// Fitur: user mendaftarkan channel atau playlist YouTube lewat Telegram
+// (`/monitor <url>`). Worker berkala (src/lib/channel-monitor-worker.ts)
+// memantau upload baru dari channel/playlist tersebut dan OTOMATIS
+// menjalankan pipeline AutoClip penuh (download → transkripsi → analisis
+// AI → potong klip → upload YouTube Studio) begitu video baru terdeteksi —
+// user TIDAK perlu mengirim link secara manual lagi.
+//
+// Mudah diganti/dikonfigurasi — 100% lewat Railway Variables, satu-satunya
+// tempat yang perlu disentuh untuk tuning adalah
+// src/lib/channel-monitor-config.ts:
+//   CHANNEL_MONITOR_ENABLED=true                   // matikan/nyalakan seluruh fitur
+//   CHANNEL_MONITOR_POLL_INTERVAL_MS=300000         // seberapa sering worker "bangun" (ms)
+//   CHANNEL_MONITOR_DEFAULT_INTERVAL_MINUTES=10     // default jeda cek per channel (menit)
+//   CHANNEL_MONITOR_MAX_PER_USER=5                  // batas jumlah channel/playlist per user
+//   CHANNEL_MONITOR_MAX_NEW_VIDEOS_PER_RUN=2        // batas video baru diproses per channel/run
+//   CHANNEL_MONITOR_PROCESS_LATEST_ON_ADD=false     // true = langsung proses video terbaru saat didaftarkan
+//   CHANNEL_MONITOR_AUTO_UPLOAD_DEFAULT=true        // auto upload ke YouTube Studio tiap monitor baru
+//   YOUTUBE_API_KEY=                                // opsional — tanpa ini otomatis fallback ke yt-dlp
+//
+// Mengganti/menambah sumber platform lain (mis. TikTok) di masa depan
+// hanya perlu menyentuh src/lib/channel-monitor.ts (fungsi resolve &
+// fetch-video), tabel & worker ini tidak perlu diubah sama sekali.
+export const monitoredChannels = pgTable("monitored_channels", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  telegramChatId: text("telegram_chat_id").notNull(),
+  platform: text("platform").notNull().default("youtube"), // youtube (mudah ditambah platform lain nanti)
+  sourceType: text("source_type").notNull().default("channel"), // channel | playlist
+  inputUrl: text("input_url").notNull(), // URL asli yang dikirim user via /monitor
+  externalId: text("external_id").notNull(), // channelId (UCxxxx) atau playlistId
+  uploadsPlaylistId: text("uploads_playlist_id"), // cache "UU..." playlist upload channel (hemat kuota API)
+  title: text("title"), // nama channel/playlist hasil resolve (ditampilkan di Telegram/dashboard)
+  intervalMinutes: integer("interval_minutes").notNull().default(10),
+  autoUpload: boolean("auto_upload").notNull().default(true),
+  enabled: boolean("enabled").notNull().default(true),
+  lastVideoId: text("last_video_id"),
+  lastVideoPublishedAt: timestamp("last_video_published_at"),
+  lastCheckedAt: timestamp("last_checked_at"),
+  lastError: text("last_error"),
+  totalVideosProcessed: integer("total_videos_processed").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Riwayat video yang sudah terdeteksi/diproses per monitor — mencegah video
+// yang sama diproses dua kali (idempoten) & jadi bahan statistik dashboard.
+export const monitoredChannelVideos = pgTable("monitored_channel_videos", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id").notNull(),
+  videoId: text("video_id").notNull(),
+  jobId: text("job_id"), // relasi longgar ke clip_jobs.job_id (diisi kalau berhasil di-enqueue)
+  title: text("title"),
+  publishedAt: timestamp("published_at"),
+  status: text("status").notNull().default("queued"), // queued | processing | done | error | skipped
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type MonitoredChannelRow = typeof monitoredChannels.$inferSelect;
+export type MonitoredChannelVideoRow = typeof monitoredChannelVideos.$inferSelect;
 
 export interface ClipResult {
   index: number;

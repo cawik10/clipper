@@ -37,6 +37,16 @@ import {
 } from "@/lib/scheduler-config";
 // 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getAutoReframeConfig, getAutoReframeBackendLabel } from "@/lib/reframe-config";
+// 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
+import { getChannelMonitorStats } from "@/lib/channel-monitor";
+import {
+  isChannelMonitorEnabled,
+  getChannelMonitorPollIntervalMs,
+  getDefaultCheckIntervalMinutes,
+  getMaxMonitorsPerUser,
+  getMaxNewVideosPerRun,
+  getYoutubeApiKey,
+} from "@/lib/channel-monitor-config";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +108,22 @@ async function getNicheStats() {
   } catch {
     return { usersWithNiche: 0 };
   }
+}
+
+// 📡 Auto-Monitor Channel/Playlist (BARU!) — statistik & konfigurasi ringan,
+// terpisah dari getStats() yang sudah ada supaya tidak mengubah perilaku/
+// bentuk data dashboard lama sama sekali.
+async function getChannelMonitorData() {
+  const config = {
+    enabled: isChannelMonitorEnabled(),
+    pollIntervalMs: getChannelMonitorPollIntervalMs(),
+    defaultIntervalMinutes: getDefaultCheckIntervalMinutes(),
+    maxPerUser: getMaxMonitorsPerUser(),
+    maxNewVideosPerRun: getMaxNewVideosPerRun(),
+    usingYoutubeApi: !!getYoutubeApiKey(),
+  };
+  const stats = await getChannelMonitorStats();
+  return { config, stats };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -226,6 +252,8 @@ export default async function HomePage() {
   const defaultNichePrompt = getDefaultNichePrompt();
   // 🎯 Auto-Reframe Speaker Tracking (BARU!) — data terpisah, tidak mengubah variabel di atas.
   const reframeCfg = getAutoReframeConfig();
+  // 📡 Auto-Monitor Channel/Playlist (BARU!) — data terpisah, tidak mengubah variabel di atas.
+  const monitorData = await getChannelMonitorData();
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 px-4 py-10">
@@ -820,6 +848,70 @@ export default async function HomePage() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════
+            📡 AUTO-MONITOR CHANNEL/PLAYLIST SECTION (BARU!)
+            Section tambahan murni — tidak mengubah section lain di atas.
+        ══════════════════════════════════════════════════════════ */}
+        <section className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white">📡 Auto-Monitor Channel/Playlist <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-1.5 rounded-full align-middle">✨ Baru</span></h2>
+            <span className={`text-xs px-2 py-1 rounded-full border ${monitorData.config.enabled ? "bg-green-500/20 border-green-500/40 text-green-400" : "bg-slate-700/40 border-slate-600 text-slate-400"}`}>
+              {monitorData.config.enabled ? "✅ Aktif" : "❌ Nonaktif"}
+            </span>
+          </div>
+
+          <p className="text-sm text-slate-400">
+            Daftarkan channel atau playlist YouTube lewat <code className="text-blue-300">/monitor &lt;link&gt;</code> di
+            Telegram. Worker berjalan di background dan otomatis mendeteksi upload baru, lalu langsung
+            menjalankan pipeline AutoClip penuh (download → transkripsi → analisis AI → potong klip → upload
+            YouTube Studio) — <span className="text-white">tanpa perlu mengirim link secara manual</span>.
+          </p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-cyan-400">{monitorData.stats.totalMonitors}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Channel/Playlist Terdaftar</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-green-400">{monitorData.stats.activeMonitors}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Aktif Dipantau</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-fuchsia-400">{monitorData.stats.totalProcessed}</div>
+              <div className="text-[10px] text-slate-500 mt-1">Video Auto-Clip Terproses</div>
+            </div>
+          </div>
+
+          <div className="font-mono text-xs text-slate-400 bg-slate-800/60 rounded-xl p-3 space-y-1">
+            <div><span className="text-yellow-300">CHANNEL_MONITOR_ENABLED</span> = <span className="text-emerald-400">{String(monitorData.config.enabled)}</span></div>
+            <div><span className="text-yellow-300">CHANNEL_MONITOR_POLL_INTERVAL_MS</span> = <span className="text-emerald-400">{monitorData.config.pollIntervalMs}</span> <span className="text-slate-600">(worker in-process cek tiap segini ms)</span></div>
+            <div><span className="text-yellow-300">CHANNEL_MONITOR_DEFAULT_INTERVAL_MINUTES</span> = <span className="text-emerald-400">{monitorData.config.defaultIntervalMinutes}</span> menit/channel</div>
+            <div><span className="text-yellow-300">CHANNEL_MONITOR_MAX_PER_USER</span> = <span className="text-emerald-400">{monitorData.config.maxPerUser}</span></div>
+            <div><span className="text-yellow-300">CHANNEL_MONITOR_MAX_NEW_VIDEOS_PER_RUN</span> = <span className="text-emerald-400">{monitorData.config.maxNewVideosPerRun}</span></div>
+            <div><span className="text-yellow-300">YOUTUBE_API_KEY</span> = <span className="text-emerald-400">{monitorData.config.usingYoutubeApi ? "terpasang (pakai YouTube Data API)" : "kosong (fallback otomatis ke yt-dlp)"}</span></div>
+          </div>
+
+          <div className="bg-slate-800/60 rounded-xl p-4 space-y-1">
+            <div className="text-xs text-slate-500">🔧 Cara Ubah (Railway Variables — mudah diganti, tanpa redeploy):</div>
+            <div className="font-mono text-xs space-y-1 text-slate-400">
+              <div><span className="text-blue-300">CHANNEL_MONITOR_ENABLED</span> = <span className="text-slate-500">true | false (default: true)</span></div>
+              <div><span className="text-blue-300">CHANNEL_MONITOR_POLL_INTERVAL_MS</span> = <span className="text-slate-500">30000 - 3600000 (default: 300000)</span></div>
+              <div><span className="text-blue-300">CHANNEL_MONITOR_DEFAULT_INTERVAL_MINUTES</span> = <span className="text-slate-500">2 - 1440 (default: 10)</span></div>
+              <div><span className="text-blue-300">CHANNEL_MONITOR_MAX_PER_USER</span> = <span className="text-slate-500">1 - 50 (default: 5)</span></div>
+              <div><span className="text-blue-300">CHANNEL_MONITOR_MAX_NEW_VIDEOS_PER_RUN</span> = <span className="text-slate-500">1 - 10 (default: 2)</span></div>
+              <div><span className="text-blue-300">CHANNEL_MONITOR_PROCESS_LATEST_ON_ADD</span> = <span className="text-slate-500">true | false (default: false)</span></div>
+              <div><span className="text-blue-300">CHANNEL_MONITOR_AUTO_UPLOAD_DEFAULT</span> = <span className="text-slate-500">true | false (default: true)</span></div>
+              <div><span className="text-blue-300">YOUTUBE_API_KEY</span> = <span className="text-slate-500">opsional — tanpa ini otomatis pakai yt-dlp</span></div>
+            </div>
+            <div className="text-xs text-slate-500 space-y-1 pt-1">
+              <div>🤖 Telegram command: <code className="text-blue-300">/monitor &lt;link&gt;</code> daftar baru, <code className="text-blue-300">/monitors</code> kelola daftar</div>
+              <div>🧠 Resolve channel/playlist & cek video baru: <code className="text-blue-300">src/lib/channel-monitor.ts</code> (YouTube Data API bila <code className="text-blue-300">YOUTUBE_API_KEY</code> tersedia, fallback otomatis ke <code className="text-blue-300">yt-dlp</code>)</div>
+              <div>⚙️ Worker auto-clip otomatis: <code className="text-blue-300">src/lib/channel-monitor-worker.ts</code> — start otomatis saat server boot via <code className="text-blue-300">src/instrumentation.ts</code> (cocok untuk Railway, proses hidup terus-menerus)</div>
+              <div>🌐 Trigger manual/cron eksternal (opsional, jaring pengaman): <code className="text-blue-300">GET /api/monitor/run?secret=SETUP_SECRET</code></div>
+            </div>
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════
             INTRO / OUTRO SECTION
         ══════════════════════════════════════════════════════════ */}
         <section className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6 space-y-4">
@@ -1184,6 +1276,15 @@ export default async function HomePage() {
               { key: "SCHEDULER_POLL_INTERVAL_MS", desc: "interval cek antrean worker, ms (default: 60000) ← BARU!", isNew: true },
               { key: "SCHEDULER_MAX_DAYS_AHEAD", desc: "batas hari ke depan untuk jadwal (default: 7) ← BARU!", isNew: true },
               { key: "SCHEDULER_SLOT_COUNT", desc: "jumlah pilihan jam rekomendasi AI (default: 3) ← BARU!", isNew: true },
+              { section: "# === 📡 AUTO-MONITOR CHANNEL/PLAYLIST (BARU!) ===" },
+              { key: "CHANNEL_MONITOR_ENABLED", desc: "true | false — saklar utama fitur (default: true) ← BARU!", isNew: true },
+              { key: "CHANNEL_MONITOR_POLL_INTERVAL_MS", desc: "interval cek worker in-process, ms (default: 300000) ← BARU!", isNew: true },
+              { key: "CHANNEL_MONITOR_DEFAULT_INTERVAL_MINUTES", desc: "jeda cek per channel dalam menit (default: 10) ← BARU!", isNew: true },
+              { key: "CHANNEL_MONITOR_MAX_PER_USER", desc: "batas channel/playlist per user (default: 5) ← BARU!", isNew: true },
+              { key: "CHANNEL_MONITOR_MAX_NEW_VIDEOS_PER_RUN", desc: "batas video baru diproses per siklus cek (default: 2) ← BARU!", isNew: true },
+              { key: "CHANNEL_MONITOR_PROCESS_LATEST_ON_ADD", desc: "true = langsung proses video terbaru saat didaftarkan (default: false) ← BARU!", isNew: true },
+              { key: "CHANNEL_MONITOR_AUTO_UPLOAD_DEFAULT", desc: "auto-upload YouTube utk monitor baru (default: true) ← BARU!", isNew: true },
+              { key: "YOUTUBE_API_KEY", desc: "YouTube Data API v3 key (opsional, fallback otomatis ke yt-dlp) ← BARU!", isNew: true },
               { section: "# === ASPECT RATIO ===" },
               { key: "ASPECT_RATIO_MODE", desc: "blur | crop | pad | stretch | none (default: blur)" },
               { section: "# === 🎯 AUTO-REFRAME SPEAKER TRACKING (BARU!) ===" },

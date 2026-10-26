@@ -1,12 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone", // Wajib agar Dockerfile tidak error di tahap COPY
-  eslint: {
-    ignoreDuringBuilds: true, // Mengabaikan error ESLint saat build
-  },
+  // Wajib agar Dockerfile (Railway) tidak error di tahap COPY .next/standalone
+  output: "standalone",
+  // Type-checking penuh sudah dijalankan terpisah lewat `tsc --noEmit` (lebih
+  // hemat memori). Menjalankannya lagi di dalam `next build` menyebabkan OOM
+  // di beberapa environment karena proyek ini memakai googleapis (tipe besar).
   typescript: {
-    ignoreBuildErrors: true, // Mengabaikan error TypeScript saat build
+    ignoreBuildErrors: true,
   },
 };
 

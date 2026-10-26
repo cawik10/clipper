@@ -53,6 +53,17 @@ import { getDuplicateFilterStats } from "@/lib/duplicate-filter";
 // 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getAutoReframeConfig, getAutoReframeBackendLabel } from "@/lib/reframe-config";
 import fs from "fs";
+// 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
+import {
+  addMonitor,
+  listMonitorsForUser,
+  removeMonitor,
+  setMonitorEnabled,
+  setMonitorInterval,
+  setMonitorAutoUpload,
+  countMonitorsForUser,
+} from "@/lib/channel-monitor";
+import { isChannelMonitorEnabled, getMaxMonitorsPerUser } from "@/lib/channel-monitor-config";
 
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
 export const bot = new Bot(token);
@@ -77,7 +88,7 @@ bot.command("start", async (ctx) => {
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(messages.help + DRIVE_HELP, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP, { parse_mode: "Markdown" });
 });
 
 bot.command("connect", async (ctx) => {
@@ -542,6 +553,18 @@ const DRIVE_HELP =
   `/drivefolder <link> — ganti folder tujuan\n` +
   `/driveon /driveoff — nyalakan/matikan auto-upload`;
 
+// 📡 Auto-Monitor Channel/Playlist (BARU!) — teks bantuan terpisah, murni
+// ditambahkan ke pesan /help yang sudah ada (lihat pemanggilannya di bawah),
+// tidak mengubah isi `messages.help` / `DRIVE_HELP` sama sekali.
+const MONITOR_HELP =
+  `\n\n📡 *Auto-Monitor Channel/Playlist*\n` +
+  `/monitor <link> — pantau channel/playlist, auto-clip tiap ada upload baru\n` +
+  `/monitors — lihat & kelola daftar yang dipantau\n` +
+  `/unmonitor <id> — berhenti memantau\n` +
+  `/monitoron /monitoroff <id> — nyala/matikan sementara\n` +
+  `/monitorinterval <id> <menit> — ubah jeda pengecekan\n` +
+  `/monitorupload <id> on|off — atur auto-upload YouTube`;
+
 function mdEscape(text: string): string {
   return text.replace(/([_*`\[\]])/g, "\\$1");
 }
@@ -701,6 +724,175 @@ bot.callbackQuery("drive_disconnect", async (ctx) => {
   await ctx.answerCallbackQuery("🔌 Drive diputus");
   await disconnectDrive(ctx.from.id.toString());
   await ctx.editMessageText("✅ Google Drive berhasil diputus. Hubungkan lagi kapan saja lewat /drive.");
+});
+
+// ===== 📡 AUTO-MONITOR CHANNEL/PLAYLIST (BARU!) =====
+// Pantau upload baru dari channel/playlist YouTube tertentu secara berkala
+// lalu OTOMATIS menjalankan AutoClip (download → analisis AI → potong klip
+// → upload) TANPA user perlu kirim link manual lagi. Logika inti ada di
+// src/lib/channel-monitor.ts (resolve/CRUD) & src/lib/channel-monitor-worker.ts
+// (worker berkala + notifikasi). Konfigurasi lengkap: src/lib/channel-monitor-config.ts.
+bot.command("monitor", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  const chatId = ctx.chat?.id?.toString();
+  if (!userId || !chatId) return;
+
+  if (!isChannelMonitorEnabled()) {
+    await ctx.reply("📡 Fitur Auto-Monitor sedang dinonaktifkan oleh admin (`CHANNEL_MONITOR_ENABLED=false`).", {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+
+  const url = (ctx.match || "").toString().trim();
+  if (!url) {
+    await ctx.reply(
+      "📡 *Auto-Monitor Channel/Playlist*\n\n" +
+        "Kirim: `/monitor <link channel atau playlist YouTube>`\n\n" +
+        "Contoh:\n" +
+        "`/monitor https://www.youtube.com/@namachannel`\n" +
+        "`/monitor https://www.youtube.com/playlist?list=PLxxxxxx`\n\n" +
+        "Bot akan otomatis mengecek upload baru secara berkala dan langsung memotong + mengupload klip TANPA kamu perlu kirim link lagi. Lihat daftar: /monitors",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+
+  const existingCount = await countMonitorsForUser(userId);
+  const limit = getMaxMonitorsPerUser();
+  if (existingCount >= limit) {
+    await ctx.reply(`❌ Batas maksimal *${limit} channel/playlist* per akun sudah tercapai. Hapus salah satu dulu dengan /unmonitor.`, {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+
+  const wait = await ctx.reply("🔎 Mengecek & mendaftarkan channel/playlist...");
+  try {
+    const monitor = await addMonitor({ telegramUserId: userId, telegramChatId: chatId, url });
+    await ctx.api.editMessageText(
+      chatId,
+      wait.message_id,
+      `✅ *Berhasil dipantau!*\n\n` +
+        `📡 ${mdEscape(monitor.title || monitor.externalId)}\n` +
+        `Jenis: ${monitor.sourceType === "playlist" ? "Playlist" : "Channel"}\n` +
+        `Cek tiap: ${monitor.intervalMinutes} menit\n` +
+        `Auto-upload: ${monitor.autoUpload ? "✅ Aktif" : "❌ Nonaktif"}\n\n` +
+        `Upload baru akan otomatis di-clip & dikirim ke chat ini — tidak perlu kirim link manual lagi!\n\n` +
+        `Kelola: /monitors`,
+      { parse_mode: "Markdown" }
+    );
+  } catch (err) {
+    await ctx.api.editMessageText(
+      chatId,
+      wait.message_id,
+      `❌ Gagal mendaftarkan: ${err instanceof Error ? err.message : String(err)}\n\n` +
+        `Pastikan link channel/playlist valid. Kalau channel pakai @handle baru, coba juga versi link \`/channel/UCxxxx\`.`,
+      { parse_mode: "Markdown" }
+    ).catch(() => {});
+  }
+});
+
+bot.command("monitors", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+
+  const monitors = await listMonitorsForUser(userId);
+  if (!monitors.length) {
+    await ctx.reply(
+      "📡 Belum ada channel/playlist yang dipantau.\n\nTambahkan dengan: `/monitor <link>`",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+
+  let msg = "📡 *Channel/Playlist yang Dipantau:*\n\n";
+  monitors.forEach((m) => {
+    msg += `*#${m.id}* — ${mdEscape(m.title || m.externalId)}\n`;
+    msg += `   ${m.enabled ? "🟢 Aktif" : "⏸ Nonaktif"} • cek tiap ${m.intervalMinutes} menit • upload: ${m.autoUpload ? "✅" : "❌"} • ${m.totalVideosProcessed} video diproses\n`;
+    if (m.lastCheckedAt) msg += `   Cek terakhir: ${new Date(m.lastCheckedAt).toLocaleString("id-ID")}\n`;
+    if (m.lastError) msg += `   ⚠️ Error terakhir: ${mdEscape(m.lastError).slice(0, 120)}\n`;
+    msg += "\n";
+  });
+  msg +=
+    "Kelola:\n" +
+    "`/unmonitor <id>` — hapus\n" +
+    "`/monitoron <id>` / `/monitoroff <id>` — nyala/matikan\n" +
+    "`/monitorinterval <id> <menit>` — ubah jeda cek\n" +
+    "`/monitorupload <id> on|off` — atur auto-upload YouTube";
+
+  await ctx.reply(msg, { parse_mode: "Markdown" });
+});
+
+bot.command("unmonitor", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const id = parseInt((ctx.match || "").toString().trim(), 10);
+  if (!id) {
+    await ctx.reply("Gunakan: `/unmonitor <id>` (lihat id lewat /monitors)", { parse_mode: "Markdown" });
+    return;
+  }
+  const ok = await removeMonitor(id, userId);
+  await ctx.reply(ok ? `✅ Monitor #${id} dihapus.` : `❌ Monitor #${id} tidak ditemukan.`);
+});
+
+bot.command("monitoron", async (ctx) => {
+  await toggleMonitor(ctx, true);
+});
+
+bot.command("monitoroff", async (ctx) => {
+  await toggleMonitor(ctx, false);
+});
+
+async function toggleMonitor(ctx: Context, enabled: boolean) {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const id = parseInt((ctx.match || "").toString().trim(), 10);
+  if (!id) {
+    await ctx.reply(`Gunakan: \`/monitor${enabled ? "on" : "off"} <id>\` (lihat id lewat /monitors)`, {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+  const ok = await setMonitorEnabled(id, userId, enabled);
+  await ctx.reply(
+    ok
+      ? `✅ Monitor #${id} ${enabled ? "diaktifkan 🟢" : "dinonaktifkan ⏸"}.`
+      : `❌ Monitor #${id} tidak ditemukan.`
+  );
+}
+
+bot.command("monitorinterval", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const [idRaw, minutesRaw] = (ctx.match || "").toString().trim().split(/\s+/);
+  const id = parseInt(idRaw, 10);
+  const minutes = parseInt(minutesRaw, 10);
+  if (!id || !minutes) {
+    await ctx.reply("Gunakan: `/monitorinterval <id> <menit>` — contoh: `/monitorinterval 1 15`", {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+  const ok = await setMonitorInterval(id, userId, minutes);
+  await ctx.reply(ok ? `✅ Monitor #${id} akan dicek tiap ${minutes} menit.` : `❌ Monitor #${id} tidak ditemukan.`);
+});
+
+bot.command("monitorupload", async (ctx) => {
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+  const [idRaw, mode] = (ctx.match || "").toString().trim().split(/\s+/);
+  const id = parseInt(idRaw, 10);
+  if (!id || !/^(on|off)$/i.test(mode || "")) {
+    await ctx.reply("Gunakan: `/monitorupload <id> on|off`", { parse_mode: "Markdown" });
+    return;
+  }
+  const ok = await setMonitorAutoUpload(id, userId, /^on$/i.test(mode));
+  await ctx.reply(
+    ok
+      ? `✅ Auto-upload monitor #${id} di-set ke ${/^on$/i.test(mode) ? "ON ✅" : "OFF ❌"}.`
+      : `❌ Monitor #${id} tidak ditemukan.`
+  );
 });
 
 // ===== MESSAGE HANDLER =====
