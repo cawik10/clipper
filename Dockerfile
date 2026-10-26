@@ -17,7 +17,8 @@ RUN curl -fsSL https://deno.land/x/install/install.sh | sh
 ENV PATH="/root/.deno/bin:$PATH"
 
 # Instal OpenCV dan Numpy
-RUN pip3 install --no-cache-dir opencv-python-headless numpy --break-system-packages
+RUN pip3 install --no-cache-dir --force-reinstall opencv-python-headless numpy --break-system-packages
+RUN pip3 install --no-cache-dir --force-reinstall opencv-contrib-python-headless numpy --break-system-packages
 
 # Install yt-dlp versi nightly terbaru untuk bypass proteksi YouTube terbaru
 RUN pip3 install --no-cache-dir -U --pre "yt-dlp[default]" curl-cffi --break-system-packages || true
