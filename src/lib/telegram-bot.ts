@@ -83,7 +83,8 @@ bot.command("start", async (ctx) => {
       .text("⚙️ Pengaturan", "settings")
       .text("📋 Riwayat", "history")
       .row()
-      .text("☁️ Google Drive", "drive_menu"),
+      .text("☁️ Google Drive", "drive_menu")
+      .text("📡 Auto-Monitor", "monitors_menu"),
   });
 });
 
@@ -199,7 +200,7 @@ bot.command("clips", async (ctx) => {
         .text("2️⃣", "set_clips_2")
         .text("3️⃣", "set_clips_3")
         .text("4️⃣", "set_clips_4")
-        .text("5️⃣ ⭐", "set_clips_5")
+        .text("5️⃣", "set_clips_5")
         .row()
         .text("6 klip", "set_clips_6")
         .text("7 klip", "set_clips_7")
@@ -724,6 +725,33 @@ bot.callbackQuery("drive_disconnect", async (ctx) => {
   await ctx.answerCallbackQuery("🔌 Drive diputus");
   await disconnectDrive(ctx.from.id.toString());
   await ctx.editMessageText("✅ Google Drive berhasil diputus. Hubungkan lagi kapan saja lewat /drive.");
+});
+
+bot.callbackQuery("monitors_menu", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return;
+
+  const monitors = await listMonitorsForUser(userId);
+  if (!monitors.length) {
+    await ctx.reply(
+      "📡 *Auto-Monitor Channel/Playlist*\n\n" +
+        "Belum ada channel/playlist yang dipantau.\n\n" +
+        "Kirim: `/monitor <link channel atau playlist YouTube>` untuk mulai memantau secara otomatis!",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+
+  // Jika sudah ada monitor, tampilkan daftar yang dipantau
+  let msg = "📡 *Channel/Playlist yang Dipantau:*\n\n";
+  monitors.forEach((m) => {
+    msg += `*#${m.id}* — ${mdEscape(m.title || m.externalId)}\n`;
+    msg += `   ${m.enabled ? "🟢 Aktif" : "⏸ Nonaktif"} • cek tiap ${m.intervalMinutes} menit • upload: ${m.autoUpload ? "✅" : "❌"}\n\n`;
+  });
+  msg += "Kelola: `/unmonitor <id>` | Ubah cek: `/monitorinterval <id> <menit>`";
+
+  await ctx.reply(msg, { parse_mode: "Markdown" });
 });
 
 // ===== 📡 AUTO-MONITOR CHANNEL/PLAYLIST (BARU!) =====
