@@ -4,7 +4,11 @@ import { bot } from "@/lib/telegram-bot";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const handler = webhookCallback(bot, "std/http");
+// Atur timeout grammy menjadi 5 menit (300000 ms) agar selaras dengan maxDuration
+const handler = webhookCallback(bot, "std/http", {
+  timeoutMilliseconds: 300000,
+  onTimeout: "return",
+});
 
 export async function POST(req: Request) {
   try {

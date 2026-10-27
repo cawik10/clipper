@@ -445,7 +445,7 @@ export async function setMonitorAutoUpload(
  */
 export async function claimDueMonitors(): Promise<MonitoredChannelRow[]> {
   await ensureChannelMonitorTables();
-  const rows = await db.execute<MonitoredChannelRow>(sql`
+  const result = await db.execute<MonitoredChannelRow>(sql`
     UPDATE monitored_channels
     SET last_checked_at = now(), updated_at = now()
     WHERE enabled = true
@@ -455,7 +455,12 @@ export async function claimDueMonitors(): Promise<MonitoredChannelRow[]> {
       )
     RETURNING *
   `);
-  return (rows as unknown as Array<Record<string, unknown>>).map(mapRawMonitorRow);
+  
+  // Deteksi array: Jika menggunakan postgres.js biasanya kembalian array langsung, 
+  // Jika menggunakan pg biasanya ada di properti .rows
+  const rows = Array.isArray(result) ? result : (result as any).rows || [];
+
+  return (rows as Array<Record<string, unknown>>).map(mapRawMonitorRow);
 }
 
 // db.execute() mengembalikan kolom snake_case mentah — mapping manual ke
@@ -584,13 +589,8 @@ export async function incrementMonitorProcessedCount(monitorId: number, by: numb
 export async function getChannelMonitorStats() {
   try {
     await ensureChannelMonitorTables();
-    const result = await db.execute(sql`
-      SELECT
-        COUNT(*) AS total_monitors,
-        COUNT(*) FILTER (WHERE enabled = true) AS active_monitors,
-        COALESCE(SUM(total_videos_processed), 0) AS total_processed
-      FROM monitored_channels
-    `);
+    const rows = Array.isArray(result) ? result : (result as any).rows || [];
+const row = (rows as Array<Record<string, string>>)[0] || {};
     const row = (result as unknown as Array<Record<string, string>>)[0] || {};
     return {
       totalMonitors: Number(row.total_monitors ?? 0),
