@@ -13,7 +13,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 4. Upload langsung ke YouTube sebagai Draft
 
 *Fitur Unggulan:*
-✂️ AutoClip — hingga 5 klip per video (mudah diubah)
+✂️ AutoClip — hingga 10 klip per video (mudah diubah)
 ⏱ Durasi klip bisa dipilih: 15 / 20 / 30 / 40 / 60 detik
 🖼 Thumbnail auto-generate
 💧 Watermark custom
@@ -22,6 +22,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 🎯 Custom Niche Prompt — arahkan fokus AI Analysis ✨ Baru!
 🧹 Duplicate/Repetitive Clip Filter — hindari klip mirip saat video sama diproses ulang ✨ Baru!
 🗓 Scheduler / Queue Posting — jadwalkan upload otomatis sesuai niche ✨ Baru!
+📡 Auto-Monitor — potong otomatis dari channel/playlist ✨ Baru!
 
 *Perintah:*
 /start - Menu utama
@@ -40,6 +41,8 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 /niche - Atur Custom Niche Prompt untuk AI Analysis ✨ Baru!
 /dupfilter - Info Duplicate/Repetitive Clip Filter ✨ Baru!
 /jadwal - Lihat & batalkan antrean jadwal upload ✨ Baru!
+/monitor <link> - Pantau channel/playlist ✨ Baru!
+/monitors - Kelola daftar pantauan ✨ Baru!
 
 Kirim link video untuk mulai! 🎬`,
 
