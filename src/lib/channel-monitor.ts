@@ -589,9 +589,18 @@ export async function incrementMonitorProcessedCount(monitorId: number, by: numb
 export async function getChannelMonitorStats() {
   try {
     await ensureChannelMonitorTables();
+    
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(*) AS total_monitors,
+        COALESCE(SUM(CASE WHEN enabled = true THEN 1 ELSE 0 END), 0) AS active_monitors,
+        COALESCE(SUM(total_videos_processed), 0) AS total_processed
+      FROM monitored_channels
+    `);
+
     const rows = Array.isArray(result) ? result : (result as any).rows || [];
-const row = (rows as Array<Record<string, string>>)[0] || {};
-    const row = (result as unknown as Array<Record<string, string>>)[0] || {};
+    const row = (rows as Array<Record<string, string>>)[0] || {};
+    
     return {
       totalMonitors: Number(row.total_monitors ?? 0),
       activeMonitors: Number(row.active_monitors ?? 0),
