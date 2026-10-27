@@ -4,13 +4,14 @@ import { getMaxClipsConfig } from "@/lib/video-config";
 export const messages = {
   welcome: `🤖 *AutoClip Bot* — Video Clipper Otomatis
 
-Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube Shorts secara otomatis!
+Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pendek viral untuk YouTube Shorts secara otomatis!
 
 *Cara Penggunaan:*
 1. Kirim link video (YouTube, Facebook, TikTok, Instagram)
 2. Bot akan menganalisis dan memilih momen terbaik
 3. Video akan dipotong sesuai durasi pilihanmu (15/20/30/40/60 detik, default 30s)
 4. Upload langsung ke YouTube sebagai Draft
+5. Langsung set auto-monitor biar gak kirim link manual 🔥 Baru Hot!
 
 *Fitur Unggulan:*
 ✂️ AutoClip — hingga 10 klip per video (mudah diubah)
@@ -22,7 +23,7 @@ Halo! Saya bisa memotong video panjang menjadi klip pendek viral untuk YouTube S
 🎯 Custom Niche Prompt — arahkan fokus AI Analysis ✨ Baru!
 🧹 Duplicate/Repetitive Clip Filter — hindari klip mirip saat video sama diproses ulang ✨ Baru!
 🗓 Scheduler / Queue Posting — jadwalkan upload otomatis sesuai niche ✨ Baru!
-📡 Auto-Monitor — potong otomatis dari channel/playlist ✨ Baru!
+📡 Auto-Monitor — potong otomatis dari channel/playlist ✨ Baru Hot!
 
 *Perintah:*
 /start - Menu utama
