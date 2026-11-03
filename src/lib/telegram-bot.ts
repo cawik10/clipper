@@ -1179,6 +1179,7 @@ async function processJobWithUpdates(
     message: string,
     meta?: { step?: string; percent?: number }
   ) => {
+    const safeMessage = message ? message.replace(/([_*`\[\]])/g, "\\$1") : "";
     if (status === "error") {
       await tracker.fail(message);
       return;
