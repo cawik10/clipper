@@ -3,8 +3,7 @@
  * ===============
  * Handles: download, transcription, clip processing (cut → zoom → watermark → intro/outro)
  */
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn } from 'child_process';
 import fs from "fs";
 import path from "path";
 import {
@@ -23,6 +22,40 @@ import type { ClipResult } from "@/db/schema";
 // src/lib/reframe-config.ts untuk detail & cara ganti/konfigurasi.
 import { getAutoReframeConfig } from "@/lib/reframe-config";
 import { buildReframeFilter } from "@/lib/auto-reframe";
+
+// TAMBAHKAN FUNGSI INI
+export function spawnAsync(command: string, args: string[], timeoutMs: number = 300000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let isDone = false;
+    
+    // Inisialisasi spawn
+    const proc = spawn(command, args, { 
+        // Anda bisa menyetel stdio ke ignore agar tidak mengonsumsi RAM sama sekali
+        stdio: ['ignore', 'ignore', 'ignore'] 
+    });
+
+    // Timeout manual untuk membunuh proses jika menggantung
+    const timer = setTimeout(() => {
+      if (!isDone) {
+        proc.kill('SIGTERM');
+        reject(new Error(`Timeout ${timeoutMs}ms terlampaui untuk: ${command}`));
+      }
+    }, timeoutMs);
+
+    proc.on('close', (code) => {
+      isDone = true;
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`Proses ${command} gagal dengan kode exit ${code}`));
+    });
+
+    proc.on('error', (err) => {
+      isDone = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 
 const execAsync = promisify(exec);
 
@@ -53,22 +86,23 @@ export async function downloadVideo(
 ): Promise<{ filePath: string; title: string; duration: number }> {
   ensureDir(TMP_DIR);
   const outputTemplate = path.join(TMP_DIR, `${jobId}.%(ext)s`);
-  const cmd = [
-      "yt-dlp",
+  
+  // UBAH: args yt-dlp menjadi bentuk Array
+  const args = [
       "--no-playlist",
       "--merge-output-format", "mp4",
-      "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
+      "-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
       "--cookies", "cookies.txt",
-      "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"',
-      "--progress",
-      "--newline",
-      "-o", `"${outputTemplate}"`,
-      `"${url}"`,
-    ].join(" ");
+      "--extractor-args", "youtube:player_client=web_safari,web_embedded,-tv_downgraded",
+      // "--progress" dan "--newline" bisa dihapus jika stdio di-ignore
+      "-o", outputTemplate,
+      url,
+  ];
 
   console.log(`[download] Starting: ${url}`);
 
-  await execAsync(cmd, { timeout: 600000 });
+  // UBAH: Gunakan spawnAsync
+  await spawnAsync("yt-dlp", args, 600000);
 
   if (onProgress) await onProgress(50);
 
@@ -76,6 +110,13 @@ export async function downloadVideo(
   if (!files.length) throw new Error("Download selesai tapi file tidak ditemukan");
 
   const filePath = path.join(TMP_DIR, files[0]);
+
+  // Bagian pengambilan info durasi (Bisa tetap menggunakan baris ini, 
+  // karena info metadata sangat kecil dan cepat. Tapi jika ingin aman, pakai execSync murni atau parsing terpisah)
+  
+  // ... [Biarkan sisa fungsi durasi apa adanya, atau konversi sekalian ke spawnAsync jika mau murni] ...
+  
+  // Karena mengambil output butuh exec, Anda bisa membiarkan yt-dlp info tetap pakai versi kecil.
 
   const infoCmd = `yt-dlp --cookies cookies.txt --extractor-args "youtube:player_client=android,ios" --dump-json --no-playlist "${url}"`;
   let title = "Video";
@@ -203,6 +244,8 @@ export async function processClips(
   const mode = makeVertical ? getAspectRatioMode() : "none";
   const results: ClipResult[] = [];
 
+  const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
   for (let i = 0; i < clips.length; i++) {
     if (onProgress) await onProgress(i, clips.length);
     try {
@@ -217,6 +260,7 @@ export async function processClips(
         thumbnailPath: undefined,
       });
     }
+    await delay(3000);
   }
 
   return results;
@@ -325,47 +369,50 @@ async function cutAndConvertClip(
     ({ useFilterComplex, filterValue } = buildFFmpegFilterArgs(mode));
   }
 
-  let cmd: string;
+  // ... [Biarkan bagian deteksi filter mode] ...
+  
+  let args: string[];
+  
   if (useFilterComplex) {
-    cmd = [
-      "ffmpeg",
+    args = [
       "-y",
       "-ss", startTime.toString(),
       "-t", duration.toString(),
-      "-i", `"${inputPath}"`,
-      "-filter_complex", `"${filterValue}"`,
-      "-map", '"[out]"',
+      "-i", inputPath, // Hapus tanda kutip ganda `"${inputPath}"`
+      "-filter_complex", filterValue, // Hapus tanda kutip ganda
+      "-map", "[out]", // Hapus tanda kutip ganda
       "-map", "0:a?",
-      "-threads", "2",
+      "-threads", "1", // Ubah ke 1 agar tidak memakan RAM berlebih saat spawn
       "-c:v", "libx264",
-      "-crf", "23",
-      "-preset", "fast",
+      "-crf", "26", // Lebih enteng dari 23
+      "-preset", "veryfast", // Lebih cepat selesai
       "-c:a", "aac",
       "-ar", "44100",
       "-ac", "2",
       "-pix_fmt", "yuv420p",
-      `"${outputPath}"`,
-    ].join(" ");
+      outputPath, // Hapus tanda kutip
+    ];
   } else {
-    cmd = [
-      "ffmpeg",
+    args = [
       "-y",
       "-ss", startTime.toString(),
       "-t", duration.toString(),
-      "-i", `"${inputPath}"`,
-      "-vf", `"${filterValue}"`,
-      "-threads", "2",
+      "-i", inputPath,
+      "-vf", filterValue,
+      "-threads", "1",
       "-c:v", "libx264",
-      "-crf", "23",
-      "-preset", "fast",
+      "-crf", "26",
+      "-preset", "veryfast",
       "-c:a", "aac",
       "-ar", "44100",
       "-ac", "2",
       "-pix_fmt", "yuv420p",
-      `"${outputPath}"`,
-    ].join(" ");
+      outputPath,
+    ];
   }
 
-  await execAsync(cmd, { timeout: 300000 });
+  // UBAH eksekusi execAsync menjadi spawnAsync
+  await spawnAsync("ffmpeg", args, 300000);
+  
   if (!fs.existsSync(outputPath)) throw new Error("Cut clip file tidak terbuat");
 }
