@@ -23,6 +23,8 @@ import type { ClipResult } from "@/db/schema";
 import { getAutoReframeConfig } from "@/lib/reframe-config";
 import { buildReframeFilter } from "@/lib/auto-reframe";
 
+const execAsync = promisify(exec);
+
 // TAMBAHKAN FUNGSI INI
 export function spawnAsync(command: string, args: string[], timeoutMs: number = 300000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -56,8 +58,6 @@ export function spawnAsync(command: string, args: string[], timeoutMs: number = 
     });
   });
 }
-
-const execAsync = promisify(exec);
 
 const TMP_DIR = process.env.TMP_DIR || "/tmp/autoclip";
 
