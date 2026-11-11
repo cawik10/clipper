@@ -36,6 +36,7 @@ Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pend
 /duration - Info & cara ubah durasi klip (15/20/30/40/60s)
 /watermark - Info watermark config
 /zoom - Info zoom effect config
+/subtitle - Info & preview style subtitle (caption burn-in)
 /introoutro - Info intro/outro config
 /thumbnail - Info thumbnail config
 /mode - Info aspect ratio
@@ -76,6 +77,7 @@ Kirim link video untuk mulai! 🎬`,
 /thumbnail - Info thumbnail config
 /watermark - Info watermark config
 /zoom - Info zoom effect config
+/subtitle - Info & preview style subtitle (caption burn-in)
 /introoutro - Info intro/outro config
 /niche - Atur Custom Niche Prompt (fokus AI Analysis) ✨ Baru!
 /dupfilter - Info Duplicate/Repetitive Clip Filter (anti klip mirip/berulang) ✨ Baru!

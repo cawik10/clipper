@@ -53,6 +53,21 @@ import { getDuplicateFilterStats } from "@/lib/duplicate-filter";
 // 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getAutoReframeConfig, getAutoReframeBackendLabel } from "@/lib/reframe-config";
 import fs from "fs";
+// 💬 Subtitle / Caption Burn-In (BARU!) — import terpisah, tidak mengubah import di atas.
+import {
+  SUBTITLE_STYLES,
+  SUBTITLE_ANIMATIONS,
+  SUBTITLE_POSITIONS,
+  STYLE_PRESETS,
+  getSubtitleConfig,
+  getSubtitleStyleLabel,
+  getSubtitlePositionLabel,
+  isValidSubtitleStyle,
+  isValidSubtitleAnimation,
+  type SubtitleStyle,
+  type SubtitleAnimation,
+} from "@/lib/subtitle-config";
+import { renderSubtitlePreview } from "@/lib/subtitle-burner";
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import {
   addMonitor,
@@ -515,6 +530,104 @@ bot.command("autoreframe", async (ctx) => {
     `💡 Tidak ada wajah terdeteksi / backend error → otomatis fallback ke crop statis, proses tetap aman.`,
     { parse_mode: "Markdown" }
   );
+});
+
+// 💬 Subtitle / Caption Burn-In (BARU!) — command terpisah, tidak mengubah
+// command lain di atas. Konfigurasi lengkap: src/lib/subtitle-config.ts
+// (style baru cukup ditambah di STYLE_PRESETS).
+async function sendSubtitlePreview(
+  ctx: Context,
+  style: SubtitleStyle,
+  animation?: SubtitleAnimation
+) {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return;
+  const cfg = getSubtitleConfig();
+  const anim = animation || cfg.animation;
+  const wait = await ctx.api.sendMessage(chatId, `⏳ Membuat preview style *${style}*...`, {
+    parse_mode: "Markdown",
+  });
+  let file: string | undefined;
+  try {
+    file = await renderSubtitlePreview(style, animation ? { animation } : {});
+    await ctx.api.sendVideo(chatId, new InputFile(file), {
+      caption:
+        `💬 *Preview Subtitle: ${STYLE_PRESETS[style].label}*\n` +
+        `${STYLE_PRESETS[style].description}\n\n` +
+        `Animasi: \`${anim}\` • Posisi: \`${cfg.position}\`\n` +
+        `Warna: \`${cfg.color}\` • Highlight: \`${cfg.highlightColor}\`\n\n` +
+        `Pakai style ini: set \`SUBTITLE_STYLE\` = \`${style}\` di Railway Variables`,
+      parse_mode: "Markdown",
+      width: 540,
+      height: 960,
+      supports_streaming: true,
+    });
+  } catch (err) {
+    console.error("[subtitle] preview gagal:", err);
+    await ctx.api.sendMessage(
+      chatId,
+      "❌ Preview gagal dibuat. Pastikan FFmpeg (dengan libass) terinstall di server."
+    );
+  } finally {
+    try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch { /* ignore */ }
+    try { await ctx.api.deleteMessage(chatId, wait.message_id); } catch { /* ignore */ }
+  }
+}
+
+bot.command("subtitle", async (ctx) => {
+  const tokens = String(ctx.match || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const styleArg = tokens.find((t) => isValidSubtitleStyle(t === "hormozi" ? "alex-hormozi" : t));
+  const animArg = tokens.find((t) => isValidSubtitleAnimation(t));
+
+  // /subtitle karaoke [pop|fade|none] → langsung kirim preview
+  if (styleArg) {
+    const style = (styleArg === "hormozi" ? "alex-hormozi" : styleArg) as SubtitleStyle;
+    await sendSubtitlePreview(ctx, style, animArg as SubtitleAnimation | undefined);
+    return;
+  }
+
+  const cfg = getSubtitleConfig();
+  const kb = new InlineKeyboard();
+  SUBTITLE_STYLES.forEach((st, i) => {
+    kb.text(`${st === cfg.style ? "✅ " : ""}${STYLE_PRESETS[st].label}`, `sub_prev_${st}`);
+    if (i % 2 === 1) kb.row();
+  });
+
+  await ctx.reply(
+    `💬 *Subtitle / Caption Burn-In:*\n\n` +
+    `Status: ${cfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+    `Style: *${getSubtitleStyleLabel(cfg.style)}* (\`${cfg.style}\`)\n` +
+    `Ukuran font: ${cfg.fontSize}px • Font: \`${cfg.font}\`\n` +
+    `Warna: \`${cfg.color}\` • Highlight: \`${cfg.highlightColor}\`\n` +
+    `Posisi: *${getSubtitlePositionLabel(cfg.position)}* (\`${cfg.position}\`)\n` +
+    `Maks kata/baris: ${cfg.maxWordsPerLine}\n` +
+    `Animasi: \`${cfg.animation}\`\n\n` +
+    `*Style tersedia:*\n` +
+    SUBTITLE_STYLES.map((st) => `• \`${st}\` → ${STYLE_PRESETS[st].description}`).join("\n") +
+    `\n\n*Preview:* tekan tombol di bawah, atau ketik \`/subtitle karaoke\`, ` +
+    `\`/subtitle alex-hormozi fade\`.\n\n` +
+    `*Cara Ubah (Railway Variables):*\n` +
+    `• \`SUBTITLE_ENABLED\` = \`true\` / \`false\`\n` +
+    `• \`SUBTITLE_STYLE\` = ${SUBTITLE_STYLES.map((x) => `\`${x}\``).join(" | ")}\n` +
+    `• \`SUBTITLE_FONT_SIZE\` = ukuran dasar (default: 48)\n` +
+    `• \`SUBTITLE_COLOR\` = \`white\` / \`#FFFFFF\`\n` +
+    `• \`SUBTITLE_HIGHLIGHT_COLOR\` = \`yellow\` / \`#FFE500\`\n` +
+    `• \`SUBTITLE_POSITION\` = ${SUBTITLE_POSITIONS.map((x) => `\`${x}\``).join(" | ")}\n` +
+    `• \`SUBTITLE_MAX_WORDS_PER_LINE\` = 1-8 (default: 4)\n` +
+    `• \`SUBTITLE_ANIMATION\` = ${SUBTITLE_ANIMATIONS.map((x) => `\`${x}\``).join(" | ")}\n\n` +
+    `ℹ️ Subtitle memakai timestamp per kata dari Whisper (butuh \`OPENAI_API_KEY\` atau \`GROQ_API_KEY\`). ` +
+    `Tanpa transkripsi, klip tetap dibuat tanpa subtitle.`,
+    { parse_mode: "Markdown", reply_markup: kb }
+  );
+});
+
+bot.callbackQuery(new RegExp(`^sub_prev_(${SUBTITLE_STYLES.join("|")})$`), async (ctx) => {
+  const style = ctx.match[1] as SubtitleStyle;
+  await ctx.answerCallbackQuery({ text: `Membuat preview ${style}...` });
+  await sendSubtitlePreview(ctx, style);
 });
 
 bot.command("introoutro", async (ctx) => {

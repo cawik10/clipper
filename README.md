@@ -38,6 +38,7 @@ Dashboard web menampilkan statistik job, konfigurasi fitur (jumlah klip, durasi 
 | ☁️ **Google Drive** | Auto-upload klip & thumbnail ke Google Drive milik user |
 | 💧 **Watermark Custom** | Teks atau logo pada setiap klip, posisi & gaya dapat diatur |
 | 🔍 **Zoom Effect** | Efek zoom otomatis pada momen dengan viral score tinggi |
+| 💬 **Subtitle / Caption Burn-In** | Caption burned-in dari transkripsi Whisper (timestamp per kata): `karaoke`, `word-highlight`, `simple`, `alex-hormozi` |
 | 🎬 **Intro/Outro** | Tambahan intro & outro otomatis di setiap klip |
 | 🖼 **Thumbnail Generator** | Generate thumbnail otomatis dari frame klip |
 | 📐 **Aspect Ratio 9:16** | Mode blur background, center crop, black bars, stretch, atau original |
@@ -164,12 +165,40 @@ curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
 /thumbnail        - Info & ubah konfigurasi thumbnail
 /watermark        - Info & ubah konfigurasi watermark
 /zoom             - Info & ubah konfigurasi zoom effect
+/subtitle         - Info config subtitle + preview style (mis. /subtitle karaoke)
 /introoutro       - Info & ubah konfigurasi intro/outro
 /drive            - Google Drive: status, hubungkan, ganti akun
 /drivefolder      - Ganti folder tujuan Drive (link / reset)
 /driveon /driveoff - Nyalakan / matikan auto-upload Drive
 /cancel           - Batalkan proses
 ```
+
+---
+
+## 💬 Subtitle / Caption Burn-In
+
+Caption otomatis di-burn ke setiap klip lewat FFmpeg `ass` filter (libass), memakai timestamp **per kata** dari Whisper. Langkah ini berjalan setelah zoom dan sebelum watermark/intro-outro. Kalau transkripsi kosong atau FFmpeg gagal, klip tetap dibuat tanpa subtitle.
+
+| Variable | Default | Pilihan |
+| --- | --- | --- |
+| `SUBTITLE_ENABLED` | `true` | `true` \| `false` |
+| `SUBTITLE_STYLE` | `karaoke` | `karaoke` \| `word-highlight` \| `simple` \| `alex-hormozi` |
+| `SUBTITLE_FONT_SIZE` | `48` | 16–160 (ukuran dasar, tiap style punya pengali) |
+| `SUBTITLE_COLOR` | `white` | nama warna / `#RRGGBB` |
+| `SUBTITLE_HIGHLIGHT_COLOR` | `yellow` | nama warna / `#RRGGBB` |
+| `SUBTITLE_POSITION` | `bottom-center` | `bottom-center` \| `center` \| `top-center` |
+| `SUBTITLE_MAX_WORDS_PER_LINE` | `4` | 1–8 |
+| `SUBTITLE_ANIMATION` | `pop` | `pop` \| `fade` \| `none` |
+| `SUBTITLE_FONT` *(opsional)* | `Montserrat` | font terinstall / dari `SUBTITLE_FONTS_DIR` |
+| `SUBTITLE_FONTS_DIR` *(opsional)* | – | folder font custom |
+| `SUBTITLE_OUTLINE_COLOR` *(opsional)* | `black` | warna outline |
+| `SUBTITLE_MARGIN_V` *(opsional)* | otomatis | jarak dari tepi (px, basis tinggi 1920) |
+
+Style: **karaoke** (highlight menyapu mengikuti kata), **word-highlight** (hanya kata aktif berwarna), **simple** (teks putih biasa), **alex-hormozi** (HURUF BESAR, 1–3 kata, kata aktif berwarna + pop).
+
+Telegram: `/subtitle` menampilkan config + tombol preview; `/subtitle karaoke`, `/subtitle alex-hormozi fade` mengirim video preview.
+
+Mengubah tampilan/menambah style: edit `STYLE_PRESETS` di `src/lib/subtitle-config.ts`. File terkait: `src/lib/subtitle-burner.ts` (render ASS + FFmpeg).
 
 ---
 
@@ -245,3 +274,4 @@ MIT License — Bebas digunakan dan dimodifikasi.
 ---
 
 Made with ❤️ using Next.js, Grammy.js, FFmpeg & OpenAI.
+| SUBTITLE\_ENABLED / SUBTITLE\_STYLE / SUBTITLE\_FONT\_SIZE / SUBTITLE\_COLOR / SUBTITLE\_HIGHLIGHT\_COLOR / SUBTITLE\_POSITION / SUBTITLE\_MAX\_WORDS\_PER\_LINE / SUBTITLE\_ANIMATION | ⚪ | Caption burn-in (lihat bagian Subtitle di bawah) |     |         |                     |

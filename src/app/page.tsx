@@ -37,6 +37,14 @@ import {
 } from "@/lib/scheduler-config";
 // 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getAutoReframeConfig, getAutoReframeBackendLabel } from "@/lib/reframe-config";
+// 💬 Subtitle / Caption Burn-In (BARU!) — import terpisah, tidak mengubah import di atas.
+import {
+  getSubtitleConfig,
+  getSubtitlePositionLabel,
+  SUBTITLE_STYLES,
+  STYLE_PRESETS,
+  colorToHex,
+} from "@/lib/subtitle-config";
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getChannelMonitorStats } from "@/lib/channel-monitor";
 import {
@@ -252,6 +260,10 @@ export default async function HomePage() {
   const defaultNichePrompt = getDefaultNichePrompt();
   // 🎯 Auto-Reframe Speaker Tracking (BARU!) — data terpisah, tidak mengubah variabel di atas.
   const reframeCfg = getAutoReframeConfig();
+  // 💬 Subtitle / Caption Burn-In (BARU!) — data terpisah, tidak mengubah variabel di atas.
+  const subtitleCfg = getSubtitleConfig();
+  const subtitleBase = colorToHex(subtitleCfg.color);
+  const subtitleHl = colorToHex(subtitleCfg.highlightColor, "#FFE500");
   // 📡 Auto-Monitor Channel/Playlist (BARU!) — data terpisah, tidak mengubah variabel di atas.
   const monitorData = await getChannelMonitorData();
 
@@ -1127,6 +1139,109 @@ export default async function HomePage() {
         </section>
 
         {/* ══════════════════════════════════════════════════════════
+            💬 SUBTITLE / CAPTION BURN-IN (FITUR BARU!)
+            Section baru murni — tidak mengubah section lain manapun.
+        ══════════════════════════════════════════════════════════ */}
+        <section className="bg-gradient-to-br from-yellow-500/10 to-orange-600/10 border-2 border-yellow-500/40 rounded-2xl p-6 space-y-5">
+          <div className="flex items-start justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-yellow-400 flex items-center gap-2">
+                💬 Subtitle / Caption Burn-In
+                <span className="text-xs bg-yellow-500/20 border border-yellow-500/40 text-yellow-300 px-2 py-0.5 rounded-full">
+                  Fitur Baru!
+                </span>
+              </h2>
+              <p className="text-slate-400 text-sm mt-1">
+                Caption otomatis ala Shorts viral, di-burn ke video lewat FFmpeg <code className="text-slate-300">ass</code> filter
+                memakai timestamp per kata dari Whisper.
+              </p>
+            </div>
+            <span className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${subtitleCfg.enabled ? "bg-green-500/20 border-green-500/40 text-green-400" : "bg-red-500/20 border-red-500/40 text-red-400"}`}>
+              {subtitleCfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+            <div className="bg-slate-900/60 rounded-xl p-3">
+              <div className="text-slate-500">Style</div>
+              <div className="text-yellow-300 font-semibold mt-1">{subtitleCfg.style}</div>
+            </div>
+            <div className="bg-slate-900/60 rounded-xl p-3">
+              <div className="text-slate-500">Posisi</div>
+              <div className="text-yellow-300 font-semibold mt-1">{getSubtitlePositionLabel(subtitleCfg.position)}</div>
+            </div>
+            <div className="bg-slate-900/60 rounded-xl p-3">
+              <div className="text-slate-500">Font / Kata per Baris</div>
+              <div className="text-yellow-300 font-semibold mt-1">{subtitleCfg.fontSize}px / {subtitleCfg.maxWordsPerLine}</div>
+            </div>
+            <div className="bg-slate-900/60 rounded-xl p-3">
+              <div className="text-slate-500">Animasi</div>
+              <div className="text-yellow-300 font-semibold mt-1">{subtitleCfg.animation}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {SUBTITLE_STYLES.map((st) => {
+              const preset = STYLE_PRESETS[st];
+              const active = st === subtitleCfg.style;
+              const words = ["Ini", "contoh", "subtitle", "viral"];
+              const shown = (preset.uppercase ? words.map((w) => w.toUpperCase()) : words).slice(0, st === "alex-hormozi" ? 3 : 4);
+              return (
+                <div key={st} className={`rounded-xl p-3 border ${active ? "border-yellow-400/70 bg-slate-900/80" : "border-slate-700/50 bg-slate-900/50"}`}>
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="font-semibold text-slate-200">{preset.label} <code className="text-slate-500">{st}</code></span>
+                    {active && <span className="text-yellow-300">● dipakai</span>}
+                  </div>
+                  <div className="bg-slate-800 rounded-lg h-20 flex items-center justify-center px-2">
+                    <div
+                      className="text-center leading-tight"
+                      style={{
+                        fontWeight: preset.bold ? 800 : 500,
+                        fontSize: st === "alex-hormozi" ? 22 : st === "simple" ? 15 : 18,
+                        textShadow: "0 0 3px #000, 0 0 3px #000, 1px 1px 2px #000",
+                        color: subtitleBase,
+                      }}
+                    >
+                      {shown.map((w, i) => {
+                        const hot =
+                          preset.highlightMode === "plain" ? false : i === 1;
+                        const sweep = preset.highlightMode === "sweep" && i <= 1;
+                        return (
+                          <span key={i} style={{ color: hot || sweep ? subtitleHl : subtitleBase }}>
+                            {w}{" "}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-2">{preset.description}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="bg-yellow-950/30 border border-yellow-500/20 rounded-xl p-4 space-y-3">
+            <div className="text-sm font-semibold text-yellow-300">🔧 Cara Atur di Railway Variables:</div>
+            <div className="font-mono text-sm bg-slate-900/80 rounded-lg p-3 space-y-1">
+              <div><span className="text-yellow-300">SUBTITLE_ENABLED</span> = <span className="text-emerald-400">{String(subtitleCfg.enabled)}</span></div>
+              <div><span className="text-yellow-300">SUBTITLE_STYLE</span> = <span className="text-emerald-400">{subtitleCfg.style}</span> <span className="text-slate-600">← karaoke | word-highlight | simple | alex-hormozi</span></div>
+              <div><span className="text-yellow-300">SUBTITLE_FONT_SIZE</span> = <span className="text-emerald-400">{subtitleCfg.fontSize}</span></div>
+              <div><span className="text-yellow-300">SUBTITLE_COLOR</span> = <span className="text-emerald-400">{subtitleCfg.color}</span></div>
+              <div><span className="text-yellow-300">SUBTITLE_HIGHLIGHT_COLOR</span> = <span className="text-emerald-400">{subtitleCfg.highlightColor}</span></div>
+              <div><span className="text-yellow-300">SUBTITLE_POSITION</span> = <span className="text-emerald-400">{subtitleCfg.position}</span> <span className="text-slate-600">← bottom-center | center | top-center</span></div>
+              <div><span className="text-yellow-300">SUBTITLE_MAX_WORDS_PER_LINE</span> = <span className="text-emerald-400">{subtitleCfg.maxWordsPerLine}</span></div>
+              <div><span className="text-yellow-300">SUBTITLE_ANIMATION</span> = <span className="text-emerald-400">{subtitleCfg.animation}</span> <span className="text-slate-600">← pop | fade | none</span></div>
+            </div>
+            <div className="text-xs text-slate-400 space-y-1">
+              <div>🎙️ Butuh transkripsi Whisper (<code className="text-yellow-300">OPENAI_API_KEY</code> atau <code className="text-yellow-300">GROQ_API_KEY</code>) — tanpa itu klip dibuat tanpa subtitle.</div>
+              <div>🛡️ Kalau FFmpeg gagal / tidak ada kata, klip tetap diproses normal — tidak pernah gagal karena fitur ini.</div>
+              <div>🎨 Tampilan tiap style bisa disetel di <code className="text-slate-300">STYLE_PRESETS</code> (<code className="text-slate-300">src/lib/subtitle-config.ts</code>).</div>
+              <div>🤖 Telegram: <code className="text-yellow-300">/subtitle</code> untuk preview style</div>
+            </div>
+          </div>
+        </section>
+
+        {/* ══════════════════════════════════════════════════════════
             PIPELINE FLOW
         ══════════════════════════════════════════════════════════ */}
         <section className="bg-slate-900/60 border border-slate-700/50 rounded-2xl p-6">
@@ -1206,6 +1321,7 @@ export default async function HomePage() {
               { cmd: "/watermark",  desc: "Info & ubah watermark config",          isNew: false },
               { cmd: "/zoom",       desc: "Info & ubah zoom effect config",        isNew: false },
               { cmd: "/autoreframe", desc: "Info & ubah Auto-Reframe Speaker Tracking ← BARU!", isNew: true },
+              { cmd: "/subtitle", desc: "Info & preview style subtitle / caption burn-in ← BARU!", isNew: true },
               { cmd: "/introoutro", desc: "Info & ubah intro/outro config",        isNew: false },
               { cmd: "/niche",      desc: "Atur Custom Niche Prompt untuk AI Analysis ← BARU!", isNew: true },
               { cmd: "/dupfilter",  desc: "Info Duplicate/Repetitive Clip Filter ← BARU!", isNew: true },
@@ -1294,6 +1410,16 @@ export default async function HomePage() {
               { key: "AUTO_REFRAME_SMOOTHING", desc: "0.0-0.95 kehalusan gerakan crop (default: 0.8) ← BARU!", isNew: true },
               { key: "AUTO_REFRAME_PADDING", desc: "0.0-1.5 ruang ekstra di sekitar wajah (default: 0.35) ← BARU!", isNew: true },
               { key: "AUTO_REFRAME_FALLBACK_MODE", desc: "mode fallback kalau wajah tidak terdeteksi (default: crop) ← BARU!", isNew: true },
+              { section: "# === 💬 SUBTITLE / CAPTION BURN-IN (BARU!) ===" },
+              { key: "SUBTITLE_ENABLED", desc: "true | false — burn caption ke klip (default: true) ← BARU!", isNew: true },
+              { key: "SUBTITLE_STYLE", desc: "karaoke | word-highlight | simple | alex-hormozi (default: karaoke) ← BARU!", isNew: true },
+              { key: "SUBTITLE_FONT_SIZE", desc: "ukuran dasar font (default: 48) ← BARU!", isNew: true },
+              { key: "SUBTITLE_COLOR", desc: "warna teks: white | #FFFFFF (default: white) ← BARU!", isNew: true },
+              { key: "SUBTITLE_HIGHLIGHT_COLOR", desc: "warna kata aktif: yellow | #FFE500 (default: yellow) ← BARU!", isNew: true },
+              { key: "SUBTITLE_POSITION", desc: "bottom-center | center | top-center (default: bottom-center) ← BARU!", isNew: true },
+              { key: "SUBTITLE_MAX_WORDS_PER_LINE", desc: "1-8 kata per baris (default: 4) ← BARU!", isNew: true },
+              { key: "SUBTITLE_ANIMATION", desc: "pop | fade | none (default: pop) ← BARU!", isNew: true },
+              { key: "SUBTITLE_FONT", desc: "nama font (default: Montserrat) ← BARU!", isNew: true },
               { section: "# === THUMBNAIL ===" },
               { key: "THUMBNAIL_ENABLED", desc: "true | false (default: true)" },
               { key: "THUMBNAIL_MODE",    desc: "middle | best | start | custom (default: middle)" },

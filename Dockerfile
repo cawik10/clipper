@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     fonts-dejavu-core \
+    fonts-montserrat \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 

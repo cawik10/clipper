@@ -17,6 +17,10 @@ import { generateThumbnail } from "@/lib/thumbnail-generator";
 import { applyWatermark } from "@/lib/watermark";
 import { applyIntroOutro } from "@/lib/intro-outro";
 import { applyZoomEffect } from "@/lib/zoom-effect";
+// 💬 Subtitle / Caption Burn-In (BARU!) — import terpisah, tidak mengubah import lain.
+import { getSubtitleConfig } from "@/lib/subtitle-config";
+import type { TranscriptSegmentWithWords, TranscriptWord } from "@/lib/subtitle-config";
+import { applySubtitles, getClipWords } from "@/lib/subtitle-burner";
 import type { ClipResult } from "@/db/schema";
 // 🎯 Auto-Reframe Speaker Tracking (BARU!) — import terpisah, tidak
 // mengubah import/fitur lain di atas. Lihat src/lib/auto-reframe.ts +
@@ -106,7 +110,7 @@ export async function downloadVideo(
 export async function transcribeAudio(
   videoPath: string,
   language: string = "id"
-): Promise<{ start: number; end: number; text: string }[]> {
+): Promise<TranscriptSegmentWithWords[]> {
   ensureDir(TMP_DIR);
   const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
   const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
@@ -133,11 +137,46 @@ export async function transcribeAudio(
   }
 }
 
+// 💬 Subtitle (BARU!) — minta timestamp per kata hanya kalau fitur subtitle aktif,
+// supaya perilaku transkripsi lama tidak berubah saat SUBTITLE_ENABLED=false.
+type RawWord = { word?: string; text?: string; start: number; end: number };
+
+function attachWordsToSegments(
+  segments: { start: number; end: number; text: string }[],
+  rawWords: RawWord[] | undefined
+): TranscriptSegmentWithWords[] {
+  const result: TranscriptSegmentWithWords[] = segments.map((s) => ({
+    start: s.start,
+    end: s.end,
+    text: s.text.trim(),
+  }));
+  if (!rawWords || !rawWords.length || !result.length) return result;
+
+  for (const rw of rawWords) {
+    const text = (rw.word ?? rw.text ?? "").trim();
+    if (!text) continue;
+    const mid = (rw.start + rw.end) / 2;
+    let seg = result.find((s) => mid >= s.start - 0.05 && mid <= s.end + 0.05);
+    if (!seg) {
+      // pilih segmen terdekat
+      seg = result.reduce((best, s) => {
+        const d = Math.min(Math.abs(mid - s.start), Math.abs(mid - s.end));
+        const bd = Math.min(Math.abs(mid - best.start), Math.abs(mid - best.end));
+        return d < bd ? s : best;
+      }, result[0]);
+    }
+    const w: TranscriptWord = { start: rw.start, end: rw.end, text };
+    (seg.words ||= []).push(w);
+  }
+  return result;
+}
+
 async function transcribeWithOpenAI(
   audioPath: string,
   language: string,
   apiKey: string
-): Promise<{ start: number; end: number; text: string }[]> {
+): Promise<TranscriptSegmentWithWords[]> {
+  const wantWords = getSubtitleConfig().enabled;
   const OpenAI = (await import("openai")).default;
   const client = new OpenAI({ apiKey });
   const audioBuffer = fs.readFileSync(audioPath);
@@ -148,23 +187,21 @@ async function transcribeWithOpenAI(
     file,
     language: language === "id" ? "id" : language,
     response_format: "verbose_json",
-    timestamp_granularities: ["segment"],
+    timestamp_granularities: wantWords ? ["segment", "word"] : ["segment"],
   });
   const data = response as unknown as {
     segments?: { start: number; end: number; text: string }[];
+    words?: RawWord[];
   };
-  return (data.segments || []).map((s) => ({
-    start: s.start,
-    end: s.end,
-    text: s.text.trim(),
-  }));
+  return attachWordsToSegments(data.segments || [], wantWords ? data.words : undefined);
 }
 
 async function transcribeWithGroq(
   audioPath: string,
   language: string,
   apiKey: string
-): Promise<{ start: number; end: number; text: string }[]> {
+): Promise<TranscriptSegmentWithWords[]> {
+  const wantWords = getSubtitleConfig().enabled;
   const FormData = (await import("form-data")).default;
   const axios = (await import("axios")).default;
   const form = new FormData();
@@ -172,6 +209,10 @@ async function transcribeWithGroq(
   form.append("model", "whisper-large-v3");
   form.append("language", language);
   form.append("response_format", "verbose_json");
+  if (wantWords) {
+    form.append("timestamp_granularities[]", "segment");
+    form.append("timestamp_granularities[]", "word");
+  }
 
   const response = await axios.post(
     "https://api.groq.com/openai/v1/audio/transcriptions",
@@ -182,11 +223,7 @@ async function transcribeWithGroq(
     }
   );
   const segments = response.data?.segments || [];
-  return segments.map((s: { start: number; end: number; text: string }) => ({
-    start: s.start,
-    end: s.end,
-    text: s.text.trim(),
-  }));
+  return attachWordsToSegments(segments, wantWords ? response.data?.words : undefined);
 }
 
 // =====================================================================
@@ -197,7 +234,9 @@ export async function processClips(
   clips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[],
   jobId: string,
   makeVertical: boolean = true,
-  onProgress?: (clipIndex: number, total: number) => Promise<void>
+  onProgress?: (clipIndex: number, total: number) => Promise<void>,
+  // 💬 Subtitle (BARU!) — opsional; kalau tidak diisi, subtitle di-skip.
+  transcript?: TranscriptSegmentWithWords[]
 ): Promise<ClipResult[]> {
   ensureDir(TMP_DIR);
   const mode = makeVertical ? getAspectRatioMode() : "none";
@@ -206,7 +245,7 @@ export async function processClips(
   for (let i = 0; i < clips.length; i++) {
     if (onProgress) await onProgress(i, clips.length);
     try {
-      const result = await processSingleClip(videoPath, clips[i], mode, jobId, i);
+      const result = await processSingleClip(videoPath, clips[i], mode, jobId, i, transcript);
       results.push(result);
     } catch (err) {
       console.error(`[clip] ❌ Klip ${i} gagal:`, err);
@@ -227,7 +266,8 @@ async function processSingleClip(
   clip: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">,
   mode: ReturnType<typeof getAspectRatioMode>,
   jobId: string,
-  clipIndex: number
+  clipIndex: number,
+  transcript?: TranscriptSegmentWithWords[]
 ): Promise<ClipResult> {
   // Step 1: Cut + convert to 9:16
   const cutPath = path.join(TMP_DIR, `clip_cut_${jobId}_${clipIndex}.mp4`);
@@ -243,7 +283,23 @@ async function processSingleClip(
   } else {
     console.log(`[clip] ⏭ Step 2/4 Zoom skipped: ${zoomResult.reason}`);
   }
-  const afterZoom = zoomResult.applied ? zoomPath : cutPath;
+  const afterZoomRaw = zoomResult.applied ? zoomPath : cutPath;
+
+  // Step 2b: 💬 Subtitle / Caption Burn-In (BARU!) — setelah zoom (caption tidak ikut
+  // ter-zoom) & sebelum watermark/intro-outro. Gagal/dimatikan → klip lanjut apa adanya.
+  const subPath = path.join(TMP_DIR, `clip_sub_${jobId}_${clipIndex}.mp4`);
+  const subResult = await applySubtitles(
+    afterZoomRaw,
+    subPath,
+    getClipWords(transcript, clip.startTime, clip.endTime)
+  );
+  if (subResult.applied) {
+    console.log(`[clip] ✅ Subtitle (${subResult.wordCount} kata): klip ${clipIndex}`);
+    try { fs.unlinkSync(afterZoomRaw); } catch { /* ignore */ }
+  } else {
+    console.log(`[clip] ⏭ Subtitle skipped (${subResult.reason})`);
+  }
+  const afterZoom = subResult.applied ? subPath : afterZoomRaw;
 
   // Step 3: Watermark
   const wmPath = path.join(TMP_DIR, `clip_wm_${jobId}_${clipIndex}.mp4`);

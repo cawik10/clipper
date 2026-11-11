@@ -12,6 +12,7 @@ import {
 } from "@/lib/youtube-uploader";
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
 import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
+import type { TranscriptSegmentWithWords } from "@/lib/subtitle-config"; // 💬 Subtitle (BARU!)
 import fs from "fs";
 
 // `meta.step` memetakan update ke step real-time progress Telegram (lihat
@@ -132,7 +133,7 @@ export async function processClipsOnly(
       .where(eq(clipJobs.jobId, jobId));
     await update("analyzing", "🎙️ Mentranskripsi audio...", { step: "transcribing" });
 
-    let transcript: { start: number; end: number; text: string }[] = [];
+    let transcript: TranscriptSegmentWithWords[] = [];
     try {
       transcript = await transcribeAudio(downloadResult.filePath, settings.language || "id");
     } catch (err) {
@@ -222,7 +223,9 @@ export async function processClipsOnly(
           `✂️ Memproses klip ${clipIndex + 1}/${total}... (Zoom + Watermark + Intro/Outro)`,
           { step: "clipping", percent: Math.round(((clipIndex + 1) / total) * 100) }
         );
-      }
+      },
+      // 💬 Subtitle (BARU!) — transkrip + timestamp per kata untuk caption burn-in
+      transcript
     );
 
     const thumbnailCount = processedClips.filter((c) => c.thumbnailPath).length;
