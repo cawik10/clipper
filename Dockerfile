@@ -13,11 +13,11 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Unduh dan install font Montserrat secara manual
+# Unduh file TTF Montserrat statis secara langsung dari GitHub resmi Google Fonts
 RUN mkdir -p /usr/share/fonts/truetype/montserrat && \
-    curl -L -o /tmp/montserrat.zip "https://fonts.google.com/download?family=Montserrat" && \
-    unzip -o /tmp/montserrat.zip -d /usr/share/fonts/truetype/montserrat && \
-    rm /tmp/montserrat.zip && \
+    curl -L -o /usr/share/fonts/truetype/montserrat/Montserrat-Regular.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/static/Montserrat-Regular.ttf" && \
+    curl -L -o /usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/static/Montserrat-Bold.ttf" && \
+    curl -L -o /usr/share/fonts/truetype/montserrat/Montserrat-Black.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/static/Montserrat-Black.ttf" && \
     fc-cache -fv
 
 # Instal Deno (sekarang akan berhasil karena unzip sudah tersedia)
