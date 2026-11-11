@@ -1,6 +1,6 @@
 FROM node:20-bookworm-slim AS base
 
-# Tambahkan 'unzip' ke dalam daftar paket
+# Hapus fonts-montserrat dari daftar, dan tambahkan fontconfig
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     python3 \
@@ -9,9 +9,16 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     fonts-dejavu-core \
-    fonts-montserrat \
+    fontconfig \
     unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Unduh dan install font Montserrat secara manual
+RUN mkdir -p /usr/share/fonts/truetype/montserrat && \
+    curl -L -o /tmp/montserrat.zip "https://fonts.google.com/download?family=Montserrat" && \
+    unzip -o /tmp/montserrat.zip -d /usr/share/fonts/truetype/montserrat && \
+    rm /tmp/montserrat.zip && \
+    fc-cache -fv
 
 # Instal Deno (sekarang akan berhasil karena unzip sudah tersedia)
 RUN curl -fsSL https://deno.land/x/install/install.sh | sh
