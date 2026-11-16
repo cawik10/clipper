@@ -39,6 +39,7 @@ Dashboard web menampilkan statistik job, konfigurasi fitur (jumlah klip, durasi 
 | 💧 **Watermark Custom** | Teks atau logo pada setiap klip, posisi & gaya dapat diatur |
 | 🔍 **Zoom Effect** | Efek zoom otomatis pada momen dengan viral score tinggi |
 | 💬 **Subtitle / Caption Burn-In** | Caption burned-in dari transkripsi Whisper (timestamp per kata): `karaoke`, `word-highlight`, `simple`, `alex-hormozi` |
+| 🪝 **AI Hook Overlay** | AI membuat teks hook di 1-2 detik pertama klip (`HOOK_*`), dirender via FFmpeg `drawtext`; style `bold-center` / `top-bar` / `split` |
 | 🎬 **Intro/Outro** | Tambahan intro & outro otomatis di setiap klip |
 | 🖼 **Thumbnail Generator** | Generate thumbnail otomatis dari frame klip |
 | 📐 **Aspect Ratio 9:16** | Mode blur background, center crop, black bars, stretch, atau original |
@@ -139,6 +140,7 @@ curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
 | `CLIP_DURATION` | ⚪ | Durasi klip tetap: `15`, `20`, `30`, `40`, atau `60` detik (default `30`) |
 | `WATERMARK_ENABLED` / `WATERMARK_TEXT` / `WATERMARK_POSITION` | ⚪ | Pengaturan watermark klip |
 | `ZOOM_EFFECT_ENABLED` / `ZOOM_EFFECT_MODE` / `ZOOM_EFFECT_TYPE` | ⚪ | Pengaturan efek zoom otomatis |
+| `HOOK_ENABLED` / `HOOK_DURATION` / `HOOK_STYLE` / `HOOK_FONT_SIZE` / `HOOK_COLOR` / `HOOK_BG_COLOR` | ⚪ | AI Hook Overlay (default: `true` / `2` / `bold-center` / `56` / `white` / `#FF0000`) |
 | `INTRO_ENABLED` / `OUTRO_ENABLED` | ⚪ | Pengaturan intro & outro otomatis |
 | `THUMBNAIL_ENABLED` / `THUMBNAIL_MODE` | ⚪ | Pengaturan thumbnail otomatis |
 | `ASPECT_RATIO_MODE` | ⚪ | `blur` \| `crop` \| `pad` \| `stretch` \| `none` (default `blur`) |
@@ -166,6 +168,7 @@ curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
 /watermark        - Info & ubah konfigurasi watermark
 /zoom             - Info & ubah konfigurasi zoom effect
 /subtitle         - Info config subtitle + preview style (mis. /subtitle karaoke)
+/hook             - Info AI Hook Overlay (teks pembuka)
 /introoutro       - Info & ubah konfigurasi intro/outro
 /drive            - Google Drive: status, hubungkan, ganti akun
 /drivefolder      - Ganti folder tujuan Drive (link / reset)

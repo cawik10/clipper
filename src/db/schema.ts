@@ -313,6 +313,10 @@ export interface ClipResult {
   tags: string[];
   viralScore: number;
   reason: string;
+  // 🪝 AI Hook Overlay (BARU!) — teks pembuka 1-2 detik pertama, di-generate AI
+  // bersamaan dengan analisis momen. Opsional & disimpan di jsonb `clips`
+  // (tidak perlu migrasi). Lihat src/lib/hook-config.ts.
+  hook?: string;
   filePath?: string;
   thumbnailPath?: string;
   youtubeVideoId?: string;

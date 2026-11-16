@@ -68,6 +68,8 @@ import {
   type SubtitleAnimation,
 } from "@/lib/subtitle-config";
 import { renderSubtitlePreview } from "@/lib/subtitle-burner";
+// 🪝 AI Hook Overlay (BARU!) — import terpisah, tidak mengubah import di atas.
+import { getHookConfig, HOOK_STYLES, HOOK_STYLE_PRESETS, getHookStyleLabel } from "@/lib/hook-config";
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import {
   addMonitor,
@@ -628,6 +630,34 @@ bot.callbackQuery(new RegExp(`^sub_prev_(${SUBTITLE_STYLES.join("|")})$`), async
   const style = ctx.match[1] as SubtitleStyle;
   await ctx.answerCallbackQuery({ text: `Membuat preview ${style}...` });
   await sendSubtitlePreview(ctx, style);
+});
+
+// 🪝 AI Hook Overlay (BARU!) — command info terpisah. Konfigurasi lengkap:
+// src/lib/hook-config.ts (env var HOOK_*), renderer: src/lib/hook-overlay.ts
+bot.command("hook", async (ctx) => {
+  const cfg = getHookConfig();
+  await ctx.reply(
+    `🪝 *AI Hook Overlay (Teks Pembuka):*\n\n` +
+    `Status: ${cfg.enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+    `Style: *${getHookStyleLabel(cfg.style)}* (\`${cfg.style}\`)\n` +
+    `Durasi: ${cfg.duration} detik pertama\n` +
+    `Font: ${cfg.fontSize}px • Warna: \`${cfg.color}\` • Latar: \`${cfg.bgColor}\`\n\n` +
+    `*Style tersedia:*\n` +
+    HOOK_STYLES.map((st) => `• \`${st}\` → ${HOOK_STYLE_PRESETS[st].description}`).join("\n") +
+    `\n\n*Contoh hook AI:*\n` +
+    `• "Kamu gak akan percaya apa yang terjadi selanjutnya..."\n` +
+    `• "99% orang salah soal ini!"\n` +
+    `• "Ini rahasia yang CEO gak mau kamu tahu"\n\n` +
+    `*Cara Ubah (Railway Variables):*\n` +
+    `• \`HOOK_ENABLED\` = \`true\` / \`false\`\n` +
+    `• \`HOOK_DURATION\` = detik (default: 2)\n` +
+    `• \`HOOK_STYLE\` = ${HOOK_STYLES.map((x) => `\`${x}\``).join(" | ")}\n` +
+    `• \`HOOK_FONT_SIZE\` = ukuran font (default: 56)\n` +
+    `• \`HOOK_COLOR\` = \`white\` / \`#FFFFFF\`\n` +
+    `• \`HOOK_BG_COLOR\` = \`#FF0000\`\n\n` +
+    `ℹ️ Hook dibuat AI bersamaan dengan analisis momen viral, lalu di-render ke video lewat FFmpeg.`,
+    { parse_mode: "Markdown" }
+  );
 });
 
 bot.command("introoutro", async (ctx) => {

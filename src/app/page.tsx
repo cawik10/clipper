@@ -45,6 +45,8 @@ import {
   STYLE_PRESETS,
   colorToHex,
 } from "@/lib/subtitle-config";
+// 🪝 AI Hook Overlay (BARU!) — komponen section terpisah.
+import HookOverlaySection from "@/components/HookOverlaySection";
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getChannelMonitorStats } from "@/lib/channel-monitor";
 import {
@@ -1241,6 +1243,9 @@ export default async function HomePage() {
           </div>
         </section>
 
+        {/* 🪝 AI HOOK OVERLAY — TEKS PEMBUKA (FITUR BARU!) — lihat src/components/HookOverlaySection.tsx */}
+        <HookOverlaySection />
+
         {/* ══════════════════════════════════════════════════════════
             PIPELINE FLOW
         ══════════════════════════════════════════════════════════ */}
@@ -1322,6 +1327,7 @@ export default async function HomePage() {
               { cmd: "/zoom",       desc: "Info & ubah zoom effect config",        isNew: false },
               { cmd: "/autoreframe", desc: "Info & ubah Auto-Reframe Speaker Tracking ← BARU!", isNew: true },
               { cmd: "/subtitle", desc: "Info & preview style subtitle / caption burn-in ← BARU!", isNew: true },
+              { cmd: "/hook", desc: "Info AI Hook Overlay (teks pembuka) ← BARU!", isNew: true },
               { cmd: "/introoutro", desc: "Info & ubah intro/outro config",        isNew: false },
               { cmd: "/niche",      desc: "Atur Custom Niche Prompt untuk AI Analysis ← BARU!", isNew: true },
               { cmd: "/dupfilter",  desc: "Info Duplicate/Repetitive Clip Filter ← BARU!", isNew: true },
@@ -1420,6 +1426,14 @@ export default async function HomePage() {
               { key: "SUBTITLE_MAX_WORDS_PER_LINE", desc: "1-8 kata per baris (default: 4) ← BARU!", isNew: true },
               { key: "SUBTITLE_ANIMATION", desc: "pop | fade | none (default: pop) ← BARU!", isNew: true },
               { key: "SUBTITLE_FONT", desc: "nama font (default: Montserrat) ← BARU!", isNew: true },
+              { section: "# === 🪝 AI HOOK OVERLAY — TEKS PEMBUKA (BARU!) ===" },
+              { key: "HOOK_ENABLED", desc: "true | false — teks hook di awal klip (default: true) ← BARU!", isNew: true },
+              { key: "HOOK_DURATION", desc: "detik hook tampil, 0.5-5 (default: 2) ← BARU!", isNew: true },
+              { key: "HOOK_STYLE", desc: "bold-center | top-bar | split (default: bold-center) ← BARU!", isNew: true },
+              { key: "HOOK_FONT_SIZE", desc: "ukuran font px (default: 56) ← BARU!", isNew: true },
+              { key: "HOOK_COLOR", desc: "warna teks: white | #FFFFFF (default: white) ← BARU!", isNew: true },
+              { key: "HOOK_BG_COLOR", desc: "warna latar/bar: #FF0000 (default: #FF0000) ← BARU!", isNew: true },
+              { key: "HOOK_FONT", desc: "nama font (default: Montserrat) ← BARU!", isNew: true },
               { section: "# === THUMBNAIL ===" },
               { key: "THUMBNAIL_ENABLED", desc: "true | false (default: true)" },
               { key: "THUMBNAIL_MODE",    desc: "middle | best | start | custom (default: middle)" },

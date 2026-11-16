@@ -27,6 +27,7 @@ import type { ClipResult } from "@/db/schema";
 // src/lib/reframe-config.ts untuk detail & cara ganti/konfigurasi.
 import { getAutoReframeConfig } from "@/lib/reframe-config";
 import { buildReframeFilter } from "@/lib/auto-reframe";
+import { applyHookOverlay } from "@/lib/hook-overlay"; // 🪝 AI Hook Overlay (BARU!)
 
 const execAsync = promisify(exec);
 
@@ -299,7 +300,20 @@ async function processSingleClip(
   } else {
     console.log(`[clip] ⏭ Subtitle skipped (${subResult.reason})`);
   }
-  const afterZoom = subResult.applied ? subPath : afterZoomRaw;
+  const afterSub = subResult.applied ? subPath : afterZoomRaw;
+
+  // Step 2c: 🪝 AI Hook Overlay (BARU!) — teks pembuka 1-2 detik pertama (hasil AI,
+  // lihat src/lib/hook-config.ts). Sebelum watermark & intro/outro supaya t=0 = awal
+  // klip. Gagal/dimatikan/tanpa hook → klip lanjut apa adanya.
+  const hookPath = path.join(TMP_DIR, `clip_hook_${jobId}_${clipIndex}.mp4`);
+  const hookResult = await applyHookOverlay(afterSub, hookPath, clip.hook);
+  if (hookResult.applied) {
+    console.log(`[clip] ✅ Hook overlay: klip ${clipIndex} → "${clip.hook}"`);
+    try { fs.unlinkSync(afterSub); } catch { /* ignore */ }
+  } else {
+    console.log(`[clip] ⏭ Hook overlay skipped (${hookResult.reason})`);
+  }
+  const afterZoom = hookResult.applied ? hookPath : afterSub;
 
   // Step 3: Watermark
   const wmPath = path.join(TMP_DIR, `clip_wm_${jobId}_${clipIndex}.mp4`);

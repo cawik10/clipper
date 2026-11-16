@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { ClipResult } from "@/db/schema";
 import { getMaxClipsConfig } from "@/lib/video-config";
 import { buildNicheInstruction } from "@/lib/niche-prompt";
+import { getHookConfig, sanitizeHookText, buildFallbackHook } from "@/lib/hook-config"; // 🪝 AI Hook Overlay (BARU!)
 
 function getOpenAIClient(): OpenAI | null {
   if (process.env.OPENAI_API_KEY) {
@@ -42,6 +43,13 @@ export async function analyzeVideoForClips(
 
   const nicheInstruction = buildNicheInstruction(nichePrompt);
 
+  // 🪝 AI Hook Overlay (BARU!) — instruksi hook ditambahkan ke prompt yang sama
+  // (tanpa panggilan AI tambahan). Kosong kalau HOOK_ENABLED=false, sehingga
+  // prompt persis seperti sebelumnya.
+  const hookCfg = getHookConfig();
+  const hookInstruction = hookCfg.enabled ? buildHookPromptInstruction(hookCfg.duration, hookCfg.maxChars) : "";
+  const hookJsonField = hookCfg.enabled ? `,\n    "hook": "<teks hook pembuka, max ${hookCfg.maxChars} karakter>"` : "";
+
   const prompt = `Kamu adalah ahli konten viral YouTube Shorts. Analisis transkrip video berikut dan temukan ${maxClips} momen terbaik yang berpotensi viral.
 
 INFORMASI VIDEO:
@@ -68,7 +76,7 @@ INSTRUKSI:
 - Buat judul YouTube Shorts yang menarik (max 70 karakter)
 - Buat deskripsi singkat (max 150 karakter)
 - Berikan tags relevan (5-10 tags)
-
+${hookInstruction}
 Output JSON array (tanpa markdown):
 [
   {
@@ -80,7 +88,7 @@ Output JSON array (tanpa markdown):
     "description": "<deskripsi singkat>",
     "tags": ["tag1", "tag2"],
     "viralScore": <1-10>,
-    "reason": "<alasan mengapa viral>"
+    "reason": "<alasan mengapa viral>"${hookJsonField}
   }
 ]`;
 
@@ -178,6 +186,7 @@ function fallbackAnalysis(
         tags: generateTags("", title),
         viralScore: 6,
         reason: "Dipilih berdasarkan distribusi merata (tidak ada transkrip)",
+        hook: resolveHook(undefined, title, i), // 🪝 AI Hook Overlay (BARU!)
       });
     }
     return clips;
@@ -209,6 +218,7 @@ function fallbackAnalysis(
       tags: generateTags(segText, title),
       viralScore: seg.score,
       reason: "Dipilih berdasarkan analisis konten transkrip",
+      hook: resolveHook(undefined, title, i), // 🪝 AI Hook Overlay (BARU!)
     });
   });
 
@@ -308,9 +318,34 @@ function validateAndFixClips(
         tags: Array.isArray(clip.tags) ? clip.tags : ["shorts"],
         viralScore: Number(clip.viralScore) || 7,
         reason: clip.reason || "AI-selected moment",
+        // 🪝 AI Hook Overlay (BARU!)
+        hook: resolveHook(clip.hook, clip.title, i),
       };
     })
     .slice(0, limit);
+}
+
+// ─── 🪝 AI Hook Overlay (BARU!) ───────────────────────────────────────────
+function buildHookPromptInstruction(duration: number, maxChars: number): string {
+  return `
+HOOK PEMBUKA (teks overlay yang muncul ${duration} detik pertama klip):
+- Untuk SETIAP klip, buat satu teks "hook" yang membuat penonton berhenti scroll dan penasaran
+- Maksimal ${maxChars} karakter, 1 kalimat singkat, bahasa santai sesuai bahasa video (Indonesia: pakai "kamu/gak", bukan bahasa baku)
+- Harus relevan dengan isi klip tersebut — jangan menjanjikan sesuatu yang tidak ada di klip
+- Gunakan teknik: rasa penasaran, angka/statistik mengejutkan, klaim berani, atau rahasia
+- Tanpa emoji, tanpa hashtag, tanpa tanda kutip
+- Contoh gaya: "Kamu gak akan percaya apa yang terjadi selanjutnya...", "99% orang salah soal ini!", "Ini rahasia yang CEO gak mau kamu tahu"
+`;
+}
+
+/** Hook dari AI (dibersihkan) → kalau kosong & HOOK_FALLBACK=true, buat dari judul klip. */
+function resolveHook(raw: unknown, title: string | undefined, index: number): string | undefined {
+  const cfg = getHookConfig();
+  if (!cfg.enabled) return undefined;
+  const cleaned = sanitizeHookText(raw, cfg.maxChars);
+  if (cleaned) return cleaned;
+  if (cfg.fallbackFromTitle) return buildFallbackHook(title || "", index) || undefined;
+  return undefined;
 }
 
 function generateTitle(text: string, videoTitle: string, index: number): string {
