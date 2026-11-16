@@ -24,6 +24,7 @@ Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pend
 🧹 Duplicate/Repetitive Clip Filter — hindari klip mirip saat video sama diproses ulang ✨ Baru!
 🗓 Scheduler / Queue Posting — jadwalkan upload otomatis sesuai niche ✨ Baru!
 📡 Auto-Monitor — potong otomatis dari channel/playlist ✨ Baru Hot!
+🪝 AI Hook Overlay (teks pembuka) ✨ Baru Hot!
 
 *Perintah:*
 /start - Menu utama
