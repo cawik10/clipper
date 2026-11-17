@@ -43,6 +43,7 @@ Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pend
 /thumbnail - Info thumbnail config
 /mode - Info aspect ratio
 /niche - Atur Custom Niche Prompt untuk AI Analysis ✨ Baru!
+/analytics - Laporan performa klip + AI Smart Learning ✨ Baru!
 /dupfilter - Info Duplicate/Repetitive Clip Filter ✨ Baru!
 /jadwal - Lihat & batalkan antrean jadwal upload ✨ Baru!
 /monitor <link> - Pantau channel/playlist ✨ Baru!
@@ -83,6 +84,7 @@ Kirim link video untuk mulai! 🎬`,
 /hook - Info AI Hook Overlay (teks pembuka)
 /introoutro - Info intro/outro config
 /niche - Atur Custom Niche Prompt (fokus AI Analysis) ✨ Baru!
+/analytics - Laporan performa klip + AI Smart Learning ✨ Baru!
 /dupfilter - Info Duplicate/Repetitive Clip Filter (anti klip mirip/berulang) ✨ Baru!
 /jadwal - Lihat antrean jadwal upload otomatis ✨ Baru!
 

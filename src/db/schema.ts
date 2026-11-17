@@ -303,6 +303,76 @@ export const monitoredChannelVideos = pgTable("monitored_channel_videos", {
 export type MonitoredChannelRow = typeof monitoredChannels.$inferSelect;
 export type MonitoredChannelVideoRow = typeof monitoredChannelVideos.$inferSelect;
 
+// =====================================================================
+// 📈 AI ANALYTICS & FEEDBACK LOOP (BARU!)
+// =====================================================================
+// Tabel tambahan — TIDAK mengubah tabel/kolom yang sudah ada, jadi dashboard
+// web & alur job lama tidak terpengaruh. Tabel ini juga dibuat otomatis saat
+// runtime (src/lib/analytics-store.ts → ensureAnalyticsTables) sehingga di
+// Railway tidak wajib menjalankan `drizzle-kit push`.
+// Konfigurasi lengkap: src/lib/analytics-config.ts (semua via Railway Variables).
+
+// Satu baris per klip yang sudah diupload ke YouTube + statistik terbarunya.
+export const clipPerformance = pgTable("clip_performance", {
+  id: serial("id").primaryKey(),
+  youtubeVideoId: text("youtube_video_id").notNull().unique(),
+  jobId: text("job_id").notNull(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  clipIndex: integer("clip_index"),
+  title: text("title").notNull(),
+  niche: text("niche").notNull().default("Umum"), // label niche hasil klasifikasi
+  viralScore: integer("viral_score"),
+  duration: integer("duration"),
+  hook: text("hook"),
+  sourceTitle: text("source_title"),
+  views: integer("views").notNull().default(0),
+  likes: integer("likes").notNull().default(0),
+  comments: integer("comments").notNull().default(0),
+  // views saat laporan mingguan terakhir → dipakai menghitung pertumbuhan mingguan
+  viewsBaseline: integer("views_baseline").notNull().default(0),
+  statsSource: text("stats_source"), // api | manual
+  lastSyncedAt: timestamp("last_synced_at"),
+  syncError: text("sync_error"),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Preferensi & hasil belajar AI per user Telegram.
+export const analyticsUserState = pgTable("analytics_user_state", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull().unique(),
+  telegramChatId: text("telegram_chat_id"),
+  weeklyReportEnabled: boolean("weekly_report_enabled").notNull().default(true),
+  learningEnabled: boolean("learning_enabled").notNull().default(true),
+  // Prompt hasil belajar yang AKTIF dipakai sebagai pengganti DEFAULT_NICHE_PROMPT.
+  learnedPrompt: text("learned_prompt"),
+  learnedInsights: text("learned_insights"), // JSON array string
+  learnedAt: timestamp("learned_at"),
+  learnedSampleSize: integer("learned_sample_size"),
+  lastReportKey: text("last_report_key"), // mis. tanggal lokal laporan → cegah kirim ganda
+  lastReportAt: timestamp("last_report_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Riwayat proses belajar (audit + bahan tampilan dashboard).
+export const analyticsLearningLog = pgTable("analytics_learning_log", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  previousPrompt: text("previous_prompt"),
+  newPrompt: text("new_prompt").notNull(),
+  insights: text("insights"), // JSON array string
+  sampleSize: integer("sample_size").notNull().default(0),
+  topNiche: text("top_niche"),
+  method: text("method").notNull().default("ai"), // ai | heuristic
+  applied: boolean("applied").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ClipPerformanceRow = typeof clipPerformance.$inferSelect;
+export type AnalyticsUserStateRow = typeof analyticsUserState.$inferSelect;
+export type AnalyticsLearningLogRow = typeof analyticsLearningLog.$inferSelect;
+
 export interface ClipResult {
   index: number;
   startTime: number;

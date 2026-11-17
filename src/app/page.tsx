@@ -47,6 +47,8 @@ import {
 } from "@/lib/subtitle-config";
 // 🪝 AI Hook Overlay (BARU!) — komponen section terpisah.
 import HookOverlaySection from "@/components/HookOverlaySection";
+// 📈 AI Analytics & Feedback Loop (BARU!) — komponen section terpisah.
+import AnalyticsSection from "@/components/AnalyticsSection";
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getChannelMonitorStats } from "@/lib/channel-monitor";
 import {
@@ -1245,6 +1247,9 @@ export default async function HomePage() {
 
         {/* 🪝 AI HOOK OVERLAY — TEKS PEMBUKA (FITUR BARU!) — lihat src/components/HookOverlaySection.tsx */}
         <HookOverlaySection />
+
+        {/* 📈 AI ANALYTICS & FEEDBACK LOOP (FITUR BARU!) — lihat src/components/AnalyticsSection.tsx */}
+        <AnalyticsSection />
 
         {/* ══════════════════════════════════════════════════════════
             PIPELINE FLOW

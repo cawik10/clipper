@@ -215,6 +215,55 @@ Mengubah tampilan/menambah style: edit `STYLE_PRESETS` di `src/lib/subtitle-conf
 
 ---
 
+## 📈 AI Analytics & Feedback Loop (Bot yang Makin Pintar)
+
+Bot melacak performa tiap klip yang diupload ke YouTube, mengirim **laporan mingguan** ke Telegram, lalu AI **belajar dari klip yang sukses** dan otomatis menyesuaikan arahan niche (pengganti `DEFAULT_NICHE_PROMPT`) untuk klip berikutnya.
+
+**Perintah Telegram**
+
+```
+/analytics                 - Laporan: klip View terbanyak + niche penghasil penonton terbanyak
+/analytics 30              - Laporan untuk klip 30 hari terakhir
+/analytics sync            - Tarik views terbaru dari YouTube sekarang
+/analytics learn           - Suruh AI belajar dari klip sukses sekarang
+/analytics apply           - Terapkan hasil belajar (jika ANALYTICS_LEARNING_AUTO_APPLY=false)
+/analytics reset           - Hapus hasil belajar (kembali ke DEFAULT_NICHE_PROMPT)
+/analytics weekly on|off   - Laporan mingguan otomatis
+/analytics learning on|off - Smart Learning Loop
+/analytics views <id> <n>  - Isi views manual (video private yang tak terbaca API)
+```
+
+**Cara kerja Smart Learning Loop:** klip dengan views tertinggi (default 30% teratas) dibandingkan dengan yang terendah → AI (Gemini/Groq, lihat `src/lib/ai-provider.ts`) menulis arahan niche baru → dipakai otomatis di analisis video berikutnya untuk akun yang belum mengatur `/niche` sendiri. Niche kustom user **tidak pernah ditimpa**. Kalau AI tidak tersedia, dipakai heuristik non-AI.
+
+**Konfigurasi (Railway Variables — semuanya opsional):**
+
+| Variable | Default | Deskripsi |
+| --- | --- | --- |
+| `ANALYTICS_ENABLED` | true | Matikan/nyalakan seluruh fitur |
+| `ANALYTICS_WEEKLY_REPORT_ENABLED` | true | Laporan mingguan otomatis |
+| `ANALYTICS_REPORT_DAY` / `ANALYTICS_REPORT_HOUR` | monday / 8 | Jadwal laporan |
+| `ANALYTICS_TIMEZONE` | ikut `SCHEDULER_TIMEZONE` (Asia/Jakarta) | Zona waktu jadwal |
+| `ANALYTICS_SYNC_INTERVAL_MINUTES` | 180 | Jeda tarik views dari YouTube |
+| `ANALYTICS_WORKER_INTERVAL_MINUTES` | 15 | Seberapa sering worker bangun |
+| `ANALYTICS_TRACK_DAYS` | 90 | Lama klip dilacak |
+| `ANALYTICS_TOP_CLIPS` / `ANALYTICS_TOP_NICHES` | 5 / 5 | Jumlah baris di laporan |
+| `ANALYTICS_LEARNING_ENABLED` | true | Smart Learning Loop |
+| `ANALYTICS_LEARNING_AUTO_APPLY` | true | false = harus `/analytics apply` dulu |
+| `ANALYTICS_LEARNING_MIN_CLIPS` | 5 | Minimal klip ber-data sebelum AI belajar |
+| `ANALYTICS_LEARNING_TOP_PERCENT` | 30 | % klip teratas dianggap sukses |
+| `ANALYTICS_LEARNING_MIN_VIEWS` | 10 | Views minimal klip sukses |
+| `ANALYTICS_LEARNING_INTERVAL_DAYS` | 7 | Jeda minimal belajar otomatis |
+| `ANALYTICS_LEARNED_PROMPT_MAX_LENGTH` | 300 | Batas panjang prompt hasil belajar |
+| `ANALYTICS_REQUEST_READONLY_SCOPE` | true | Minta izin `youtube.readonly` saat `/connect` |
+| `YOUTUBE_API_KEY` | – | Fallback baca views video public/unlisted |
+
+> 🔑 **Penting:** klip diupload sebagai *private draft*, sehingga membaca views-nya butuh izin `youtube.readonly`. Akun yang sudah terhubung perlu mengirim `/connect` sekali lagi. Alternatif: ubah privasi video jadi public/unlisted + set `YOUTUBE_API_KEY`, atau isi manual lewat `/analytics views`.
+
+Tabel `clip_performance`, `analytics_user_state`, `analytics_learning_log` dibuat **otomatis** saat runtime (tidak perlu `drizzle-kit push`). Pemicu manual/cron: `GET /api/analytics/run?secret=<SETUP_SECRET>[&action=sync|report|learn&userId=...]`.
+Kata kunci klasifikasi niche & semua default ada di `src/lib/analytics-config.ts`; format laporan di `src/lib/analytics-report.ts`.
+
+---
+
 ## 🚂 Deployment
 
 Proyek ini sudah **live di Railway**: **https://cawik-clipper.up.railway.app/**

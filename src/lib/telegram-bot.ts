@@ -44,6 +44,8 @@ import {
   isDriveConfigured,
 } from "@/lib/drive-uploader";
 import { setNichePrompt, clearNichePrompt } from "@/lib/user-settings";
+// 📈 AI Analytics & Feedback Loop (BARU!) — import terpisah, tidak mengubah import di atas.
+import { registerAnalyticsCommands } from "@/lib/analytics-telegram";
 import { NICHE_PRESETS, getNichePromptLabel, getDefaultNichePrompt } from "@/lib/niche-prompt";
 import {
   getDuplicateFilterConfig,
@@ -374,6 +376,10 @@ bot.callbackQuery("niche_menu", async (ctx) => {
   await ctx.answerCallbackQuery();
   await sendNicheMenu(ctx);
 });
+
+// 📈 AI Analytics & Feedback Loop (BARU!) — /analytics (laporan performa + Smart Learning).
+// Lihat src/lib/analytics-telegram.ts. Dimatikan lewat ANALYTICS_ENABLED=false.
+registerAnalyticsCommands(bot);
 
 // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — info read-only, konfigurasi
 // via Railway Variables. Lihat src/lib/duplicate-filter-config.ts.

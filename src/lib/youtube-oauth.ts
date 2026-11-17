@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import { shouldRequestReadonlyScope } from "@/lib/analytics-config";
 
 function getOAuthClient() {
   return new google.auth.OAuth2(
@@ -12,7 +13,14 @@ export function getAuthUrl(userId: string): string {
   const oauth2Client = getOAuthClient();
   return oauth2Client.generateAuthUrl({
     access_type: "offline",
-    scope: ["https://www.googleapis.com/auth/youtube.upload"],
+    // 📈 AI Analytics (BARU!) — scope baca-saja ditambahkan supaya views video
+    // private/draft bisa dilacak. Matikan: ANALYTICS_REQUEST_READONLY_SCOPE=false
+    scope: shouldRequestReadonlyScope()
+      ? [
+          "https://www.googleapis.com/auth/youtube.upload",
+          "https://www.googleapis.com/auth/youtube.readonly",
+        ]
+      : ["https://www.googleapis.com/auth/youtube.upload"],
     state: userId,
     prompt: "consent",
   });

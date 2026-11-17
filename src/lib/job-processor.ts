@@ -5,6 +5,8 @@ import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-proces
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
 import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
 import { getDefaultNichePrompt } from "@/lib/niche-prompt";
+// 📈 AI Analytics & Feedback Loop (BARU!) — import terpisah.
+import { resolveNichePromptForJob } from "@/lib/analytics-learning";
 import {
   uploadClipsToYouTube,
   isTokenExpired,
@@ -162,7 +164,9 @@ export async function processClipsOnly(
         effectiveMaxDuration,
         effectiveClipDuration,
         // 🎯 Custom Niche Prompt (BARU!) — arahan khusus per-akun untuk AI Analysis
-        settings.nichePrompt
+        // 📈 Smart Learning Loop (BARU!) — kalau user memakai default, prompt hasil
+        // belajar AI dari klip sukses dipakai menggantikan DEFAULT_NICHE_PROMPT.
+        await resolveNichePromptForJob(job.telegramUserId, settings.nichePrompt)
       );
     } catch (err) {
       throw new Error(`Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`);

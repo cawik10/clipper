@@ -16,5 +16,10 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { startChannelMonitorWorker } = await import("@/lib/channel-monitor-worker");
     startChannelMonitorWorker();
+
+    // 📈 AI Analytics & Feedback Loop (BARU!) — sync views, laporan mingguan,
+    // Smart Learning. Mati otomatis kalau ANALYTICS_ENABLED=false.
+    const { startAnalyticsWorker } = await import("@/lib/analytics-worker");
+    startAnalyticsWorker();
   }
 }
