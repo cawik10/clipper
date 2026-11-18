@@ -33,6 +33,10 @@
  *   ANALYTICS_REQUEST_READONLY_SCOPE=true     // minta izin youtube.readonly saat /connect
  *                                             // (dibutuhkan untuk membaca views video private)
  *
+ * 🩺 AUTO-TITLE DOCTOR (bagian dari loop ini): klip tayang > 24 jam dengan views
+ *    rendah otomatis dapat judul & hashtag baru dari AI. Semua env-nya ada di
+ *    src/lib/auto-title-doctor-config.ts (saklar: ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true).
+ *
  * Preset niche & kata kunci klasifikasi ada di `NICHE_KEYWORDS` di bawah —
  * niche baru yang ditambahkan ke NICHE_PRESETS (src/lib/niche-prompt.ts)
  * otomatis ikut dilacak; tambahkan kata kunci agar klasifikasinya lebih tajam.

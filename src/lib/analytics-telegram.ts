@@ -14,6 +14,8 @@
  *   /analytics weekly on|off   → laporan mingguan otomatis
  *   /analytics learning on|off → Smart Learning Loop
  *   /analytics views <id> <n>  → isi views manual (video private yang tidak terbaca API)
+ *   /analytics retitle         → 🩺 status & riwayat Auto-Title Doctor
+ *   /analytics retitle run     → 🩺 periksa klip ber-views rendah & ganti judulnya sekarang
  */
 
 import { InlineKeyboard, type Bot, type Context } from "grammy";
@@ -37,6 +39,11 @@ import {
   isLearningEnabled,
   isWeeklyReportEnabled,
 } from "@/lib/analytics-config";
+import {
+  isAutoRetitleEnabled,
+  isRetitleDryRun,
+} from "@/lib/auto-title-doctor-config";
+import { describeRetitleRules, getRetitleCounts, getRetitleHistory, runAutoRetitle } from "@/lib/auto-title-doctor";
 
 const HTML = { parse_mode: "HTML" as const, link_preview_options: { is_disabled: true } };
 
@@ -169,6 +176,46 @@ export function registerAnalyticsCommands(bot: Bot<Context>): void {
         return;
       }
 
+      // 🩺 Auto-Title Doctor (BARU!)
+      if (sub === "retitle") {
+        if (!isAutoRetitleEnabled()) {
+          await ctx.reply(
+            "🩺 <b>Auto-Title Doctor</b> sedang nonaktif.\nAdmin bisa menyalakannya dengan <code>ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true</code> di Railway Variables.",
+            HTML
+          );
+          return;
+        }
+        if ((rest[0] || "").toLowerCase() === "run") {
+          const wait = await ctx.reply("🩺 Memeriksa klip ber-views rendah...");
+          await syncUserStats(userId).catch(() => {});
+          const r = await runAutoRetitle(userId, { force: true });
+          if (ctx.chat) await ctx.api.deleteMessage(ctx.chat.id, wait.message_id).catch(() => {});
+          // Detail perubahan sudah dikirim lewat notifikasi worker; di sini cukup ringkasan.
+          await ctx.reply(
+            `🩺 <b>Selesai</b>\n• Kandidat: ${r.candidates}\n• ${r.dryRun ? "Disimulasikan" : "Judul diganti"}: ${r.retitled}\n• Gagal: ${r.failed}` +
+              (r.skipped ? `\n<i>${escapeHtml(r.skipped)}</i>` : "") +
+              (r.errors.length ? `\n<i>${escapeHtml(r.errors[0].slice(0, 200))}</i>` : ""),
+            HTML
+          );
+          return;
+        }
+        const [counts, history] = await Promise.all([getRetitleCounts(userId), getRetitleHistory(userId, 5)]);
+        const lines = history.map((h) => {
+          const icon = h.status === "success" ? "✅" : h.status === "dry_run" ? "🧪" : "⚠️";
+          return `${icon} <a href="https://youtu.be/${h.youtubeVideoId}">${h.youtubeVideoId}</a>: ${escapeHtml(h.oldTitle.slice(0, 40))} → <b>${escapeHtml((h.newTitle || h.error || "-").slice(0, 60))}</b>`;
+        });
+        await ctx.reply(
+          "🩺 <b>Auto-Title Doctor</b> — ON ✅" +
+            (isRetitleDryRun() ? " (mode simulasi)" : "") +
+            `\n<i>Aturan: ${escapeHtml(describeRetitleRules())}</i>\n\n` +
+            `Diganti: <b>${counts.success}</b> · Simulasi: ${counts.dryRun} · Gagal: ${counts.failed}` +
+            (lines.length ? `\n\n${lines.join("\n")}` : "\n\nBelum ada riwayat.") +
+            "\n\n<code>/analytics retitle run</code> — periksa &amp; perbaiki sekarang",
+          HTML
+        );
+        return;
+      }
+
       if (sub === "views") {
         const raw = rest[0] || "";
         const views = parseInt((rest[1] || "").replace(/[.,_]/g, ""), 10);
@@ -194,7 +241,9 @@ export function registerAnalyticsCommands(bot: Bot<Context>): void {
           "<code>/analytics reset</code> — hapus hasil belajar\n" +
           "<code>/analytics weekly on|off</code> — laporan mingguan\n" +
           "<code>/analytics learning on|off</code> — Smart Learning\n" +
-          "<code>/analytics views &lt;id&gt; &lt;jumlah&gt;</code> — isi views manual",
+          "<code>/analytics views &lt;id&gt; &lt;jumlah&gt;</code> — isi views manual\n" +
+          "<code>/analytics retitle</code> — 🩺 Auto-Title Doctor (status &amp; riwayat)\n" +
+          "<code>/analytics retitle run</code> — 🩺 perbaiki judul klip ber-views rendah sekarang",
         HTML
       );
     } catch (err) {

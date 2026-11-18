@@ -39,6 +39,8 @@ import {
 } from "@/lib/analytics-store";
 import { buildAnalyticsReport } from "@/lib/analytics-report";
 import { runSmartLearning } from "@/lib/analytics-learning";
+import { runAutoRetitleForUsers } from "@/lib/auto-title-doctor";
+import { isAutoRetitleEnabled } from "@/lib/auto-title-doctor-config";
 import { db } from "@/db";
 import { analyticsUserState } from "@/db/schema";
 import { and, eq, isNull, ne, or } from "drizzle-orm";
@@ -139,6 +141,8 @@ export interface AnalyticsCycleResult {
   synced: number;
   reportsSent: number;
   errors: number;
+  /** 🩺 Auto-Title Doctor: jumlah klip yang judulnya diganti (atau disimulasikan) di siklus ini */
+  retitled: number;
 }
 
 /**
@@ -146,7 +150,7 @@ export interface AnalyticsCycleResult {
  * endpoint manual). `userId` = batasi ke satu user.
  */
 export async function runAnalyticsCycle(opts: { force?: boolean; userId?: string } = {}): Promise<AnalyticsCycleResult> {
-  const result: AnalyticsCycleResult = { enabled: isAnalyticsEnabled(), discovered: 0, synced: 0, reportsSent: 0, errors: 0 };
+  const result: AnalyticsCycleResult = { enabled: isAnalyticsEnabled(), discovered: 0, synced: 0, reportsSent: 0, errors: 0, retitled: 0 };
   if (!result.enabled) return result;
   if (globalForAnalytics.__autoclipAnalyticsRunning) return result;
   globalForAnalytics.__autoclipAnalyticsRunning = true;
@@ -157,6 +161,7 @@ export async function runAnalyticsCycle(opts: { force?: boolean; userId?: string
     const userIds = opts.userId ? [opts.userId] : await listTrackedUserIds();
     const dueKey = opts.force ? `manual-${Date.now()}` : getDueReportKey();
     const syncMs = getSyncIntervalMinutes() * 60_000;
+    const syncedUsers: string[] = []; // 🩺 Auto-Title Doctor hanya jalan untuk user yang views-nya baru disinkron
 
     for (const userId of userIds) {
       try {
@@ -170,6 +175,7 @@ export async function runAnalyticsCycle(opts: { force?: boolean; userId?: string
             if (sent.sent) {
               result.reportsSent++;
               result.synced++;
+              syncedUsers.push(userId);
               continue;
             }
             result.errors++;
@@ -187,10 +193,25 @@ export async function runAnalyticsCycle(opts: { force?: boolean; userId?: string
         if (opts.force || !last || Date.now() - last.getTime() >= syncMs) {
           await syncUserStats(userId);
           result.synced++;
+          syncedUsers.push(userId);
         }
       } catch (err) {
         result.errors++;
         console.error(`[analytics] Siklus user ${userId} gagal:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    // 🩺 Auto-Title Doctor (BARU!) — klip tayang > 24 jam dengan views rendah → judul & hashtag baru via AI.
+    // Hanya aktif kalau ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true. Kegagalan di sini tidak mengganggu siklus lain.
+    if (isAutoRetitleEnabled() && syncedUsers.length) {
+      try {
+        const doctor = await runAutoRetitleForUsers(syncedUsers, { force: opts.force });
+        result.retitled = doctor.reduce((n, r) => n + r.retitled, 0);
+        for (const r of doctor) {
+          if (r.errors.length) console.warn(`[title-doctor] user ${r.userId}: ${r.errors.slice(0, 3).join(" | ")}`);
+        }
+      } catch (err) {
+        console.error("[title-doctor] siklus gagal:", err instanceof Error ? err.message : err);
       }
     }
   } finally {
@@ -211,8 +232,8 @@ export function startAnalyticsWorker(): void {
   const tick = async () => {
     try {
       const r = await runAnalyticsCycle();
-      if (r.synced > 0 || r.reportsSent > 0 || r.errors > 0) {
-        console.log(`[analytics] Sync ${r.synced} user, ${r.reportsSent} laporan terkirim, ${r.errors} error.`);
+      if (r.synced > 0 || r.reportsSent > 0 || r.errors > 0 || r.retitled > 0) {
+        console.log(`[analytics] Sync ${r.synced} user, ${r.reportsSent} laporan terkirim, ${r.retitled} judul diperbaiki, ${r.errors} error.`);
       }
     } catch (err) {
       console.error("[analytics] Tick worker gagal:", err);

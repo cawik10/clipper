@@ -264,6 +264,35 @@ Kata kunci klasifikasi niche & semua default ada di `src/lib/analytics-config.ts
 
 ---
 
+## 🩺 Auto-Title Doctor (bagian dari AI Analytics Loop)
+
+Setelah worker analytics menarik views (default tiap 180 menit), klip yang sudah tayang **> 24 jam** tapi views-nya **di bawah ambang** (default 50) otomatis diperiksa: AI (Gemini/Groq) membuat **Judul & Hashtag baru yang lebih clickbait**, lalu video di YouTube di-update lewat API `videos.update`. Hasilnya dikirim ke Telegram dan dicatat di tabel `clip_retitle_log` (dibuat otomatis).
+
+**Aktifkan:** set `ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true` di Railway Variables, lalu kirim `/connect` sekali lagi di Telegram (butuh izin edit video `youtube.force-ssl`). Default **mati** karena fitur ini mengubah video di YouTube.
+
+| Variable | Default | Deskripsi |
+| --- | --- | --- |
+| `ANALYTICS_AUTO_RETITLE_LOW_VIEWS` | false | Saklar utama |
+| `ANALYTICS_RETITLE_VIEWS_THRESHOLD` | 50 | Angka views, atau `avg` = di bawah rata-rata klip user |
+| `ANALYTICS_RETITLE_MIN_AGE_HOURS` | 24 | Klip diperiksa setelah tayang N jam |
+| `ANALYTICS_RETITLE_MAX_AGE_DAYS` | 14 | Klip lebih tua dari ini tidak diutak-atik |
+| `ANALYTICS_RETITLE_MAX_PER_CLIP` | 1 | Maks penggantian judul per klip |
+| `ANALYTICS_RETITLE_COOLDOWN_HOURS` | 72 | Jeda antar-penggantian pada klip yang sama |
+| `ANALYTICS_RETITLE_MAX_PER_CYCLE` | 5 | Batas klip per user per siklus (hemat kuota API) |
+| `ANALYTICS_RETITLE_PRIVACY` | public | Privasi video yang boleh diganti (`public,unlisted,private`) |
+| `ANALYTICS_RETITLE_HASHTAGS` | 4 | Jumlah hashtag baru (0 = hashtag tidak diubah) |
+| `ANALYTICS_RETITLE_RETRY_HOURS` | 12 | Jeda coba ulang kalau AI/YouTube gagal |
+| `ANALYTICS_RETITLE_NOTIFY` | true | Notifikasi Telegram tiap judul diganti |
+| `ANALYTICS_RETITLE_DRY_RUN` | false | true = simulasi (AI membuat judul, YouTube tidak diubah) |
+| `ANALYTICS_RETITLE_STYLE` | – | Tambahan gaya penulisan untuk AI |
+| `ANALYTICS_RETITLE_REQUEST_SCOPE` | true | Minta izin edit video saat `/connect` |
+
+Perintah: `/analytics retitle` (status & riwayat) · `/analytics retitle run` (jalankan sekarang) · `GET /api/analytics/run?secret=...&action=retitle[&dryRun=1][&userId=...]`.
+
+> 💡 Video yang masih **private** tidak diganti judulnya (views 0 karena memang tidak bisa dilihat siapa pun). Hanya `description` bagian hashtag-akhir yang diganti; sisa deskripsi, kategori, dan bahasa video dipertahankan. Semua env & prompt AI ada di `src/lib/auto-title-doctor-config.ts`.
+
+---
+
 ## 🚂 Deployment
 
 Proyek ini sudah **live di Railway**: **https://cawik-clipper.up.railway.app/**

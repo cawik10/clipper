@@ -369,6 +369,25 @@ export const analyticsLearningLog = pgTable("analytics_learning_log", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// 🩺 Auto-Title Doctor (BARU!) — riwayat penggantian judul klip ber-views rendah.
+// Dibuat otomatis saat runtime (src/lib/auto-title-doctor.ts → ensureRetitleTable).
+export const clipRetitleLog = pgTable("clip_retitle_log", {
+  id: serial("id").primaryKey(),
+  youtubeVideoId: text("youtube_video_id").notNull(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  oldTitle: text("old_title").notNull(),
+  newTitle: text("new_title"),
+  hashtags: text("hashtags"), // dipisah spasi, mis. "#a #b"
+  viewsAtRetitle: integer("views_at_retitle").notNull().default(0),
+  hoursSinceUpload: integer("hours_since_upload"),
+  status: text("status").notNull(), // success | dry_run | failed
+  errorKind: text("error_kind"), // permission | quota | ai | youtube
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ClipRetitleLogRow = typeof clipRetitleLog.$inferSelect;
+
 export type ClipPerformanceRow = typeof clipPerformance.$inferSelect;
 export type AnalyticsUserStateRow = typeof analyticsUserState.$inferSelect;
 export type AnalyticsLearningLogRow = typeof analyticsLearningLog.$inferSelect;
