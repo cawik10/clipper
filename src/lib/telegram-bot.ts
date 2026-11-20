@@ -72,6 +72,22 @@ import {
 import { renderSubtitlePreview } from "@/lib/subtitle-burner";
 // 🪝 AI Hook Overlay (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getHookConfig, HOOK_STYLES, HOOK_STYLE_PRESETS, getHookStyleLabel } from "@/lib/hook-config";
+// 💬 Auto-First Comment (BARU!) — import terpisah, tidak mengubah import di atas.
+import {
+  isAutoCommentEnabled,
+  getAutoCommentStyle,
+  getAutoCommentStyleLabel,
+  getAutoCommentSuffix,
+  getAutoCommentMaxChars,
+  getAutoCommentAllowedPrivacy,
+  getAutoCommentRetries,
+  getAutoCommentDelaySeconds,
+  isCommentPinLinkEnabled,
+  isCommentFallbackEnabled,
+  AUTO_COMMENT_STYLES,
+  AUTO_COMMENT_STYLE_PRESETS,
+  AUTO_COMMENT_EXAMPLES,
+} from "@/lib/auto-comment-config";
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import {
   addMonitor,
@@ -108,7 +124,7 @@ bot.command("start", async (ctx) => {
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP, { parse_mode: "Markdown" });
 });
 
 bot.command("connect", async (ctx) => {
@@ -666,6 +682,37 @@ bot.command("hook", async (ctx) => {
   );
 });
 
+// 💬 Auto-First Comment (BARU!) — command info terpisah. Konfigurasi lengkap:
+// src/lib/auto-comment-config.ts (env var YOUTUBE_AUTO_COMMENT_*), logika posting:
+// src/lib/auto-comment.ts
+bot.command("autocomment", async (ctx) => {
+  const enabled = isAutoCommentEnabled();
+  const suffix = getAutoCommentSuffix();
+  await ctx.reply(
+    `💬 *Auto-First Comment (Pancingan Algoritma):*\n\n` +
+    `Status: ${enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
+    `Gaya: *${getAutoCommentStyleLabel()}* (\`${getAutoCommentStyle()}\`)\n` +
+    `Maks panjang: ${getAutoCommentMaxChars()} karakter\n` +
+    `Suffix: ${suffix ? `\`${suffix.replace(/`/g, "'")}\`` : "—"}\n` +
+    `Video target: ${getAutoCommentAllowedPrivacy().join(", ")}\n` +
+    `Percobaan: ${getAutoCommentRetries()}x • Jeda setelah upload: ${getAutoCommentDelaySeconds()} dtk\n` +
+    `Komentar cadangan: ${isCommentFallbackEnabled() ? "✅" : "❌"} • Link untuk pin: ${isCommentPinLinkEnabled() ? "✅" : "❌"}\n\n` +
+    `*Gaya tersedia:*\n` +
+    AUTO_COMMENT_STYLES.map((st) => `• \`${st}\` → ${AUTO_COMMENT_STYLE_PRESETS[st].description}`).join("\n") +
+    `\n\n*Contoh komentar:*\n` +
+    AUTO_COMMENT_EXAMPLES.map((x) => `• "${mdEscape(x)}"`).join("\n") +
+    `\n\n*Cara Ubah (Railway Variables):*\n` +
+    `• \`YOUTUBE_AUTO_COMMENT_ENABLED\` = \`true\` / \`false\`\n` +
+    `• \`YOUTUBE_AUTO_COMMENT_STYLE\` = ${AUTO_COMMENT_STYLES.map((x) => `\`${x}\``).join(" | ")}\n` +
+    `• \`YOUTUBE_AUTO_COMMENT_SUFFIX\` = teks tambahan (mis. Full video di channel @kamu)\n` +
+    `• \`YOUTUBE_AUTO_COMMENT_PROMPT\` = arahan tambahan untuk AI\n\n` +
+    `ℹ️ AI membuat komentar bersamaan dengan analisis klip, lalu bot memposting via \`commentThreads.insert\` setelah video terupload. ` +
+    `Butuh izin baru: kirim /connect sekali lagi setelah fitur diaktifkan. ` +
+    `YouTube API tidak bisa mem-pin otomatis — bot mengirim link komentar untuk kamu pin manual.`,
+    { parse_mode: "Markdown" }
+  );
+});
+
 bot.command("introoutro", async (ctx) => {
   const cfg = getIntroOutroConfig();
   await ctx.reply(
@@ -714,6 +761,11 @@ const MONITOR_HELP =
   `/monitoron /monitoroff <id> — nyala/matikan sementara\n` +
   `/monitorinterval <id> <menit> — ubah jeda pengecekan\n` +
   `/monitorupload <id> on|off — atur auto-upload YouTube`;
+
+// 💬 Auto-First Comment (BARU!) — teks bantuan terpisah, ditambahkan ke pesan /help.
+const AUTOCOMMENT_HELP =
+  `\n\n💬 *Auto-First Comment*\n` +
+  `/autocomment — info komentar pancingan otomatis di video yang diupload`;
 
 function mdEscape(text: string): string {
   return text.replace(/([_*`\[\]])/g, "\\$1");

@@ -13,6 +13,7 @@ import {
   refreshAccessToken,
 } from "@/lib/youtube-uploader";
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
+import { postAutoCommentsForClips } from "@/lib/auto-comment"; // 💬 Auto-First Comment (BARU!)
 import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
 import type { TranscriptSegmentWithWords } from "@/lib/subtitle-config"; // 💬 Subtitle (BARU!)
 import fs from "fs";
@@ -395,6 +396,23 @@ export async function publishJobClips(
           return { ...clip, youtubeVideoId: uploadResult.videoId, youtubeUrl: uploadResult.videoUrl };
         }
         return clip;
+      });
+
+      // === STEP 5a: 💬 AUTO-FIRST COMMENT (BARU!) ===
+      // Posting komentar pancingan hasil AI ke video yang baru terupload
+      // (commentThreads.insert). Mati kalau YOUTUBE_AUTO_COMMENT_ENABLED bukan true.
+      // Tidak pernah melempar error — upload tetap sukses walau komentar gagal.
+      // Lihat src/lib/auto-comment.ts & src/lib/auto-comment-config.ts.
+      finalClips = await postAutoCommentsForClips({
+        clips: finalClips,
+        accessToken,
+        refreshToken,
+        scope: tokenRow.scope,
+        privacy: settings.defaultPrivacy || "private",
+        userId: job.telegramUserId,
+        onProgress: async (message, percent) => {
+          await update("uploading", message, { step: "uploading_youtube", percent });
+        },
       });
     }
 

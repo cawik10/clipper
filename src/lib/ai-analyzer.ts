@@ -3,6 +3,15 @@ import { ClipResult } from "@/db/schema";
 import { getMaxClipsConfig } from "@/lib/video-config";
 import { buildNicheInstruction } from "@/lib/niche-prompt";
 import { getHookConfig, sanitizeHookText, buildFallbackHook } from "@/lib/hook-config"; // 🪝 AI Hook Overlay (BARU!)
+// 💬 Auto-First Comment (BARU!) — komentar pancingan dibuat AI dalam prompt yang sama.
+import {
+  isAutoCommentEnabled,
+  getAutoCommentStyle,
+  getAutoCommentMaxChars,
+  getAutoCommentExtraPrompt,
+  buildAutoCommentPromptInstruction,
+  sanitizeCommentText,
+} from "@/lib/auto-comment-config";
 
 function getOpenAIClient(): OpenAI | null {
   if (process.env.OPENAI_API_KEY) {
@@ -50,6 +59,16 @@ export async function analyzeVideoForClips(
   const hookInstruction = hookCfg.enabled ? buildHookPromptInstruction(hookCfg.duration, hookCfg.maxChars) : "";
   const hookJsonField = hookCfg.enabled ? `,\n    "hook": "<teks hook pembuka, max ${hookCfg.maxChars} karakter>"` : "";
 
+  // 💬 Auto-First Comment (BARU!) — instruksi ditambahkan ke prompt yang sama (tanpa
+  // panggilan AI tambahan). Kosong kalau YOUTUBE_AUTO_COMMENT_ENABLED bukan true,
+  // sehingga prompt persis seperti sebelumnya.
+  const commentOn = isAutoCommentEnabled();
+  const commentMax = getAutoCommentMaxChars();
+  const commentInstruction = commentOn
+    ? buildAutoCommentPromptInstruction(getAutoCommentStyle(), commentMax, getAutoCommentExtraPrompt())
+    : "";
+  const commentJsonField = commentOn ? `,\n    "firstComment": "<komentar pancingan, max ${commentMax} karakter>"` : "";
+
   const prompt = `Kamu adalah ahli konten viral YouTube Shorts. Analisis transkrip video berikut dan temukan ${maxClips} momen terbaik yang berpotensi viral.
 
 INFORMASI VIDEO:
@@ -76,7 +95,7 @@ INSTRUKSI:
 - Buat judul YouTube Shorts yang menarik (max 70 karakter)
 - Buat deskripsi singkat (max 150 karakter)
 - Berikan tags relevan (5-10 tags)
-${hookInstruction}
+${hookInstruction}${commentInstruction}
 Output JSON array (tanpa markdown):
 [
   {
@@ -88,7 +107,7 @@ Output JSON array (tanpa markdown):
     "description": "<deskripsi singkat>",
     "tags": ["tag1", "tag2"],
     "viralScore": <1-10>,
-    "reason": "<alasan mengapa viral>"${hookJsonField}
+    "reason": "<alasan mengapa viral>"${hookJsonField}${commentJsonField}
   }
 ]`;
 
@@ -320,6 +339,8 @@ function validateAndFixClips(
         reason: clip.reason || "AI-selected moment",
         // 🪝 AI Hook Overlay (BARU!)
         hook: resolveHook(clip.hook, clip.title, i),
+        // 💬 Auto-First Comment (BARU!)
+        firstComment: resolveFirstComment(clip.firstComment),
       };
     })
     .slice(0, limit);
@@ -336,6 +357,13 @@ HOOK PEMBUKA (teks overlay yang muncul ${duration} detik pertama klip):
 - Tanpa emoji, tanpa hashtag, tanpa tanda kutip
 - Contoh gaya: "Kamu gak akan percaya apa yang terjadi selanjutnya...", "99% orang salah soal ini!", "Ini rahasia yang CEO gak mau kamu tahu"
 `;
+}
+
+// ─── 💬 Auto-First Comment (BARU!) ────────────────────────────────────────
+/** Komentar pancingan dari AI (dibersihkan). Kosong → komentar cadangan dipakai saat posting (auto-comment.ts). */
+function resolveFirstComment(raw: unknown): string | undefined {
+  if (!isAutoCommentEnabled()) return undefined;
+  return sanitizeCommentText(raw) || undefined;
 }
 
 /** Hook dari AI (dibersihkan) → kalau kosong & HOOK_FALLBACK=true, buat dari judul klip. */

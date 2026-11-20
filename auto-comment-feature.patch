@@ -1,0 +1,891 @@
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index 5146481..bb7f9df 100644
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -50,6 +50,7 @@ import HookOverlaySection from "@/components/HookOverlaySection";
+ // 📈 AI Analytics & Feedback Loop (BARU!) — komponen section terpisah.
+ import AnalyticsSection from "@/components/AnalyticsSection";
+ import AutoTitleDoctorSection from "@/components/AutoTitleDoctorSection";
++import AutoCommentSection from "@/components/AutoCommentSection"; // 💬 Auto-First Comment (BARU!)
+ // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
+ import { getChannelMonitorStats } from "@/lib/channel-monitor";
+ import {
+@@ -1255,6 +1256,9 @@ export default async function HomePage() {
+         {/* 🩺 AUTO-TITLE DOCTOR (FITUR BARU!) — bagian dari AI Analytics Loop, lihat src/components/AutoTitleDoctorSection.tsx */}
+         <AutoTitleDoctorSection />
+ 
++        {/* 💬 AUTO-FIRST COMMENT (FITUR BARU!) — pancingan algoritma, lihat src/components/AutoCommentSection.tsx */}
++        <AutoCommentSection />
++
+         {/* ══════════════════════════════════════════════════════════
+             PIPELINE FLOW
+         ══════════════════════════════════════════════════════════ */}
+diff --git a/src/components/AutoCommentSection.tsx b/src/components/AutoCommentSection.tsx
+new file mode 100644
+index 0000000..f59d5dc
+--- /dev/null
++++ b/src/components/AutoCommentSection.tsx
+@@ -0,0 +1,126 @@
++/**
++ * 💬 AUTO-FIRST COMMENT — section dashboard (FITUR BARU!)
++ * Server component terpisah supaya src/app/page.tsx tidak berubah banyak.
++ * Konfigurasi: src/lib/auto-comment-config.ts · Logika: src/lib/auto-comment.ts
++ */
++import {
++  AUTO_COMMENT_EXAMPLES,
++  AUTO_COMMENT_STYLES,
++  AUTO_COMMENT_STYLE_PRESETS,
++  getAutoCommentAllowedPrivacy,
++  getAutoCommentDelaySeconds,
++  getAutoCommentMaxChars,
++  getAutoCommentRetries,
++  getAutoCommentStyle,
++  getAutoCommentSuffix,
++  isAutoCommentEnabled,
++  isCommentFallbackEnabled,
++  isCommentPinLinkEnabled,
++} from "@/lib/auto-comment-config";
++
++export default function AutoCommentSection() {
++  const enabled = isAutoCommentEnabled();
++  const style = getAutoCommentStyle();
++  const suffix = getAutoCommentSuffix();
++
++  return (
++    <section className="bg-gradient-to-br from-sky-500/10 to-indigo-600/10 border-2 border-sky-500/40 rounded-2xl p-6 space-y-5">
++      <div className="flex items-start justify-between flex-wrap gap-3">
++        <div>
++          <h2 className="text-xl font-bold text-sky-400 flex items-center gap-2">
++            💬 Auto-First Comment (Pancingan Algoritma)
++            <span className="text-xs bg-sky-500/20 border border-sky-500/40 text-sky-300 px-2 py-0.5 rounded-full">
++              Fitur Baru!
++            </span>
++          </h2>
++          <p className="text-slate-400 text-sm mt-1">
++            Algoritma YouTube Shorts menyukai kolom komentar yang ramai. AI membuat 1 kalimat komentar pancingan/kontroversial
++            yang relevan dengan isi klip, lalu setelah video terupload bot otomatis memostingnya lewat{" "}
++            <code className="text-slate-300">commentThreads.insert</code>.
++          </p>
++        </div>
++        <span
++          className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${
++            enabled
++              ? "bg-green-500/20 border-green-500/40 text-green-400"
++              : "bg-slate-700/40 border-slate-600 text-slate-400"
++          }`}
++        >
++          {enabled ? "✅ Aktif" : "⚪ Nonaktif"}
++        </span>
++      </div>
++
++      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Gaya</div>
++          <div className="text-sky-300 font-semibold mt-1">{AUTO_COMMENT_STYLE_PRESETS[style].label}</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Maks panjang</div>
++          <div className="text-sky-300 font-semibold mt-1">{getAutoCommentMaxChars()} karakter</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Video target</div>
++          <div className="text-sky-300 font-semibold mt-1">{getAutoCommentAllowedPrivacy().join(", ")}</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Percobaan / jeda</div>
++          <div className="text-sky-300 font-semibold mt-1">
++            {getAutoCommentRetries()}x / {getAutoCommentDelaySeconds()} dtk
++          </div>
++        </div>
++      </div>
++
++      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
++        {AUTO_COMMENT_STYLES.map((st) => (
++          <div
++            key={st}
++            className={`rounded-xl p-3 border ${
++              st === style ? "border-sky-400/70 bg-sky-950/40" : "border-slate-700/50 bg-slate-900/50"
++            }`}
++          >
++            <div className="text-xs text-slate-300 font-semibold">
++              {AUTO_COMMENT_STYLE_PRESETS[st].label}{" "}
++              {st === style && <span className="text-sky-400 text-[9px] ml-1">● AKTIF</span>}
++            </div>
++            <div className="text-[11px] text-slate-500 mt-1">{AUTO_COMMENT_STYLE_PRESETS[st].description}</div>
++          </div>
++        ))}
++      </div>
++
++      <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++        <div className="text-sm font-semibold text-slate-300 mb-2">✨ Contoh komentar hasil AI:</div>
++        <ul className="text-sm text-slate-400 space-y-1 list-disc list-inside">
++          {AUTO_COMMENT_EXAMPLES.map((c) => (
++            <li key={c}>&quot;{c}&quot;</li>
++          ))}
++        </ul>
++        {suffix && (
++          <div className="text-xs text-slate-500 mt-2">
++            Suffix otomatis di akhir komentar: <span className="text-sky-300">&quot;{suffix}&quot;</span>
++          </div>
++        )}
++      </div>
++
++      <div className="bg-sky-950/30 border border-sky-500/20 rounded-xl p-4 space-y-3">
++        <div className="text-sm font-semibold text-sky-300">🔧 Cara Atur di Railway Variables:</div>
++        <div className="font-mono text-sm bg-slate-900/80 rounded-lg p-3 space-y-1">
++          <div><span className="text-yellow-300">YOUTUBE_AUTO_COMMENT_ENABLED</span> = <span className="text-emerald-400">{String(enabled)}</span></div>
++          <div><span className="text-yellow-300">YOUTUBE_AUTO_COMMENT_STYLE</span> = <span className="text-emerald-400">{style}</span> <span className="text-slate-600">← {AUTO_COMMENT_STYLES.join(" | ")}</span></div>
++          <div><span className="text-yellow-300">YOUTUBE_AUTO_COMMENT_SUFFIX</span> = <span className="text-emerald-400">{suffix || "(kosong)"}</span> <span className="text-slate-600">← mis. Full video ada di channel @kamu</span></div>
++          <div><span className="text-yellow-300">YOUTUBE_AUTO_COMMENT_MAX_CHARS</span> = <span className="text-emerald-400">{getAutoCommentMaxChars()}</span></div>
++          <div><span className="text-yellow-300">YOUTUBE_AUTO_COMMENT_FALLBACK</span> = <span className="text-emerald-400">{String(isCommentFallbackEnabled())}</span></div>
++          <div><span className="text-yellow-300">YOUTUBE_AUTO_COMMENT_PIN_LINK</span> = <span className="text-emerald-400">{String(isCommentPinLinkEnabled())}</span></div>
++        </div>
++        <div className="text-xs text-slate-400 space-y-1">
++          <div>🧠 Komentar dibuat AI (GPT/Gemini) dalam prompt analisis yang sama — tanpa panggilan AI tambahan.</div>
++          <div>🔑 Butuh izin <code className="text-slate-300">youtube.force-ssl</code>: setelah diaktifkan, kirim <code className="text-yellow-300">/connect</code> sekali lagi di Telegram.</div>
++          <div>📌 YouTube API tidak menyediakan fitur pin — bot mengirim link komentar ke Telegram, tinggal ⋮ → Pin.</div>
++          <div>🛡️ Kalau komentar gagal, upload video tetap sukses — tidak pernah gagal karena fitur ini.</div>
++          <div>🎨 Gaya, prompt AI &amp; komentar cadangan bisa diubah di <code className="text-slate-300">src/lib/auto-comment-config.ts</code></div>
++          <div>🤖 Telegram: <code className="text-yellow-300">/autocomment</code> untuk lihat konfigurasi</div>
++        </div>
++      </div>
++    </section>
++  );
++}
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index 7b6df09..a83da32 100644
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -406,6 +406,13 @@ export interface ClipResult {
+   // bersamaan dengan analisis momen. Opsional & disimpan di jsonb `clips`
+   // (tidak perlu migrasi). Lihat src/lib/hook-config.ts.
+   hook?: string;
++  // 💬 Auto-First Comment (BARU!) — komentar pancingan hasil AI + hasil posting
++  // via commentThreads.insert. Opsional & disimpan di jsonb `clips` (tanpa migrasi).
++  // Lihat src/lib/auto-comment-config.ts & src/lib/auto-comment.ts.
++  firstComment?: string;
++  firstCommentId?: string;
++  firstCommentUrl?: string;
++  firstCommentStatus?: "posted" | "failed" | "skipped";
+   filePath?: string;
+   thumbnailPath?: string;
+   youtubeVideoId?: string;
+diff --git a/src/lib/ai-analyzer.ts b/src/lib/ai-analyzer.ts
+index 188e76b..cd0cca1 100644
+--- a/src/lib/ai-analyzer.ts
++++ b/src/lib/ai-analyzer.ts
+@@ -3,6 +3,15 @@ import { ClipResult } from "@/db/schema";
+ import { getMaxClipsConfig } from "@/lib/video-config";
+ import { buildNicheInstruction } from "@/lib/niche-prompt";
+ import { getHookConfig, sanitizeHookText, buildFallbackHook } from "@/lib/hook-config"; // 🪝 AI Hook Overlay (BARU!)
++// 💬 Auto-First Comment (BARU!) — komentar pancingan dibuat AI dalam prompt yang sama.
++import {
++  isAutoCommentEnabled,
++  getAutoCommentStyle,
++  getAutoCommentMaxChars,
++  getAutoCommentExtraPrompt,
++  buildAutoCommentPromptInstruction,
++  sanitizeCommentText,
++} from "@/lib/auto-comment-config";
+ 
+ function getOpenAIClient(): OpenAI | null {
+   if (process.env.OPENAI_API_KEY) {
+@@ -50,6 +59,16 @@ export async function analyzeVideoForClips(
+   const hookInstruction = hookCfg.enabled ? buildHookPromptInstruction(hookCfg.duration, hookCfg.maxChars) : "";
+   const hookJsonField = hookCfg.enabled ? `,\n    "hook": "<teks hook pembuka, max ${hookCfg.maxChars} karakter>"` : "";
+ 
++  // 💬 Auto-First Comment (BARU!) — instruksi ditambahkan ke prompt yang sama (tanpa
++  // panggilan AI tambahan). Kosong kalau YOUTUBE_AUTO_COMMENT_ENABLED bukan true,
++  // sehingga prompt persis seperti sebelumnya.
++  const commentOn = isAutoCommentEnabled();
++  const commentMax = getAutoCommentMaxChars();
++  const commentInstruction = commentOn
++    ? buildAutoCommentPromptInstruction(getAutoCommentStyle(), commentMax, getAutoCommentExtraPrompt())
++    : "";
++  const commentJsonField = commentOn ? `,\n    "firstComment": "<komentar pancingan, max ${commentMax} karakter>"` : "";
++
+   const prompt = `Kamu adalah ahli konten viral YouTube Shorts. Analisis transkrip video berikut dan temukan ${maxClips} momen terbaik yang berpotensi viral.
+ 
+ INFORMASI VIDEO:
+@@ -76,7 +95,7 @@ INSTRUKSI:
+ - Buat judul YouTube Shorts yang menarik (max 70 karakter)
+ - Buat deskripsi singkat (max 150 karakter)
+ - Berikan tags relevan (5-10 tags)
+-${hookInstruction}
++${hookInstruction}${commentInstruction}
+ Output JSON array (tanpa markdown):
+ [
+   {
+@@ -88,7 +107,7 @@ Output JSON array (tanpa markdown):
+     "description": "<deskripsi singkat>",
+     "tags": ["tag1", "tag2"],
+     "viralScore": <1-10>,
+-    "reason": "<alasan mengapa viral>"${hookJsonField}
++    "reason": "<alasan mengapa viral>"${hookJsonField}${commentJsonField}
+   }
+ ]`;
+ 
+@@ -320,6 +339,8 @@ function validateAndFixClips(
+         reason: clip.reason || "AI-selected moment",
+         // 🪝 AI Hook Overlay (BARU!)
+         hook: resolveHook(clip.hook, clip.title, i),
++        // 💬 Auto-First Comment (BARU!)
++        firstComment: resolveFirstComment(clip.firstComment),
+       };
+     })
+     .slice(0, limit);
+@@ -338,6 +359,13 @@ HOOK PEMBUKA (teks overlay yang muncul ${duration} detik pertama klip):
+ `;
+ }
+ 
++// ─── 💬 Auto-First Comment (BARU!) ────────────────────────────────────────
++/** Komentar pancingan dari AI (dibersihkan). Kosong → komentar cadangan dipakai saat posting (auto-comment.ts). */
++function resolveFirstComment(raw: unknown): string | undefined {
++  if (!isAutoCommentEnabled()) return undefined;
++  return sanitizeCommentText(raw) || undefined;
++}
++
+ /** Hook dari AI (dibersihkan) → kalau kosong & HOOK_FALLBACK=true, buat dari judul klip. */
+ function resolveHook(raw: unknown, title: string | undefined, index: number): string | undefined {
+   const cfg = getHookConfig();
+diff --git a/src/lib/auto-comment-config.ts b/src/lib/auto-comment-config.ts
+new file mode 100644
+index 0000000..3691ea5
+--- /dev/null
++++ b/src/lib/auto-comment-config.ts
+@@ -0,0 +1,232 @@
++/**
++ * 💬 AUTO-FIRST COMMENT (Pancingan Algoritma YouTube) — KONFIGURASI (FITUR BARU!)
++ * =====================================================================
++ * Algoritma YouTube Shorts menyukai kolom komentar yang ramai. Fitur ini:
++ *
++ *  1. Saat AI menganalisis klip (src/lib/ai-analyzer.ts), AI diminta membuat
++ *     1 kalimat komentar pancingan/kontroversial yang relevan dengan isi klip.
++ *     (Ditambahkan ke prompt yang sama — TANPA panggilan AI tambahan.)
++ *  2. Setelah klip terupload lewat YouTube Data API, bot otomatis memposting
++ *     komentar itu ke video tersebut memakai `commentThreads.insert`
++ *     (lihat src/lib/auto-comment.ts).
++ *
++ * Kalau AI tidak memberi komentar / posting gagal, upload TIDAK PERNAH ikut
++ * gagal — klip tetap sukses terupload, bot hanya memberi tahu di Telegram.
++ *
++ * ⚠️ CATATAN PIN: YouTube Data API v3 TIDAK menyediakan endpoint untuk
++ *    mem-pin (menyematkan) komentar. Bot memposting komentar sebagai
++ *    pemilik channel, lalu mengirim link langsung ke komentar tersebut di
++ *    Telegram — tinggal tap → ⋮ → "Pin" (1 detik). Matikan link ini dengan
++ *    YOUTUBE_AUTO_COMMENT_PIN_LINK=false.
++ *
++ * =====================================================================
++ * CARA MENGATUR (Railway → Variables, tanpa menyentuh kode)
++ * =====================================================================
++ * YOUTUBE_AUTO_COMMENT_ENABLED=true       ← SAKLAR UTAMA (default: false / mati)
++ * YOUTUBE_AUTO_COMMENT_STYLE=mixed        ← question | controversial | cta | mixed
++ * YOUTUBE_AUTO_COMMENT_SUFFIX="Full video ada di channel @namakamu"
++ *                                         ← opsional: kalimat tambahan di akhir komentar
++ * YOUTUBE_AUTO_COMMENT_PROMPT="..."       ← opsional: arahan tambahan untuk AI
++ * YOUTUBE_AUTO_COMMENT_MAX_CHARS=150      ← batas panjang kalimat dari AI (30-500)
++ * YOUTUBE_AUTO_COMMENT_FALLBACK=true      ← true = pakai komentar cadangan (FALLBACK_COMMENTS)
++ *                                           kalau AI tidak memberi komentar
++ * YOUTUBE_AUTO_COMMENT_PRIVACY=public,unlisted,private
++ *                                         ← komentar hanya diposting ke video berstatus ini
++ * YOUTUBE_AUTO_COMMENT_DELAY_SECONDS=5    ← jeda setelah upload sebelum komentar (0-120)
++ * YOUTUBE_AUTO_COMMENT_RETRIES=3          ← maks percobaan per klip (1-8)
++ * YOUTUBE_AUTO_COMMENT_RETRY_DELAY_SECONDS=15 ← jeda antar percobaan (1-300, makin lama tiap ulang)
++ * YOUTUBE_AUTO_COMMENT_PIN_LINK=true      ← kirim link komentar untuk di-pin manual
++ * YOUTUBE_AUTO_COMMENT_REQUEST_SCOPE=true ← minta izin komentar (youtube.force-ssl) saat /connect
++ *
++ * 🔑 PENTING: `commentThreads.insert` butuh izin `youtube.force-ssl`, sedangkan
++ *    izin lama hanya `youtube.upload`. Setelah fitur dinyalakan, kirim
++ *    /connect SEKALI LAGI di Telegram untuk memberi izin baru.
++ *
++ * Gaya (STYLE), prompt AI, dan komentar cadangan bisa diubah di konstanta
++ * paling bawah file ini.
++ */
++
++function envBool(name: string, fallback: boolean): boolean {
++  const raw = process.env[name];
++  if (raw === undefined || raw === "") return fallback;
++  return !/^(false|0|off|no|nonaktif)$/i.test(raw.trim());
++}
++
++function envInt(name: string, fallback: number, min: number, max: number): number {
++  const n = parseInt(process.env[name] || "", 10);
++  if (!isNaN(n) && n >= min && n <= max) return n;
++  return fallback;
++}
++
++// ─── FLAG ────────────────────────────────────────────────────────────────
++
++/** Saklar utama. Default MATI (opt-in) karena memposting komentar publik di channel user. */
++export function isAutoCommentEnabled(): boolean {
++  const raw = process.env.YOUTUBE_AUTO_COMMENT_ENABLED;
++  if (raw === undefined || raw === "") return false;
++  return /^(true|1|on|yes|ya|aktif)$/i.test(raw.trim());
++}
++
++/** Minta scope `youtube.force-ssl` saat /connect (hanya kalau fitur menyala). */
++export function shouldRequestCommentScope(): boolean {
++  return isAutoCommentEnabled() && envBool("YOUTUBE_AUTO_COMMENT_REQUEST_SCOPE", true);
++}
++
++export function isCommentPinLinkEnabled(): boolean {
++  return envBool("YOUTUBE_AUTO_COMMENT_PIN_LINK", true);
++}
++
++export function isCommentFallbackEnabled(): boolean {
++  return envBool("YOUTUBE_AUTO_COMMENT_FALLBACK", true);
++}
++
++// ─── STYLE ───────────────────────────────────────────────────────────────
++
++export const AUTO_COMMENT_STYLES = ["question", "controversial", "cta", "mixed"] as const;
++export type AutoCommentStyle = (typeof AUTO_COMMENT_STYLES)[number];
++
++export function getAutoCommentStyle(): AutoCommentStyle {
++  const raw = (process.env.YOUTUBE_AUTO_COMMENT_STYLE || "mixed").trim().toLowerCase();
++  return (AUTO_COMMENT_STYLES as readonly string[]).includes(raw) ? (raw as AutoCommentStyle) : "mixed";
++}
++
++/** ✏️ Edit di sini untuk menyetel arahan tiap gaya komentar ke AI. */
++export const AUTO_COMMENT_STYLE_PRESETS: Record<AutoCommentStyle, { label: string; description: string; guide: string }> = {
++  question: {
++    label: "Pertanyaan",
++    description: "Pertanyaan terbuka yang mengajak penonton menjawab",
++    guide: 'pertanyaan terbuka yang gampang dijawab satu kata/kalimat. Contoh: "Menurut kamu, siapa yang salah di sini? Komen ya!"',
++  },
++  controversial: {
++    label: "Kontroversial",
++    description: "Pernyataan/pertanyaan yang memancing pro-kontra (tetap sopan)",
++    guide:
++      'pertanyaan/pernyataan yang memancing pro-kontra supaya orang ingin berdebat di kolom komentar (tetap sopan, tanpa SARA/hinaan). Contoh: "Setuju gak sama pendapat dia di detik terakhir? Coba komen!"',
++  },
++  cta: {
++    label: "Ajakan (CTA)",
++    description: "Ajakan komen + arahkan ke video penuh/channel",
++    guide:
++      'ajakan berkomentar yang singkat, boleh mengajak menonton video penuh. Contoh: "Kamu tim mana? Tulis di komentar, full videonya ada di channel kami!"',
++  },
++  mixed: {
++    label: "Campuran",
++    description: "AI memilih gaya terbaik per klip (pertanyaan / kontroversial / ajakan)",
++    guide:
++      "pilih gaya paling cocok untuk klip itu: pertanyaan terbuka, pernyataan kontroversial yang memancing pro-kontra, atau ajakan berkomentar. Variasikan antar klip",
++  },
++};
++
++export function getAutoCommentStyleLabel(style: AutoCommentStyle = getAutoCommentStyle()): string {
++  return AUTO_COMMENT_STYLE_PRESETS[style].label;
++}
++
++// ─── TEKS ────────────────────────────────────────────────────────────────
++
++export function getAutoCommentMaxChars(): number {
++  return envInt("YOUTUBE_AUTO_COMMENT_MAX_CHARS", 150, 30, 500);
++}
++
++/** Kalimat tambahan di akhir komentar (mis. "Full video ada di channel @nama"). */
++export function getAutoCommentSuffix(): string {
++  return (process.env.YOUTUBE_AUTO_COMMENT_SUFFIX || "").replace(/\s+/g, " ").trim().slice(0, 300);
++}
++
++export function getAutoCommentExtraPrompt(): string {
++  return (process.env.YOUTUBE_AUTO_COMMENT_PROMPT || "").replace(/\s+/g, " ").trim().slice(0, 300);
++}
++
++// ─── POSTING ─────────────────────────────────────────────────────────────
++
++export function getAutoCommentDelaySeconds(): number {
++  return envInt("YOUTUBE_AUTO_COMMENT_DELAY_SECONDS", 5, 0, 120);
++}
++
++export function getAutoCommentRetries(): number {
++  return envInt("YOUTUBE_AUTO_COMMENT_RETRIES", 3, 1, 8);
++}
++
++export function getAutoCommentRetryDelaySeconds(): number {
++  return envInt("YOUTUBE_AUTO_COMMENT_RETRY_DELAY_SECONDS", 15, 1, 300);
++}
++
++/** Status privasi video yang boleh diberi komentar otomatis. */
++export function getAutoCommentAllowedPrivacy(): string[] {
++  const list = (process.env.YOUTUBE_AUTO_COMMENT_PRIVACY || "public,unlisted,private")
++    .toLowerCase()
++    .split(",")
++    .map((s) => s.trim())
++    .filter((s) => s === "public" || s === "unlisted" || s === "private");
++  return list.length ? list : ["public", "unlisted", "private"];
++}
++
++// ─── KONSTANTA (ubah di sini kalau perlu) ────────────────────────────────
++
++/** Batas komentar YouTube yang dipakai bot (karakter; batas resmi lebih besar). */
++export const AUTO_COMMENT_HARD_LIMIT = 500;
++
++/** Scope Google untuk `commentThreads.insert`. */
++export const AUTO_COMMENT_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";
++/** Scope yang dianggap cukup untuk memposting komentar. */
++export const AUTO_COMMENT_REQUIRED_SCOPES = [
++  "https://www.googleapis.com/auth/youtube.force-ssl",
++  "https://www.googleapis.com/auth/youtube",
++];
++
++/** Komentar cadangan kalau AI tidak memberi komentar (dipilih bergantian per klip). */
++export const FALLBACK_COMMENTS = [
++  "Setuju gak sama bagian ini? Coba tulis pendapatmu di komentar!",
++  "Menurut kamu gimana? Komen di bawah ya!",
++  "Kamu tim setuju atau tim enggak? Ayo komen!",
++  "Ada yang pernah ngalamin hal kayak gini? Cerita di komentar!",
++];
++
++/** Contoh komentar (dipakai dashboard & perintah /autocomment). */
++export const AUTO_COMMENT_EXAMPLES = [
++  "Setuju gak sama pendapat dia di detik terakhir? Coba komen!",
++  "Menurut kamu siapa yang salah di sini? Tulis di komentar!",
++  "Full videonya ada di channel @namakamu — kamu tim mana?",
++];
++
++/** Instruksi yang ditambahkan ke prompt analisis AI (ai-analyzer.ts). Ubah gaya/aturan di sini. */
++export function buildAutoCommentPromptInstruction(style: AutoCommentStyle, maxChars: number, extra: string): string {
++  return `
++KOMENTAR PERTAMA (akan diposting otomatis sebagai komentar pertama di video untuk memancing algoritma):
++- Untuk SETIAP klip, buat satu kalimat "firstComment" berupa ${AUTO_COMMENT_STYLE_PRESETS[style].guide}
++- Maksimal ${maxChars} karakter, 1 kalimat, bahasa santai sesuai bahasa video (Indonesia: pakai "kamu/gak", bukan bahasa baku)
++- Harus relevan dengan isi klip tersebut (mis. merujuk pendapat/momen di klip) — jangan mengarang fakta yang tidak ada di klip
++- Tanpa hashtag, tanpa tanda kutip, maksimal 1 emoji; harus diakhiri ajakan untuk berkomentar${extra ? `\n- Arahan tambahan: ${extra}` : ""}
++`;
++}
++
++// ─── SANITASI ────────────────────────────────────────────────────────────
++
++/** Bersihkan komentar dari AI: buang kutip/hashtag/baris baru, potong rapi di batas kata. */
++export function sanitizeCommentText(raw: unknown, maxChars: number = getAutoCommentMaxChars()): string {
++  if (typeof raw !== "string") return "";
++  let text = raw
++    .replace(/[\r\n]+/g, " ")
++    .replace(/#[\p{L}\p{N}_]+/gu, "")
++    .replace(/\s+/g, " ")
++    .trim()
++    .replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, "")
++    .trim();
++  if (text.length > maxChars) {
++    const cut = text.slice(0, maxChars);
++    const lastSpace = cut.lastIndexOf(" ");
++    text = (lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut).trim().replace(/[,;:\-–—]+$/, "");
++  }
++  return text;
++}
++
++/** Komentar cadangan (kalau FALLBACK aktif). */
++export function buildFallbackComment(index: number): string {
++  return FALLBACK_COMMENTS[Math.abs(index) % FALLBACK_COMMENTS.length];
++}
++
++/** Gabungkan komentar + suffix, dijaga di bawah batas komentar. */
++export function composeFinalComment(comment: string): string {
++  const suffix = getAutoCommentSuffix();
++  const full = suffix ? `${comment} ${suffix}`.trim() : comment;
++  return full.length > AUTO_COMMENT_HARD_LIMIT ? full.slice(0, AUTO_COMMENT_HARD_LIMIT).trim() : full;
++}
+diff --git a/src/lib/auto-comment.ts b/src/lib/auto-comment.ts
+new file mode 100644
+index 0000000..1801163
+--- /dev/null
++++ b/src/lib/auto-comment.ts
+@@ -0,0 +1,237 @@
++/**
++ * 💬 AUTO-FIRST COMMENT — LOGIKA POSTING (FITUR BARU!)
++ * =====================================================================
++ * Setelah klip terupload ke YouTube (src/lib/job-processor.ts → publishJobClips),
++ * fungsi `postAutoCommentsForClips` memposting komentar pancingan hasil AI
++ * (field `clip.firstComment`) memakai YouTube Data API `commentThreads.insert`.
++ *
++ * Prinsip: fitur ini TIDAK PERNAH melempar error ke pemanggil. Gagal / dimatikan
++ * / izin kurang → klip tetap sukses terupload; hasilnya dicatat di field klip
++ * (`firstCommentStatus`) dan diberitahukan lewat Telegram.
++ *
++ * Konfigurasi & prompt: src/lib/auto-comment-config.ts
++ */
++import { google } from "googleapis";
++import type { ClipResult } from "@/db/schema";
++import {
++  AUTO_COMMENT_REQUIRED_SCOPES,
++  buildFallbackComment,
++  composeFinalComment,
++  getAutoCommentAllowedPrivacy,
++  getAutoCommentDelaySeconds,
++  getAutoCommentRetries,
++  getAutoCommentRetryDelaySeconds,
++  isAutoCommentEnabled,
++  isCommentFallbackEnabled,
++  isCommentPinLinkEnabled,
++} from "@/lib/auto-comment-config";
++
++type ErrorKind = "permission" | "quota" | "disabled" | "retryable" | "other";
++
++const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
++
++function escapeHtml(s: string): string {
++  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
++}
++
++/** null = scope tidak diketahui (token lama tanpa catatan scope) → coba saja. */
++export function hasCommentScope(scope: string | null | undefined): boolean | null {
++  if (!scope || !scope.trim()) return null;
++  const granted = scope.split(/[\s,]+/);
++  return AUTO_COMMENT_REQUIRED_SCOPES.some((s) => granted.includes(s));
++}
++
++function classifyError(err: unknown): { kind: ErrorKind; message: string } {
++  const e = err as {
++    code?: number | string;
++    errors?: Array<{ reason?: string }>;
++    response?: { status?: number; data?: { error?: { errors?: Array<{ reason?: string }> } } };
++  };
++  const reasons = [...(e?.errors || []), ...(e?.response?.data?.error?.errors || [])]
++    .map((r) => r.reason || "")
++    .join(" ");
++  const message = err instanceof Error ? err.message : String(err);
++  const text = `${message} ${reasons}`;
++  const status = Number(e?.code ?? e?.response?.status);
++
++  if (/commentsDisabled/i.test(text)) return { kind: "disabled", message };
++  if (/quota|rateLimit/i.test(text)) return { kind: "quota", message };
++  if (/insufficient|forbidden|scope|permission|invalid_grant|unauthorized/i.test(text) || status === 401) {
++    return { kind: "permission", message };
++  }
++  // Video yang baru diupload kadang belum siap menerima komentar (videoNotFound / processing / 5xx).
++  if (/videoNotFound|processing|backendError|internalError|timeout|ECONNRESET|ETIMEDOUT/i.test(text) || status >= 500 || status === 404) {
++    return { kind: "retryable", message };
++  }
++  if (status === 403) return { kind: "permission", message };
++  return { kind: "other", message };
++}
++
++/** Komentar final untuk satu klip (komentar AI → cadangan → kosong), sudah + suffix. */
++export function resolveCommentForClip(clip: Pick<ClipResult, "firstComment" | "index">): string {
++  const base = (clip.firstComment || "").trim() || (isCommentFallbackEnabled() ? buildFallbackComment(clip.index) : "");
++  return base ? composeFinalComment(base) : "";
++}
++
++export interface AutoCommentArgs {
++  clips: ClipResult[];
++  accessToken: string;
++  refreshToken: string;
++  scope?: string | null;
++  /** Status privasi video yang baru diupload (private | unlisted | public). */
++  privacy: string;
++  userId: string;
++  /** Callback progres singkat (teks polos, tanpa Markdown) — opsional. */
++  onProgress?: (message: string, percent?: number) => Promise<void>;
++}
++
++/**
++ * Posting komentar pertama ke semua klip yang berhasil diupload.
++ * Mengembalikan daftar klip yang sama (urutan tetap) dengan field komentar terisi.
++ */
++export async function postAutoCommentsForClips(args: AutoCommentArgs): Promise<ClipResult[]> {
++  const { clips, accessToken, refreshToken, scope, privacy, userId, onProgress } = args;
++  if (!isAutoCommentEnabled()) return clips;
++
++  const targets = clips.filter((c) => c.youtubeVideoId && !c.firstCommentId);
++  if (!targets.length) return clips;
++
++  try {
++    if (!getAutoCommentAllowedPrivacy().includes(privacy)) {
++      console.log(`[auto-comment] dilewati: privasi video "${privacy}" tidak ada di YOUTUBE_AUTO_COMMENT_PRIVACY`);
++      return clips;
++    }
++
++    if (hasCommentScope(scope) === false) {
++      const msg = "Izin komentar YouTube belum diberikan. Kirim /connect sekali lagi lalu setujui izin baru.";
++      await onProgress?.(`⚠️ Komentar otomatis dilewati: ${msg}`);
++      await notifyTelegram(
++        userId,
++        `💬 <b>Auto-Comment dilewati</b>\n⚠️ ${escapeHtml(msg)}\n<i>(YouTube Data API butuh izin youtube.force-ssl untuk memposting komentar.)</i>`
++      );
++      return clips.map((c) => (targets.includes(c) ? { ...c, firstCommentStatus: "failed" as const } : c));
++    }
++
++    const oauth2Client = new google.auth.OAuth2(
++      process.env.GOOGLE_CLIENT_ID,
++      process.env.GOOGLE_CLIENT_SECRET,
++      process.env.GOOGLE_REDIRECT_URI
++    );
++    oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
++    const youtube = google.youtube({ version: "v3", auth: oauth2Client });
++
++    const maxAttempts = getAutoCommentRetries();
++    const baseRetryDelay = getAutoCommentRetryDelaySeconds() * 1000;
++    const initialDelay = getAutoCommentDelaySeconds() * 1000;
++
++    await onProgress?.("💬 Memposting komentar pertama (pancingan algoritma)...", 0);
++    if (initialDelay > 0) await sleep(initialDelay);
++
++    const updated = new Map<ClipResult, ClipResult>();
++    const lines: string[] = [];
++    let okCount = 0;
++    let fatal: string | null = null;
++
++    for (let t = 0; t < targets.length; t++) {
++      const clip = targets[t];
++      const label = `Klip ${clip.index + 1}`;
++
++      if (fatal) {
++        updated.set(clip, { ...clip, firstCommentStatus: "failed" });
++        continue;
++      }
++
++      const text = resolveCommentForClip(clip);
++      if (!text) {
++        updated.set(clip, { ...clip, firstCommentStatus: "skipped" });
++        lines.push(`⏭ ${label}: tidak ada teks komentar`);
++        continue;
++      }
++
++      let posted: { id: string } | null = null;
++      let lastError = "";
++      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
++        try {
++          const res = await youtube.commentThreads.insert({
++            part: ["snippet"],
++            requestBody: {
++              snippet: {
++                videoId: clip.youtubeVideoId!,
++                topLevelComment: { snippet: { textOriginal: text } },
++              },
++            },
++          });
++          posted = { id: res.data.id || "" };
++          break;
++        } catch (err) {
++          const c = classifyError(err);
++          lastError = c.message;
++          console.warn(`[auto-comment] ${label} percobaan ${attempt}/${maxAttempts} gagal (${c.kind}): ${c.message}`);
++          if (c.kind === "permission" || c.kind === "quota") {
++            fatal = c.kind === "quota" ? "Kuota YouTube API habis hari ini." : "Izin komentar kurang — kirim /connect sekali lagi.";
++            break;
++          }
++          if (c.kind === "disabled") {
++            lastError = "komentar dinonaktifkan di video";
++            break;
++          }
++          if (attempt < maxAttempts) await sleep(baseRetryDelay * attempt);
++        }
++      }
++
++      if (posted) {
++        okCount++;
++        const commentUrl = posted.id ? `https://www.youtube.com/watch?v=${clip.youtubeVideoId}&lc=${posted.id}` : undefined;
++        updated.set(clip, {
++          ...clip,
++          firstComment: text,
++          firstCommentId: posted.id || undefined,
++          firstCommentUrl: commentUrl,
++          firstCommentStatus: "posted",
++        });
++        lines.push(
++          `✅ ${label}: <i>${escapeHtml(text.slice(0, 120))}</i>` +
++            (isCommentPinLinkEnabled() && commentUrl ? `\n   📌 <a href="${commentUrl}">Buka komentar → ⋮ → Pin</a>` : "")
++        );
++      } else {
++        updated.set(clip, { ...clip, firstComment: text, firstCommentStatus: "failed" });
++        lines.push(`❌ ${label}: ${escapeHtml((fatal || lastError || "gagal").slice(0, 150))}`);
++      }
++
++      await onProgress?.(
++        `💬 Komentar pertama ${t + 1}/${targets.length} diproses`,
++        Math.round(((t + 1) / targets.length) * 100)
++      );
++      if (t < targets.length - 1) await sleep(1500);
++    }
++
++    await onProgress?.(`💬 Komentar pertama terpasang di ${okCount}/${targets.length} klip`, 100);
++
++    await notifyTelegram(
++      userId,
++      `💬 <b>Auto-Comment</b> — ${okCount}/${targets.length} komentar terpasang\n\n${lines.join("\n")}` +
++        (okCount > 0 && isCommentPinLinkEnabled()
++          ? `\n\n<i>ℹ️ YouTube API tidak bisa mem-pin komentar otomatis. Tap link di atas lalu pilih ⋮ → Pin.</i>`
++          : "")
++    );
++
++    return clips.map((c) => updated.get(c) || c);
++  } catch (err) {
++    console.error("[auto-comment] error tak terduga (diabaikan, upload tetap sukses):", err);
++    return clips;
++  }
++}
++
++async function notifyTelegram(userId: string, html: string): Promise<void> {
++  try {
++    const { resolveChatId } = await import("@/lib/analytics-store");
++    const chatId = await resolveChatId(userId);
++    const { bot } = await import("@/lib/telegram-bot");
++    await bot.api.sendMessage(chatId, html.slice(0, 4000), {
++      parse_mode: "HTML",
++      link_preview_options: { is_disabled: true },
++    });
++  } catch (err) {
++    console.warn("[auto-comment] notifikasi Telegram gagal:", err instanceof Error ? err.message : err);
++  }
++}
+diff --git a/src/lib/job-processor.ts b/src/lib/job-processor.ts
+index 4e09be8..6ff99c3 100644
+--- a/src/lib/job-processor.ts
++++ b/src/lib/job-processor.ts
+@@ -13,6 +13,7 @@ import {
+   refreshAccessToken,
+ } from "@/lib/youtube-uploader";
+ import { uploadClipsToDrive } from "@/lib/drive-uploader";
++import { postAutoCommentsForClips } from "@/lib/auto-comment"; // 💬 Auto-First Comment (BARU!)
+ import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
+ import type { TranscriptSegmentWithWords } from "@/lib/subtitle-config"; // 💬 Subtitle (BARU!)
+ import fs from "fs";
+@@ -396,6 +397,23 @@ export async function publishJobClips(
+         }
+         return clip;
+       });
++
++      // === STEP 5a: 💬 AUTO-FIRST COMMENT (BARU!) ===
++      // Posting komentar pancingan hasil AI ke video yang baru terupload
++      // (commentThreads.insert). Mati kalau YOUTUBE_AUTO_COMMENT_ENABLED bukan true.
++      // Tidak pernah melempar error — upload tetap sukses walau komentar gagal.
++      // Lihat src/lib/auto-comment.ts & src/lib/auto-comment-config.ts.
++      finalClips = await postAutoCommentsForClips({
++        clips: finalClips,
++        accessToken,
++        refreshToken,
++        scope: tokenRow.scope,
++        privacy: settings.defaultPrivacy || "private",
++        userId: job.telegramUserId,
++        onProgress: async (message, percent) => {
++          await update("uploading", message, { step: "uploading_youtube", percent });
++        },
++      });
+     }
+ 
+     // === STEP 5b: AUTO-UPLOAD KE GOOGLE DRIVE (jika terhubung & aktif) ===
+diff --git a/src/lib/telegram-bot.ts b/src/lib/telegram-bot.ts
+index 03a4d1b..04b8dbf 100644
+--- a/src/lib/telegram-bot.ts
++++ b/src/lib/telegram-bot.ts
+@@ -72,6 +72,22 @@ import {
+ import { renderSubtitlePreview } from "@/lib/subtitle-burner";
+ // 🪝 AI Hook Overlay (BARU!) — import terpisah, tidak mengubah import di atas.
+ import { getHookConfig, HOOK_STYLES, HOOK_STYLE_PRESETS, getHookStyleLabel } from "@/lib/hook-config";
++// 💬 Auto-First Comment (BARU!) — import terpisah, tidak mengubah import di atas.
++import {
++  isAutoCommentEnabled,
++  getAutoCommentStyle,
++  getAutoCommentStyleLabel,
++  getAutoCommentSuffix,
++  getAutoCommentMaxChars,
++  getAutoCommentAllowedPrivacy,
++  getAutoCommentRetries,
++  getAutoCommentDelaySeconds,
++  isCommentPinLinkEnabled,
++  isCommentFallbackEnabled,
++  AUTO_COMMENT_STYLES,
++  AUTO_COMMENT_STYLE_PRESETS,
++  AUTO_COMMENT_EXAMPLES,
++} from "@/lib/auto-comment-config";
+ // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
+ import {
+   addMonitor,
+@@ -108,7 +124,7 @@ bot.command("start", async (ctx) => {
+ });
+ 
+ bot.command("help", async (ctx) => {
+-  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP, { parse_mode: "Markdown" });
++  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP, { parse_mode: "Markdown" });
+ });
+ 
+ bot.command("connect", async (ctx) => {
+@@ -666,6 +682,37 @@ bot.command("hook", async (ctx) => {
+   );
+ });
+ 
++// 💬 Auto-First Comment (BARU!) — command info terpisah. Konfigurasi lengkap:
++// src/lib/auto-comment-config.ts (env var YOUTUBE_AUTO_COMMENT_*), logika posting:
++// src/lib/auto-comment.ts
++bot.command("autocomment", async (ctx) => {
++  const enabled = isAutoCommentEnabled();
++  const suffix = getAutoCommentSuffix();
++  await ctx.reply(
++    `💬 *Auto-First Comment (Pancingan Algoritma):*\n\n` +
++    `Status: ${enabled ? "✅ Aktif" : "❌ Nonaktif"}\n` +
++    `Gaya: *${getAutoCommentStyleLabel()}* (\`${getAutoCommentStyle()}\`)\n` +
++    `Maks panjang: ${getAutoCommentMaxChars()} karakter\n` +
++    `Suffix: ${suffix ? `\`${suffix.replace(/`/g, "'")}\`` : "—"}\n` +
++    `Video target: ${getAutoCommentAllowedPrivacy().join(", ")}\n` +
++    `Percobaan: ${getAutoCommentRetries()}x • Jeda setelah upload: ${getAutoCommentDelaySeconds()} dtk\n` +
++    `Komentar cadangan: ${isCommentFallbackEnabled() ? "✅" : "❌"} • Link untuk pin: ${isCommentPinLinkEnabled() ? "✅" : "❌"}\n\n` +
++    `*Gaya tersedia:*\n` +
++    AUTO_COMMENT_STYLES.map((st) => `• \`${st}\` → ${AUTO_COMMENT_STYLE_PRESETS[st].description}`).join("\n") +
++    `\n\n*Contoh komentar:*\n` +
++    AUTO_COMMENT_EXAMPLES.map((x) => `• "${mdEscape(x)}"`).join("\n") +
++    `\n\n*Cara Ubah (Railway Variables):*\n` +
++    `• \`YOUTUBE_AUTO_COMMENT_ENABLED\` = \`true\` / \`false\`\n` +
++    `• \`YOUTUBE_AUTO_COMMENT_STYLE\` = ${AUTO_COMMENT_STYLES.map((x) => `\`${x}\``).join(" | ")}\n` +
++    `• \`YOUTUBE_AUTO_COMMENT_SUFFIX\` = teks tambahan (mis. Full video di channel @kamu)\n` +
++    `• \`YOUTUBE_AUTO_COMMENT_PROMPT\` = arahan tambahan untuk AI\n\n` +
++    `ℹ️ AI membuat komentar bersamaan dengan analisis klip, lalu bot memposting via \`commentThreads.insert\` setelah video terupload. ` +
++    `Butuh izin baru: kirim /connect sekali lagi setelah fitur diaktifkan. ` +
++    `YouTube API tidak bisa mem-pin otomatis — bot mengirim link komentar untuk kamu pin manual.`,
++    { parse_mode: "Markdown" }
++  );
++});
++
+ bot.command("introoutro", async (ctx) => {
+   const cfg = getIntroOutroConfig();
+   await ctx.reply(
+@@ -715,6 +762,11 @@ const MONITOR_HELP =
+   `/monitorinterval <id> <menit> — ubah jeda pengecekan\n` +
+   `/monitorupload <id> on|off — atur auto-upload YouTube`;
+ 
++// 💬 Auto-First Comment (BARU!) — teks bantuan terpisah, ditambahkan ke pesan /help.
++const AUTOCOMMENT_HELP =
++  `\n\n💬 *Auto-First Comment*\n` +
++  `/autocomment — info komentar pancingan otomatis di video yang diupload`;
++
+ function mdEscape(text: string): string {
+   return text.replace(/([_*`\[\]])/g, "\\$1");
+ }
+diff --git a/src/lib/youtube-oauth.ts b/src/lib/youtube-oauth.ts
+index b7009eb..0c5a7c9 100644
+--- a/src/lib/youtube-oauth.ts
++++ b/src/lib/youtube-oauth.ts
+@@ -1,6 +1,7 @@
+ import { google } from "googleapis";
+ import { shouldRequestReadonlyScope } from "@/lib/analytics-config";
+ import { RETITLE_SCOPE, shouldRequestRetitleScope } from "@/lib/auto-title-doctor-config";
++import { AUTO_COMMENT_SCOPE, shouldRequestCommentScope } from "@/lib/auto-comment-config";
+ 
+ function getOAuthClient() {
+   return new google.auth.OAuth2(
+@@ -16,13 +17,18 @@ export function getAuthUrl(userId: string): string {
+     access_type: "offline",
+     // 📈 AI Analytics (BARU!) — scope baca-saja ditambahkan supaya views video
+     // private/draft bisa dilacak. Matikan: ANALYTICS_REQUEST_READONLY_SCOPE=false
+-    scope: [
+-      "https://www.googleapis.com/auth/youtube.upload",
+-      ...(shouldRequestReadonlyScope() ? ["https://www.googleapis.com/auth/youtube.readonly"] : []),
+-      // 🩺 Auto-Title Doctor (BARU!) — izin edit judul video (videos.update).
+-      // Hanya diminta kalau ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true.
+-      ...(shouldRequestRetitleScope() ? [RETITLE_SCOPE] : []),
+-    ],
++    scope: Array.from(
++      new Set([
++        "https://www.googleapis.com/auth/youtube.upload",
++        ...(shouldRequestReadonlyScope() ? ["https://www.googleapis.com/auth/youtube.readonly"] : []),
++        // 🩺 Auto-Title Doctor (BARU!) — izin edit judul video (videos.update).
++        // Hanya diminta kalau ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true.
++        ...(shouldRequestRetitleScope() ? [RETITLE_SCOPE] : []),
++        // 💬 Auto-First Comment (BARU!) — izin posting komentar (commentThreads.insert,
++        // scope youtube.force-ssl). Hanya diminta kalau YOUTUBE_AUTO_COMMENT_ENABLED=true.
++        ...(shouldRequestCommentScope() ? [AUTO_COMMENT_SCOPE] : []),
++      ])
++    ),
+     state: userId,
+     prompt: "consent",
+   });

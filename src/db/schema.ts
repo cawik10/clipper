@@ -406,6 +406,13 @@ export interface ClipResult {
   // bersamaan dengan analisis momen. Opsional & disimpan di jsonb `clips`
   // (tidak perlu migrasi). Lihat src/lib/hook-config.ts.
   hook?: string;
+  // 💬 Auto-First Comment (BARU!) — komentar pancingan hasil AI + hasil posting
+  // via commentThreads.insert. Opsional & disimpan di jsonb `clips` (tanpa migrasi).
+  // Lihat src/lib/auto-comment-config.ts & src/lib/auto-comment.ts.
+  firstComment?: string;
+  firstCommentId?: string;
+  firstCommentUrl?: string;
+  firstCommentStatus?: "posted" | "failed" | "skipped";
   filePath?: string;
   thumbnailPath?: string;
   youtubeVideoId?: string;

@@ -40,6 +40,7 @@ Dashboard web menampilkan statistik job, konfigurasi fitur (jumlah klip, durasi 
 | 🔍 **Zoom Effect** | Efek zoom otomatis pada momen dengan viral score tinggi |
 | 💬 **Subtitle / Caption Burn-In** | Caption burned-in dari transkripsi Whisper (timestamp per kata): `karaoke`, `word-highlight`, `simple`, `alex-hormozi` |
 | 🪝 **AI Hook Overlay** | AI membuat teks hook di 1-2 detik pertama klip (`HOOK_*`), dirender via FFmpeg `drawtext`; style `bold-center` / `top-bar` / `split` |
+| 💬 **Auto-First Comment** | AI membuat 1 kalimat komentar pancingan per klip; setelah upload, bot memposting otomatis via `commentThreads.insert` (`YOUTUBE_AUTO_COMMENT_*`) |
 | 🎬 **Intro/Outro** | Tambahan intro & outro otomatis di setiap klip |
 | 🖼 **Thumbnail Generator** | Generate thumbnail otomatis dari frame klip |
 | 📐 **Aspect Ratio 9:16** | Mode blur background, center crop, black bars, stretch, atau original |
@@ -141,6 +142,7 @@ curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
 | `WATERMARK_ENABLED` / `WATERMARK_TEXT` / `WATERMARK_POSITION` | ⚪ | Pengaturan watermark klip |
 | `ZOOM_EFFECT_ENABLED` / `ZOOM_EFFECT_MODE` / `ZOOM_EFFECT_TYPE` | ⚪ | Pengaturan efek zoom otomatis |
 | `HOOK_ENABLED` / `HOOK_DURATION` / `HOOK_STYLE` / `HOOK_FONT_SIZE` / `HOOK_COLOR` / `HOOK_BG_COLOR` | ⚪ | AI Hook Overlay (default: `true` / `2` / `bold-center` / `56` / `white` / `#FF0000`) |
+| `YOUTUBE_AUTO_COMMENT_ENABLED` / `YOUTUBE_AUTO_COMMENT_STYLE` / `YOUTUBE_AUTO_COMMENT_SUFFIX` | ⚪ | Auto-First Comment (default: `false` / `mixed` / kosong) — lihat bagian Auto-First Comment |
 | `INTRO_ENABLED` / `OUTRO_ENABLED` | ⚪ | Pengaturan intro & outro otomatis |
 | `THUMBNAIL_ENABLED` / `THUMBNAIL_MODE` | ⚪ | Pengaturan thumbnail otomatis |
 | `ASPECT_RATIO_MODE` | ⚪ | `blur` \| `crop` \| `pad` \| `stretch` \| `none` (default `blur`) |
@@ -169,6 +171,7 @@ curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
 /zoom             - Info & ubah konfigurasi zoom effect
 /subtitle         - Info config subtitle + preview style (mis. /subtitle karaoke)
 /hook             - Info AI Hook Overlay (teks pembuka)
+/autocomment      - Info Auto-First Comment (komentar pancingan otomatis)
 /introoutro       - Info & ubah konfigurasi intro/outro
 /drive            - Google Drive: status, hubungkan, ganti akun
 /drivefolder      - Ganti folder tujuan Drive (link / reset)
@@ -290,6 +293,35 @@ Setelah worker analytics menarik views (default tiap 180 menit), klip yang sudah
 Perintah: `/analytics retitle` (status & riwayat) · `/analytics retitle run` (jalankan sekarang) · `GET /api/analytics/run?secret=...&action=retitle[&dryRun=1][&userId=...]`.
 
 > 💡 Video yang masih **private** tidak diganti judulnya (views 0 karena memang tidak bisa dilihat siapa pun). Hanya `description` bagian hashtag-akhir yang diganti; sisa deskripsi, kategori, dan bahasa video dipertahankan. Semua env & prompt AI ada di `src/lib/auto-title-doctor-config.ts`.
+
+---
+
+## 💬 Auto-First Comment (Pancingan Algoritma YouTube)
+
+Algoritma YouTube Shorts menyukai kolom komentar yang ramai. Saat AI menganalisis klip, AI sekaligus membuat **1 kalimat komentar pancingan/kontroversial** yang relevan dengan isi klip (tanpa panggilan AI tambahan). Setelah video terupload lewat YouTube Data API, bot otomatis memposting komentar itu memakai endpoint `commentThreads.insert`.
+
+Contoh: *"Setuju gak sama pendapat dia di detik terakhir? Coba komen!"* atau *"Full videonya ada di channel @namakamu"* (lewat `YOUTUBE_AUTO_COMMENT_SUFFIX`).
+
+**Aktifkan:** set `YOUTUBE_AUTO_COMMENT_ENABLED=true` di Railway Variables, lalu kirim `/connect` sekali lagi di Telegram (butuh izin `youtube.force-ssl`). Default **mati**.
+
+| Variable | Default | Deskripsi |
+| --- | --- | --- |
+| `YOUTUBE_AUTO_COMMENT_ENABLED` | false | Saklar utama |
+| `YOUTUBE_AUTO_COMMENT_STYLE` | mixed | `question` \| `controversial` \| `cta` \| `mixed` |
+| `YOUTUBE_AUTO_COMMENT_SUFFIX` | – | Kalimat tambahan di akhir komentar (mis. `Full video ada di channel @namakamu`) |
+| `YOUTUBE_AUTO_COMMENT_PROMPT` | – | Arahan tambahan untuk AI |
+| `YOUTUBE_AUTO_COMMENT_MAX_CHARS` | 150 | Batas panjang kalimat dari AI (30–500) |
+| `YOUTUBE_AUTO_COMMENT_FALLBACK` | true | Pakai komentar cadangan kalau AI tidak memberi komentar |
+| `YOUTUBE_AUTO_COMMENT_PRIVACY` | public,unlisted,private | Hanya komentari video dengan status ini |
+| `YOUTUBE_AUTO_COMMENT_DELAY_SECONDS` | 5 | Jeda setelah upload sebelum komentar |
+| `YOUTUBE_AUTO_COMMENT_RETRIES` | 3 | Maks percobaan per klip |
+| `YOUTUBE_AUTO_COMMENT_RETRY_DELAY_SECONDS` | 15 | Jeda antar percobaan |
+| `YOUTUBE_AUTO_COMMENT_PIN_LINK` | true | Kirim link komentar ke Telegram untuk di-pin manual |
+| `YOUTUBE_AUTO_COMMENT_REQUEST_SCOPE` | true | Minta izin komentar saat `/connect` |
+
+Perintah: `/autocomment` (status & konfigurasi).
+
+> 📌 **Soal pin:** YouTube Data API v3 **tidak menyediakan endpoint untuk mem-pin komentar**. Bot memposting komentar sebagai pemilik channel, lalu mengirim link langsung ke komentar itu di Telegram — tinggal ⋮ → *Pin*. Kalau posting komentar gagal, upload video tetap sukses. Gaya, prompt AI & komentar cadangan ada di `src/lib/auto-comment-config.ts`.
 
 ---
 
