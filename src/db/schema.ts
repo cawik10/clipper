@@ -386,6 +386,27 @@ export const clipRetitleLog = pgTable("clip_retitle_log", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ✂️ Auto-Prune Klip Gagal (BARU!) — usulan sembunyikan/hapus klip sepi; keputusan ada di tangan user.
+// Dibuat otomatis saat runtime (src/lib/auto-prune.ts → ensurePruneTable).
+export const clipPruneSuggestion = pgTable("clip_prune_suggestion", {
+  id: serial("id").primaryKey(),
+  youtubeVideoId: text("youtube_video_id").notNull().unique(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  title: text("title").notNull(),
+  views: integer("views").notNull().default(0),
+  ageDays: integer("age_days").notNull().default(0),
+  retitleCount: integer("retitle_count").notNull().default(0),
+  status: text("status").notNull().default("pending"), // pending | hidden | deleted | kept
+  lastError: text("last_error"),
+  notifiedCount: integer("notified_count").notNull().default(0),
+  lastNotifiedAt: timestamp("last_notified_at"),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type ClipPruneSuggestionRow = typeof clipPruneSuggestion.$inferSelect;
+
 export type ClipRetitleLogRow = typeof clipRetitleLog.$inferSelect;
 
 export type ClipPerformanceRow = typeof clipPerformance.$inferSelect;

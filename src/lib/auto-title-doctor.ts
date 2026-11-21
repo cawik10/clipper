@@ -114,7 +114,7 @@ export interface RetitleSummary {
   errors: string[];
 }
 
-type ErrorKind = "permission" | "quota" | "ai" | "youtube";
+export type ErrorKind = "permission" | "quota" | "ai" | "youtube";
 
 // ─── HELPER TEKS ─────────────────────────────────────────────────────────
 
@@ -232,7 +232,7 @@ async function generateNewTitle(args: {
 
 // ─── YOUTUBE ─────────────────────────────────────────────────────────────
 
-function classifyError(err: unknown): { kind: ErrorKind; message: string } {
+export function classifyError(err: unknown): { kind: ErrorKind; message: string } {
   const e = err as {
     code?: number | string;
     message?: string;
@@ -250,13 +250,13 @@ function classifyError(err: unknown): { kind: ErrorKind; message: string } {
   return { kind: "youtube", message };
 }
 
-function hasRequiredScope(scope: string | null | undefined): boolean | null {
+export function hasRequiredScope(scope: string | null | undefined): boolean | null {
   if (!scope || !scope.trim()) return null; // tidak diketahui → coba saja
   const granted = scope.split(/[\s,]+/);
   return RETITLE_REQUIRED_SCOPES.some((s) => granted.includes(s));
 }
 
-async function getYoutubeClient(userId: string): Promise<{ youtube: youtube_v3.Youtube; scope: string | null } | { error: string; kind: ErrorKind }> {
+export async function getYoutubeClient(userId: string): Promise<{ youtube: youtube_v3.Youtube; scope: string | null } | { error: string; kind: ErrorKind }> {
   const rows = await db.select().from(youtubeTokens).where(eq(youtubeTokens.telegramUserId, userId));
   if (!rows.length) return { error: "YouTube belum terhubung (/connect)", kind: "permission" };
   const tokenRow = rows[0];

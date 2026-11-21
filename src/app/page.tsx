@@ -50,6 +50,7 @@ import HookOverlaySection from "@/components/HookOverlaySection";
 // 📈 AI Analytics & Feedback Loop (BARU!) — komponen section terpisah.
 import AnalyticsSection from "@/components/AnalyticsSection";
 import AutoTitleDoctorSection from "@/components/AutoTitleDoctorSection";
+import AutoPruneSection from "@/components/AutoPruneSection"; // ✂️ Auto-Prune Klip Gagal (BARU!)
 import AutoCommentSection from "@/components/AutoCommentSection"; // 💬 Auto-First Comment (BARU!)
 import SourceGuardSection from "@/components/SourceGuardSection"; // 🛡️ Source Credit & Copyright Guard (BARU!)
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
@@ -1257,6 +1258,9 @@ export default async function HomePage() {
         {/* 🩺 AUTO-TITLE DOCTOR (FITUR BARU!) — bagian dari AI Analytics Loop, lihat src/components/AutoTitleDoctorSection.tsx */}
         <AutoTitleDoctorSection />
 
+        {/* ✂️ AUTO-PRUNE KLIP GAGAL (FITUR BARU!) — usulan sembunyikan/hapus klip sepi, lihat src/components/AutoPruneSection.tsx */}
+        <AutoPruneSection />
+
         {/* 💬 AUTO-FIRST COMMENT (FITUR BARU!) — pancingan algoritma, lihat src/components/AutoCommentSection.tsx */}
         <AutoCommentSection />
 
@@ -1355,6 +1359,7 @@ export default async function HomePage() {
               { cmd: "/driveoff",    desc: "Matikan auto-upload ke Google Drive",           isNew: true },
               { cmd: "/drivedisconnect", desc: "Putuskan akun Google Drive",                isNew: true },
               { cmd: "/jadwal",      desc: "Lihat & batalkan antrean jadwal upload YouTube ← BARU!", isNew: true },
+              { cmd: "/prune",       desc: "Usulan sembunyikan/hapus klip sepi (Auto-Prune) ← BARU!", isNew: true },
             ].map((item) => (
               <div key={item.cmd} className="flex items-start gap-2 bg-slate-800/60 rounded-lg px-3 py-2 text-sm">
                 <code className={`font-mono font-bold shrink-0 ${item.isNew ? "text-emerald-400" : "text-blue-400"}`}>

@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import { shouldRequestReadonlyScope } from "@/lib/analytics-config";
 import { RETITLE_SCOPE, shouldRequestRetitleScope } from "@/lib/auto-title-doctor-config";
+import { PRUNE_SCOPE, shouldRequestPruneScope } from "@/lib/auto-prune-config";
 import { AUTO_COMMENT_SCOPE, shouldRequestCommentScope } from "@/lib/auto-comment-config";
 
 function getOAuthClient() {
@@ -24,6 +25,9 @@ export function getAuthUrl(userId: string): string {
         // 🩺 Auto-Title Doctor (BARU!) — izin edit judul video (videos.update).
         // Hanya diminta kalau ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true.
         ...(shouldRequestRetitleScope() ? [RETITLE_SCOPE] : []),
+        // ✂️ Auto-Prune Klip Gagal (BARU!) — izin sembunyikan/hapus video (videos.update/delete,
+        // scope youtube.force-ssl yang sama). Matikan: AUTO_PRUNE_ENABLED=false / AUTO_PRUNE_REQUEST_SCOPE=false
+        ...(shouldRequestPruneScope() ? [PRUNE_SCOPE] : []),
         // 💬 Auto-First Comment (BARU!) — izin posting komentar (commentThreads.insert,
         // scope youtube.force-ssl). Hanya diminta kalau YOUTUBE_AUTO_COMMENT_ENABLED=true.
         ...(shouldRequestCommentScope() ? [AUTO_COMMENT_SCOPE] : []),

@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
  *   GET /api/analytics/run?secret=...&action=report                  → paksa kirim laporan mingguan ke semua user
  *   GET /api/analytics/run?secret=...&action=report&userId=123       → ... hanya untuk satu user
  *   GET /api/analytics/run?secret=...&action=learn&userId=123        → paksa Smart Learning untuk satu user
+ *   GET /api/analytics/run?secret=...&action=prune[&userId=123][&notify=0]  → ✂️ Auto-Prune Klip Gagal sekarang (usulan sembunyikan/hapus; notify=0 = tanpa kirim Telegram)
  *   GET /api/analytics/run?secret=...&action=retitle[&userId=123][&dryRun=1] → 🩺 Auto-Title Doctor sekarang (butuh ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true; dryRun=1 = simulasi tanpa mengubah YouTube)
  */
 export async function GET(req: NextRequest) {
@@ -54,6 +55,20 @@ export async function GET(req: NextRequest) {
       const dryRun = /^(1|true|yes)$/i.test(req.nextUrl.searchParams.get("dryRun") || "") ? true : undefined;
       for (const id of ids) await syncUserStats(id).catch(() => {});
       return NextResponse.json({ action, results: await runAutoRetitleForUsers(ids, { force: true, dryRun }) });
+    }
+
+    // ✂️ Auto-Prune Klip Gagal (BARU!) — hanya membuat USULAN; tidak ada video yang diubah.
+    if (action === "prune") {
+      const { runAutoPruneForUsers } = await import("@/lib/auto-prune");
+      const { isAutoPruneEnabled } = await import("@/lib/auto-prune-config");
+      if (!isAutoPruneEnabled()) {
+        return NextResponse.json({ action, enabled: false, message: "AUTO_PRUNE_ENABLED=false" });
+      }
+      const { listTrackedUserIds } = await import("@/lib/analytics-store");
+      const ids = userId ? [userId] : await listTrackedUserIds();
+      const notify = /^(0|false|no)$/i.test(req.nextUrl.searchParams.get("notify") || "") ? false : true;
+      for (const id of ids) await syncUserStats(id).catch(() => {});
+      return NextResponse.json({ action, results: await runAutoPruneForUsers(ids, { notify }) });
     }
 
     if (action === "report") {

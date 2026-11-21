@@ -46,6 +46,7 @@ import {
 import { setNichePrompt, clearNichePrompt } from "@/lib/user-settings";
 // 📈 AI Analytics & Feedback Loop (BARU!) — import terpisah, tidak mengubah import di atas.
 import { registerAnalyticsCommands } from "@/lib/analytics-telegram";
+import { registerAutoPruneCommands } from "@/lib/auto-prune-telegram"; // ✂️ Auto-Prune Klip Gagal (BARU!)
 // 🛡️ Source Credit & Copyright Guard (BARU!) — import terpisah, tidak mengubah import di atas.
 import { registerSourceGuardCommands, SOURCE_GUARD_HELP } from "@/lib/source-guard-telegram";
 import { NICHE_PRESETS, getNichePromptLabel, getDefaultNichePrompt } from "@/lib/niche-prompt";
@@ -398,6 +399,7 @@ bot.callbackQuery("niche_menu", async (ctx) => {
 // 📈 AI Analytics & Feedback Loop (BARU!) — /analytics (laporan performa + Smart Learning).
 // Lihat src/lib/analytics-telegram.ts. Dimatikan lewat ANALYTICS_ENABLED=false.
 registerAnalyticsCommands(bot);
+registerAutoPruneCommands(bot); // ✂️ /prune + tombol Sembunyikan/Hapus/Pertahankan (BARU!)
 registerSourceGuardCommands(bot); // 🛡️ /sourceguard & /whitelist (BARU!)
 
 // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — info read-only, konfigurasi

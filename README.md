@@ -297,6 +297,48 @@ Perintah: `/analytics retitle` (status & riwayat) · `/analytics retitle run` (j
 
 ---
 
+## ✂️ Auto-Prune Klip Gagal (bagian dari AI Analytics Loop)
+
+Klip yang sudah tayang **> 14 hari**, views-nya masih **< 50**, dan sudah **di-retitle ≥ 1x** oleh Auto-Title Doctor akan **diusulkan** untuk disembunyikan atau dihapus. Channel yang penuh klip sepi bisa menurunkan performa distribusi. **Bot hanya memberi usulan — kamu yang memutuskan** lewat tombol di Telegram:
+
+```
+✂️ Auto-Prune Klip Gagal
+🎬 Judul klip
+👁 12 views · 📅 21 hari tayang · ✏️ sudah di-retitle 1x
+[🙈 Sembunyikan] [🗑 Hapus] [✅ Pertahankan]
+```
+
+- **Sembunyikan** → privasi video diubah ke `private` (atau `unlisted`), field status lain dipertahankan. Bisa dibuka lagi kapan saja di YouTube Studio.
+- **Hapus** → `videos.delete` (permanen), dengan konfirmasi tombol kedua.
+- **Pertahankan** → klip tidak diusulkan lagi.
+- Kalau aksi gagal (mis. izin kurang), usulan tetap menunggu dan tombolnya bisa dicoba lagi.
+
+Berjalan otomatis di worker analytics setelah views disinkron (default tiap 180 menit). Default **nyala** karena hanya memberi usulan; matikan dengan `AUTO_PRUNE_ENABLED=false`.
+
+| Variable                       | Default        | Deskripsi                                                                |
+| ------------------------------ | -------------- | ------------------------------------------------------------------------ |
+| AUTO\_PRUNE\_ENABLED           | true           | Saklar utama (hanya memberi usulan)                                      |
+| AUTO\_PRUNE\_MIN\_AGE\_DAYS    | 14             | Klip dinilai gagal setelah tayang N hari                                 |
+| AUTO\_PRUNE\_VIEWS\_THRESHOLD  | 50             | Views di bawah angka ini = sepi                                          |
+| AUTO\_PRUNE\_MIN\_RETITLES     | 1              | Minimal sudah di-retitle N kali (0 = tidak wajib)                        |
+| AUTO\_PRUNE\_RETITLE\_GRACE\_DAYS | 3          | Beri waktu N hari setelah retitle terakhir                               |
+| AUTO\_PRUNE\_ACTIONS           | hide,delete    | Tombol yang ditawarkan (`hide`, `delete`, atau salah satu)               |
+| AUTO\_PRUNE\_HIDE\_TO          | private        | "Sembunyikan" = ubah privasi ke `private` \| `unlisted`                  |
+| AUTO\_PRUNE\_DELETE\_CONFIRM   | true           | Hapus butuh konfirmasi tombol kedua                                      |
+| AUTO\_PRUNE\_PRIVACY           | public,unlisted | Hanya usulkan video dengan privasi ini                                  |
+| AUTO\_PRUNE\_MAX\_PER\_NOTIFY  | 5              | Maks klip per notifikasi per siklus                                      |
+| AUTO\_PRUNE\_NOTIFY            | true           | Kirim usulan ke Telegram                                                 |
+| AUTO\_PRUNE\_REMINDER\_DAYS    | 0              | Ingatkan lagi usulan yang belum diputuskan tiap N hari (0 = tidak)       |
+| AUTO\_PRUNE\_KEEP\_SNOOZE\_DAYS | 0             | Klip "Dipertahankan" boleh diusulkan lagi setelah N hari (0 = tidak)     |
+| AUTO\_PRUNE\_MAX\_STALE\_HOURS | 48             | Views harus disinkron dalam N jam terakhir                               |
+| AUTO\_PRUNE\_REQUEST\_SCOPE    | true           | Minta izin edit video (`youtube.force-ssl`) saat /connect                |
+
+Perintah: `/prune` (status & aturan) · `/prune list` (lihat & putuskan usulan) · `/prune run` (cari klip gagal sekarang) · `GET /api/analytics/run?secret=...&action=prune[&userId=...][&notify=0]`.
+
+> 🔑 Sembunyikan & hapus butuh izin `youtube.force-ssl` (sama dengan Auto-Title Doctor). Kalau akun belum memberi izin itu, kirim `/connect` sekali lagi. Syarat "sudah di-retitle" mengandalkan Auto-Title Doctor (`ANALYTICS_AUTO_RETITLE_LOW_VIEWS=true`); kalau tidak dipakai, set `AUTO_PRUNE_MIN_RETITLES=0`. Tabel `clip_prune_suggestion` dibuat **otomatis** saat runtime. Semua default & teks pesan ada di `src/lib/auto-prune-config.ts`; logika di `src/lib/auto-prune.ts`.
+
+---
+
 ## 💬 Auto-First Comment (Pancingan Algoritma YouTube)
 
 Algoritma YouTube Shorts menyukai kolom komentar yang ramai. Saat AI menganalisis klip, AI sekaligus membuat **1 kalimat komentar pancingan/kontroversial** yang relevan dengan isi klip (tanpa panggilan AI tambahan). Setelah video terupload lewat YouTube Data API, bot otomatis memposting komentar itu memakai endpoint `commentThreads.insert`.

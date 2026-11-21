@@ -41,6 +41,8 @@ import { buildAnalyticsReport } from "@/lib/analytics-report";
 import { runSmartLearning } from "@/lib/analytics-learning";
 import { runAutoRetitleForUsers } from "@/lib/auto-title-doctor";
 import { isAutoRetitleEnabled } from "@/lib/auto-title-doctor-config";
+import { runAutoPruneForUsers } from "@/lib/auto-prune"; // ✂️ Auto-Prune Klip Gagal (BARU!)
+import { isAutoPruneEnabled } from "@/lib/auto-prune-config";
 import { db } from "@/db";
 import { analyticsUserState } from "@/db/schema";
 import { and, eq, isNull, ne, or } from "drizzle-orm";
@@ -143,6 +145,8 @@ export interface AnalyticsCycleResult {
   errors: number;
   /** 🩺 Auto-Title Doctor: jumlah klip yang judulnya diganti (atau disimulasikan) di siklus ini */
   retitled: number;
+  /** ✂️ Auto-Prune: jumlah usulan sembunyikan/hapus klip baru di siklus ini */
+  pruneSuggested: number;
 }
 
 /**
@@ -150,7 +154,7 @@ export interface AnalyticsCycleResult {
  * endpoint manual). `userId` = batasi ke satu user.
  */
 export async function runAnalyticsCycle(opts: { force?: boolean; userId?: string } = {}): Promise<AnalyticsCycleResult> {
-  const result: AnalyticsCycleResult = { enabled: isAnalyticsEnabled(), discovered: 0, synced: 0, reportsSent: 0, errors: 0, retitled: 0 };
+  const result: AnalyticsCycleResult = { enabled: isAnalyticsEnabled(), discovered: 0, synced: 0, reportsSent: 0, errors: 0, retitled: 0, pruneSuggested: 0 };
   if (!result.enabled) return result;
   if (globalForAnalytics.__autoclipAnalyticsRunning) return result;
   globalForAnalytics.__autoclipAnalyticsRunning = true;
@@ -214,6 +218,20 @@ export async function runAnalyticsCycle(opts: { force?: boolean; userId?: string
         console.error("[title-doctor] siklus gagal:", err instanceof Error ? err.message : err);
       }
     }
+
+    // ✂️ Auto-Prune Klip Gagal (BARU!) — klip > 14 hari, views < 50, sudah di-retitle → USULAN
+    // sembunyikan/hapus ke Telegram (user yang memutuskan). Kegagalan di sini tidak mengganggu siklus lain.
+    if (isAutoPruneEnabled() && syncedUsers.length) {
+      try {
+        const prune = await runAutoPruneForUsers(syncedUsers);
+        result.pruneSuggested = prune.reduce((n, r) => n + r.suggested, 0);
+        for (const r of prune) {
+          if (r.errors.length) console.warn(`[auto-prune] user ${r.userId}: ${r.errors.slice(0, 3).join(" | ")}`);
+        }
+      } catch (err) {
+        console.error("[auto-prune] siklus gagal:", err instanceof Error ? err.message : err);
+      }
+    }
   } finally {
     globalForAnalytics.__autoclipAnalyticsRunning = false;
   }
@@ -232,8 +250,8 @@ export function startAnalyticsWorker(): void {
   const tick = async () => {
     try {
       const r = await runAnalyticsCycle();
-      if (r.synced > 0 || r.reportsSent > 0 || r.errors > 0 || r.retitled > 0) {
-        console.log(`[analytics] Sync ${r.synced} user, ${r.reportsSent} laporan terkirim, ${r.retitled} judul diperbaiki, ${r.errors} error.`);
+      if (r.synced > 0 || r.reportsSent > 0 || r.errors > 0 || r.retitled > 0 || r.pruneSuggested > 0) {
+        console.log(`[analytics] Sync ${r.synced} user, ${r.reportsSent} laporan terkirim, ${r.retitled} judul diperbaiki, ${r.pruneSuggested} usulan prune, ${r.errors} error.`);
       }
     } catch (err) {
       console.error("[analytics] Tick worker gagal:", err);
