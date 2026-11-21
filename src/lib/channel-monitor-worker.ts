@@ -41,6 +41,7 @@ import {
   type VideoItem,
 } from "@/lib/channel-monitor";
 import { MonitoredChannelRow } from "@/db/schema";
+import { isSourceGuardBlockedError } from "@/lib/source-guard"; // 🛡️ Source Guard (BARU!)
 import { getChannelMonitorPollIntervalMs, isChannelMonitorEnabled } from "@/lib/channel-monitor-config";
 
 function safeMd(text: string): string {
@@ -192,6 +193,13 @@ async function processMonitoredVideo(monitor: MonitoredChannelRow, video: VideoI
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     await tracker.finishError(safeMd(errMsg)).catch(() => {});
+    // 🛡️ Source Guard (BARU!) — video diblokir guard bukan error sistem: tandai
+    // "skipped" (tidak dicoba ulang, tidak dihitung error). Lihat src/lib/source-guard.ts.
+    if (isSourceGuardBlockedError(err)) {
+      await updateMonitoredVideoStatus(monitor.id, video.id, "skipped", errMsg);
+      console.log(`[channel-monitor] Video ${video.id} di-skip Source Guard: ${errMsg}`);
+      return;
+    }
     await updateMonitoredVideoStatus(monitor.id, video.id, "error", errMsg);
     throw err;
   }

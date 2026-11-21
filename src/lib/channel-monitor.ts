@@ -215,14 +215,10 @@ async function resolveChannelViaYtDlp(url: string): Promise<ResolvedMonitorTarge
   const info = JSON.parse(stdout.trim().split("\n")[0]);
 
   const externalId: string = info.channel_id || info.id || videosUrl;
-  const uploadsPlaylistId = externalId.startsWith("UC")
-    ? `UU${externalId.slice(2)}`
-    : externalId;
-
   return {
     sourceType: "channel",
     externalId,
-    uploadsPlaylistId,
+    uploadsPlaylistId: externalId, // dipakai sbg penanda "listing pakai yt-dlp langsung"
     title: info.channel || info.title || externalId,
     inputUrl: videosUrl,
   };
@@ -247,13 +243,8 @@ export async function listRecentVideos(
 ): Promise<VideoItem[]> {
   const apiKey = getYoutubeApiKey();
   if (apiKey && monitor.uploadsPlaylistId) {
-    const validPlaylistId = monitor.uploadsPlaylistId.startsWith("UC")
-      ? `UU${monitor.uploadsPlaylistId.slice(2)}`
-      : monitor.uploadsPlaylistId;
-
-    const viaApi = await listRecentVideosViaApi(validPlaylistId, apiKey, limit).catch((err: any) => {
-      const msg = err?.response?.data?.error?.message || err?.message || String(err);
-      console.error(`[channel-monitor] YouTube API listing gagal (${validPlaylistId}), fallback ke yt-dlp: ${msg}`);
+    const viaApi = await listRecentVideosViaApi(monitor.uploadsPlaylistId, apiKey, limit).catch((err) => {
+      console.error("[channel-monitor] YouTube API listing gagal, fallback ke yt-dlp:", err);
       return null;
     });
     if (viaApi) return viaApi;

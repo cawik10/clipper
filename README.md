@@ -41,6 +41,7 @@ Dashboard web menampilkan statistik job, konfigurasi fitur (jumlah klip, durasi 
 | 💬 **Subtitle / Caption Burn-In** | Caption burned-in dari transkripsi Whisper (timestamp per kata): `karaoke`, `word-highlight`, `simple`, `alex-hormozi` |
 | 🪝 **AI Hook Overlay** | AI membuat teks hook di 1-2 detik pertama klip (`HOOK_*`), dirender via FFmpeg `drawtext`; style `bold-center` / `top-bar` / `split` |
 | 💬 **Auto-First Comment** | AI membuat 1 kalimat komentar pancingan per klip; setelah upload, bot memposting otomatis via `commentThreads.insert` (`YOUTUBE_AUTO_COMMENT_*`) |
+| 🛡️ **Source Credit & Copyright Guard** | Kredit sumber otomatis di deskripsi, whitelist channel, batas klip per video sumber per hari, skip video bertanda Content ID (SOURCE\_CREDIT\_ENABLED, COPYRIGHT\_GUARD\_MODE = warn \| block) |
 | 🎬 **Intro/Outro** | Tambahan intro & outro otomatis di setiap klip |
 | 🖼 **Thumbnail Generator** | Generate thumbnail otomatis dari frame klip |
 | 📐 **Aspect Ratio 9:16** | Mode blur background, center crop, black bars, stretch, atau original |
@@ -322,6 +323,44 @@ Contoh: *"Setuju gak sama pendapat dia di detik terakhir? Coba komen!"* atau *"F
 Perintah: `/autocomment` (status & konfigurasi).
 
 > 📌 **Soal pin:** YouTube Data API v3 **tidak menyediakan endpoint untuk mem-pin komentar**. Bot memposting komentar sebagai pemilik channel, lalu mengirim link langsung ke komentar itu di Telegram — tinggal ⋮ → *Pin*. Kalau posting komentar gagal, upload video tetap sukses. Gaya, prompt AI & komentar cadangan ada di `src/lib/auto-comment-config.ts`.
+
+---
+
+## 🛡️ Source Credit & Copyright Guard
+
+Auto-Monitor mengambil video channel lain secara otomatis — risiko terbesarnya **copyright strike** atau **penolakan monetisasi (reused content)**. Fitur ini menambah pengaman berikut (semua opsional, diatur lewat Railway Variables, kode lain tidak perlu disentuh):
+
+| Pengaman | Cara kerja |
+| --- | --- |
+| **Source Credit** | Deskripsi YouTube tiap klip otomatis ditambah `Source: <judul> — <channel> <link>` (sebelum baris hashtag). |
+| **Whitelist channel** | Hanya channel milik sendiri (hasil `/connect`) atau yang diizinkan (`COPYRIGHT_WHITELIST_CHANNELS` / `/whitelist add`) yang lolos. |
+| **Batas klip / sumber / hari** | Maks N klip dari satu video sumber per hari (default 3). Mode `block` memangkas klip / menolak job. |
+| **Skip Content ID** | Video dengan sinyal Content ID (musik berlisensi, "Provided to YouTube by", error blokir hak cipta, kata kunci kustom) di-skip. |
+
+Pengecekan berjalan **sebelum download** (hemat bandwidth/CPU) lewat metadata `yt-dlp --dump-json`, berlaku untuk Auto-Monitor **dan** link manual (ubah dengan `COPYRIGHT_GUARD_SCOPE=monitor`). Video yang diblokir guard di Auto-Monitor ditandai `skipped` (bukan error).
+
+| Variable | Default | Deskripsi |
+| --- | --- | --- |
+| SOURCE\_CREDIT\_ENABLED | true | Saklar kredit sumber di deskripsi |
+| SOURCE\_CREDIT\_TEMPLATE | `Source: {title} — {channel} {url}` | Format baris kredit (placeholder `{title}` `{channel}` `{url}`) |
+| SOURCE\_CREDIT\_POSITION | bottom | `bottom` (sebelum hashtag) \| `top` |
+| COPYRIGHT\_GUARD\_MODE | warn | `warn` = peringatan saja \| `block` = blokir pelanggaran \| `off` |
+| COPYRIGHT\_GUARD\_SCOPE | all | `all` = semua job \| `monitor` = hanya Auto-Monitor |
+| COPYRIGHT\_WHITELIST\_CHANNELS | – | ID `UCxxx` / `@handle` / nama / URL channel, pisah koma |
+| COPYRIGHT\_WHITELIST\_REQUIRED | false | true = whitelist wajib walau kosong (hanya channel sendiri yang lolos) |
+| COPYRIGHT\_ALLOW\_OWN\_CHANNEL | true | Channel YouTube hasil `/connect` otomatis lolos (butuh izin `youtube.readonly`) |
+| COPYRIGHT\_MAX\_CLIPS\_PER\_SOURCE\_PER\_DAY | 3 | Maks klip per video sumber per hari (0 = tanpa batas) |
+| COPYRIGHT\_DAY\_TIMEZONE | Asia/Jakarta | Zona waktu pergantian hari (default ikut `SCHEDULER_TIMEZONE`) |
+| COPYRIGHT\_SKIP\_CONTENT\_ID | true | Skip video bertanda Content ID |
+| COPYRIGHT\_CONTENT\_ID\_MUSIC\_SIGNAL | true | Metadata musik berlisensi dianggap tanda Content ID |
+| COPYRIGHT\_CONTENT\_ID\_KEYWORDS | – | Kata kunci tambahan (pisah koma) di judul/deskripsi/channel sumber |
+| COPYRIGHT\_PREFLIGHT\_TIMEOUT\_MS | 45000 | Batas waktu pengambilan metadata sumber |
+
+Perintah Telegram: `/sourceguard` (status, konfigurasi & statistik) · `/whitelist` (daftar) · `/whitelist add @channel` · `/whitelist remove <nomor|channel>`.
+
+> ⚠️ **Mode default `warn`** hanya memberi peringatan di progress Telegram + log (tidak ada yang berubah selain kredit di deskripsi). Setelah yakin, set `COPYRIGHT_GUARD_MODE=block`. Kalau whitelist aktif di mode `block`, video yang channel-nya tidak bisa diverifikasi (metadata gagal diambil) ikut diblokir.
+>
+> 🔎 YouTube **tidak menyediakan API publik** untuk melihat klaim Content ID video orang lain, jadi deteksi berbasis **sinyal** (bukan jaminan 100%). Whitelist tetap pengaman terkuat. Daftar penanda bawaan: `DEFAULT_CONTENT_ID_KEYWORDS` di `src/lib/source-guard-config.ts`; logika di `src/lib/source-guard.ts`. Tabel `source_guard_log` & `source_whitelist` dibuat **otomatis** saat runtime.
 
 ---
 

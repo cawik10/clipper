@@ -392,6 +392,40 @@ export type ClipPerformanceRow = typeof clipPerformance.$inferSelect;
 export type AnalyticsUserStateRow = typeof analyticsUserState.$inferSelect;
 export type AnalyticsLearningLogRow = typeof analyticsLearningLog.$inferSelect;
 
+// =====================================================================
+// 🛡️ SOURCE CREDIT & COPYRIGHT GUARD (BARU!)
+// =====================================================================
+// Tabel tambahan — TIDAK mengubah tabel/kolom yang sudah ada. Dibuat otomatis
+// saat runtime (lihat ensureSourceGuardTables di src/lib/source-guard.ts),
+// jadi tidak wajib `drizzle-kit push`. Konfigurasi: src/lib/source-guard-config.ts
+export const sourceGuardLog = pgTable("source_guard_log", {
+  id: serial("id").primaryKey(),
+  jobId: text("job_id").notNull(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  sourceKey: text("source_key").notNull(), // hasil normalizeSourceUrl (mis. youtube:<id>)
+  sourceUrl: text("source_url").notNull(),
+  sourceTitle: text("source_title"),
+  channelId: text("channel_id"),
+  channelName: text("channel_name"),
+  monitorId: integer("monitor_id"),
+  mode: text("mode").notNull().default("warn"),
+  decision: text("decision").notNull().default("allowed"), // allowed | warned | blocked
+  violations: jsonb("violations"), // [{ code, message }]
+  clipsCount: integer("clips_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const sourceWhitelist = pgTable("source_whitelist", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  entry: text("entry").notNull(), // sudah dinormalisasi (huruf kecil, tanpa @ / URL)
+  label: text("label"), // teks asli yang diketik user
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type SourceGuardLogRow = typeof sourceGuardLog.$inferSelect;
+export type SourceWhitelistRow = typeof sourceWhitelist.$inferSelect;
+
 export interface ClipResult {
   index: number;
   startTime: number;

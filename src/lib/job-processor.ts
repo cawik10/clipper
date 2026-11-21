@@ -16,6 +16,17 @@ import { uploadClipsToDrive } from "@/lib/drive-uploader";
 import { postAutoCommentsForClips } from "@/lib/auto-comment"; // 💬 Auto-First Comment (BARU!)
 import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
 import type { TranscriptSegmentWithWords } from "@/lib/subtitle-config"; // 💬 Subtitle (BARU!)
+// 🛡️ Source Credit & Copyright Guard (BARU!) — import terpisah. Lihat src/lib/source-guard.ts
+import {
+  runSourceGuard,
+  trimClipsToQuota,
+  recordGuardClips,
+  applySourceCreditToClips,
+  buildBlockedMessage,
+  formatViolations,
+  SourceGuardBlockedError,
+  type GuardOutcome,
+} from "@/lib/source-guard";
 import fs from "fs";
 
 // `meta.step` memetakan update ke step real-time progress Telegram (lihat
@@ -98,6 +109,30 @@ export async function processClipsOnly(
   const { min: effectiveMinDuration, max: effectiveMaxDuration } = getDurationRange(effectiveClipDuration);
 
   try {
+    // === STEP 0: 🛡️ SOURCE GUARD (BARU!) ===
+    // Cek whitelist channel, tanda Content ID & batas klip/hari SEBELUM download.
+    // mode warn → hanya peringatan; mode block → job dihentikan (hemat bandwidth/CPU).
+    // Mati total: COPYRIGHT_GUARD_MODE=off. Lihat src/lib/source-guard-config.ts.
+    let guard: GuardOutcome | null = null;
+    try {
+      guard = await runSourceGuard({
+        jobId,
+        sourceUrl: job.sourceUrl,
+        telegramUserId: job.telegramUserId,
+        sourceMonitorId: job.sourceMonitorId,
+      });
+    } catch (err) {
+      console.error("[source-guard] Guard gagal dijalankan (dilewati):", err);
+    }
+    if (guard?.blocked) {
+      throw new SourceGuardBlockedError(buildBlockedMessage(guard));
+    }
+    if (guard && guard.violations.length > 0) {
+      for (const line of formatViolations(guard)) {
+        await update("downloading", `⚠️ Source Guard (warn): ${line}`, { step: "downloading", percent: 0 });
+      }
+    }
+
     // === STEP 1: DOWNLOAD ===
     await db
       .update(clipJobs)
@@ -182,6 +217,19 @@ export async function processClipsOnly(
       percent: 100,
     });
 
+    // === STEP 3a: 🛡️ BATAS KLIP PER VIDEO SUMBER PER HARI (mode block) ===
+    if (guard) {
+      const quota = trimClipsToQuota(guard, analysisClips);
+      if (quota.trimmed > 0) {
+        analysisClips = quota.clips;
+        await update(
+          "analyzing",
+          `🛡️ Source Guard: dibatasi ${guard.quota.limit} klip/hari per video sumber — ${quota.trimmed} klip dipangkas.`,
+          { step: "analyzing", percent: 100 }
+        );
+      }
+    }
+
     // === STEP 3b: 🧹 DUPLICATE / REPETITIVE CLIP FILTER ===
     // Membuang kandidat klip yang kontennya terlalu mirip dengan klip yang
     // sudah pernah dibuat sebelumnya (mis. source video ini diproses ulang).
@@ -243,6 +291,9 @@ export async function processClipsOnly(
 
     const successfulClips = processedClips.filter((c) => c.filePath);
     if (!successfulClips.length) throw new Error("Semua klip gagal diproses");
+
+    // 🛡️ Catat jumlah klip untuk penghitung batas harian Source Guard.
+    await recordGuardClips(jobId, successfulClips.length);
 
     // 🧹 Simpan sidik jari klip yang berhasil dibuat, supaya jadi pembanding
     // ketika source video ini (atau yang mirip) diproses lagi di kemudian hari.
@@ -334,6 +385,17 @@ export async function publishJobClips(
       .where(eq(clipJobs.jobId, jobId));
 
     let finalClips: ClipResult[] = processedClips;
+
+    // === STEP 4b: 🛡️ SOURCE CREDIT (BARU!) ===
+    // Tambah "Source: <judul> — <channel> <link>" ke deskripsi tiap klip sebelum
+    // upload. Mati: SOURCE_CREDIT_ENABLED=false. Tidak pernah melempar error.
+    const creditResult = await applySourceCreditToClips(jobId, successfulClips);
+    if (creditResult.applied && creditResult.credit) {
+      await update("uploading", "🛡️ Kredit sumber ditambahkan ke deskripsi klip", {
+        step: "uploading_youtube",
+        percent: 0,
+      });
+    }
 
     // === STEP 5: UPLOAD TO YOUTUBE (jika terhubung) ===
     const tokenRows = await db

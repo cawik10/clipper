@@ -51,6 +51,7 @@ import HookOverlaySection from "@/components/HookOverlaySection";
 import AnalyticsSection from "@/components/AnalyticsSection";
 import AutoTitleDoctorSection from "@/components/AutoTitleDoctorSection";
 import AutoCommentSection from "@/components/AutoCommentSection"; // 💬 Auto-First Comment (BARU!)
+import SourceGuardSection from "@/components/SourceGuardSection"; // 🛡️ Source Credit & Copyright Guard (BARU!)
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getChannelMonitorStats } from "@/lib/channel-monitor";
 import {
@@ -1258,6 +1259,9 @@ export default async function HomePage() {
 
         {/* 💬 AUTO-FIRST COMMENT (FITUR BARU!) — pancingan algoritma, lihat src/components/AutoCommentSection.tsx */}
         <AutoCommentSection />
+
+        {/* 🛡️ SOURCE CREDIT & COPYRIGHT GUARD (FITUR BARU!) — lihat src/components/SourceGuardSection.tsx */}
+        <SourceGuardSection />
 
         {/* ══════════════════════════════════════════════════════════
             PIPELINE FLOW
