@@ -38,6 +38,12 @@ export interface ProgressTrackerOptions {
 
 type EditExtra = { reply_markup?: unknown };
 
+/** Escape karakter spesial Telegram Markdown (v1) pada teks dinamis agar tidak error parse entities. */
+function escapeMarkdown(text?: string): string {
+  if (!text) return "";
+  return text.replace(/([_*`\[])/g, "\\$1");
+}
+
 // Sama seperti pola `ensureDriveTable()` di drive-uploader.ts — membuat tabel
 // otomatis saat runtime kalau belum ada (misal baru deploy di Railway dan
 // belum sempat menjalankan `drizzle-kit push`). Idempotent & aman dipanggil
@@ -109,20 +115,66 @@ export class TelegramProgressTracker {
   /** Kirim pesan awal (semua step masih pending) dan simpan message_id untuk diedit. */
   async start(): Promise<number> {
     const text = this.enabled ? this.render() : `⏳ *Memproses...*`;
-    const msg = await this.api.sendMessage(this.chatId, text, { parse_mode: "Markdown" });
+    let msg;
+    try {
+      msg = await this.api.sendMessage(this.chatId, text, { parse_mode: "Markdown" });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes("can't parse entities")) {
+        const plainText = text.replace(/[*_`\\]/g, "");
+        msg = await this.api.sendMessage(this.chatId, plainText);
+      } else {
+        throw err;
+      }
+    }
     this.messageId = msg.message_id;
     this.lastText = text;
     return this.messageId;
   }
 
   private render(footerNote?: string): string {
+    const safeSteps: StepState[] = [...this.steps.values()].map((s) => ({
+      ...s,
+      label: escapeMarkdown(s.label),
+      detail: s.detail ? escapeMarkdown(s.detail) : undefined,
+    }));
+
     return renderProgressMessage({
-      title: this.title,
-      jobLabel: this.jobLabel,
-      steps: [...this.steps.values()],
+      title: escapeMarkdown(this.title),
+      jobLabel: this.jobLabel ? escapeMarkdown(this.jobLabel) : undefined,
+      steps: safeSteps,
       startedAt: this.startedAt,
-      footerNote,
+      footerNote: footerNote ? escapeMarkdown(footerNote) : undefined,
     });
+  }
+
+  /** Edit pesan Telegram dengan fallback otomatis ke teks polos jika Markdown tetap gagal di-parse. */
+  private async safeEditMessage(text: string, extra?: EditExtra): Promise<void> {
+    if (!this.messageId) return;
+    try {
+      await this.api.editMessageText(this.chatId, this.messageId, text, {
+        parse_mode: "Markdown",
+        ...(extra as object),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("message is not modified")) return;
+
+      if (msg.includes("can't parse entities")) {
+        try {
+          const plainText = text.replace(/[*_`\\]/g, "");
+          await this.api.editMessageText(this.chatId, this.messageId, plainText, {
+            ...(extra as object),
+          });
+          return;
+        } catch (fallbackErr) {
+          console.warn("[progress-tracker] gagal fallback edit pesan:", fallbackErr);
+          return;
+        }
+      }
+
+      console.warn("[progress-tracker] gagal edit pesan:", msg);
+    }
   }
 
   private async persist(step: StepState): Promise<void> {
@@ -221,14 +273,7 @@ export class TelegramProgressTracker {
     if (text === this.lastText) return;
     this.lastEditAt = Date.now();
     this.lastText = text;
-    try {
-      await this.api.editMessageText(this.chatId, this.messageId, text, { parse_mode: "Markdown" });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes("message is not modified")) {
-        console.warn("[progress-tracker] gagal edit pesan:", msg);
-      }
-    }
+    await this.safeEditMessage(text);
   }
 
   /** Panggil saat job sukses: tandai semua step selesai & kunci pesan (tidak diedit lagi). */
@@ -242,14 +287,7 @@ export class TelegramProgressTracker {
     const text = this.render(note);
     this.lastEditAt = Date.now();
     this.lastText = text;
-    try {
-      await this.api.editMessageText(this.chatId, this.messageId, text, {
-        parse_mode: "Markdown",
-        ...(extra as object),
-      });
-    } catch {
-      /* ignore */
-    }
+    await this.safeEditMessage(text, extra);
   }
 
   /** Panggil saat job gagal: tandai step yang sedang berjalan sebagai error & kunci pesan. */
@@ -258,14 +296,7 @@ export class TelegramProgressTracker {
       // Progress message sudah final (mis. sudah error sebelumnya) — tetap coba
       // lampirkan tombol retry di pesan yang sama supaya user bisa mengulang.
       if (this.messageId) {
-        try {
-          await this.api.editMessageText(this.chatId, this.messageId, this.render(`❌ ${errorMessage}`), {
-            parse_mode: "Markdown",
-            ...(extra as object),
-          });
-        } catch {
-          /* ignore */
-        }
+        await this.safeEditMessage(this.render(`❌ ${errorMessage}`), extra);
       }
       return;
     }
@@ -281,13 +312,6 @@ export class TelegramProgressTracker {
     const text = this.render(`❌ ${errorMessage}`);
     this.lastEditAt = Date.now();
     this.lastText = text;
-    try {
-      await this.api.editMessageText(this.chatId, this.messageId, text, {
-        parse_mode: "Markdown",
-        ...(extra as object),
-      });
-    } catch {
-      /* ignore */
-    }
+    await this.safeEditMessage(text, extra);
   }
 }
