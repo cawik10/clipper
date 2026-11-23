@@ -49,6 +49,7 @@ import { registerAnalyticsCommands } from "@/lib/analytics-telegram";
 import { registerAutoPruneCommands } from "@/lib/auto-prune-telegram"; // ✂️ Auto-Prune Klip Gagal (BARU!)
 // 🛡️ Source Credit & Copyright Guard (BARU!) — import terpisah, tidak mengubah import di atas.
 import { registerSourceGuardCommands, SOURCE_GUARD_HELP } from "@/lib/source-guard-telegram";
+import { registerClaimMonitorCommands, CLAIM_MONITOR_HELP } from "@/lib/claim-monitor-telegram"; // 🚨 Post-Upload Claim Monitor (BARU!)
 import { NICHE_PRESETS, getNichePromptLabel, getDefaultNichePrompt } from "@/lib/niche-prompt";
 import {
   getDuplicateFilterConfig,
@@ -134,7 +135,7 @@ bot.command("start", async (ctx) => {
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP + SOURCE_GUARD_HELP, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP + SOURCE_GUARD_HELP + CLAIM_MONITOR_HELP, { parse_mode: "Markdown" });
 });
 
 bot.command("connect", async (ctx) => {
@@ -408,6 +409,7 @@ bot.callbackQuery("niche_menu", async (ctx) => {
 registerAnalyticsCommands(bot);
 registerAutoPruneCommands(bot); // ✂️ /prune + tombol Sembunyikan/Hapus/Pertahankan (BARU!)
 registerSourceGuardCommands(bot); // 🛡️ /sourceguard & /whitelist (BARU!)
+registerClaimMonitorCommands(bot); // 🚨 /claims & /blacklist + tombol Hapus/Private/Abaikan (BARU!)
 registerAdminCommands(bot); // 🛠️ /admin & /broadcast — khusus ADMIN_TELEGRAM_IDS (BARU!)
 
 // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — info read-only, konfigurasi

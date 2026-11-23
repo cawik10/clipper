@@ -3,6 +3,7 @@ import { shouldRequestReadonlyScope } from "@/lib/analytics-config";
 import { RETITLE_SCOPE, shouldRequestRetitleScope } from "@/lib/auto-title-doctor-config";
 import { PRUNE_SCOPE, shouldRequestPruneScope } from "@/lib/auto-prune-config";
 import { AUTO_COMMENT_SCOPE, shouldRequestCommentScope } from "@/lib/auto-comment-config";
+import { CLAIM_SCOPE, shouldRequestClaimScope } from "@/lib/claim-monitor-config"; // 🚨 Claim Monitor (BARU!)
 
 function getOAuthClient() {
   return new google.auth.OAuth2(
@@ -31,6 +32,9 @@ export function getAuthUrl(userId: string): string {
         // 💬 Auto-First Comment (BARU!) — izin posting komentar (commentThreads.insert,
         // scope youtube.force-ssl). Hanya diminta kalau YOUTUBE_AUTO_COMMENT_ENABLED=true.
         ...(shouldRequestCommentScope() ? [AUTO_COMMENT_SCOPE] : []),
+        // 🚨 Post-Upload Claim Monitor (BARU!) — izin baca status klaim (videos.list) + tombol Hapus/Private
+        // (videos.update/delete, scope youtube.force-ssl). Matikan: CLAIM_MONITOR_ENABLED=false / CLAIM_MONITOR_REQUEST_SCOPE=false
+        ...(shouldRequestClaimScope() ? [CLAIM_SCOPE] : []),
       ])
     ),
     state: userId,

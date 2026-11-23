@@ -506,3 +506,58 @@ export interface ClipResult {
   driveFileId?: string;
   driveUrl?: string;
 }
+
+// =====================================================================
+// 🚨 POST-UPLOAD CLAIM MONITOR (BARU!)
+// =====================================================================
+// Tabel tambahan — TIDAK mengubah tabel/kolom yang sudah ada. Dibuat otomatis
+// saat runtime (lihat ensureClaimTables di src/lib/claim-monitor.ts), jadi di
+// Railway tidak wajib `drizzle-kit push`. Konfigurasi: src/lib/claim-monitor-config.ts
+
+// Satu baris per klip yang sudah diupload + status klaim/pembatasan terakhir dari YouTube.
+export const videoClaimWatch = pgTable("video_claim_watch", {
+  id: serial("id").primaryKey(),
+  youtubeVideoId: text("youtube_video_id").notNull().unique(),
+  jobId: text("job_id").notNull(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  title: text("title").notNull(),
+  sourceUrl: text("source_url"),
+  sourceTitle: text("source_title"),
+  // Identitas source channel (video asal yang diambil). channel_key = token pembanding utama.
+  channelKey: text("channel_key").notNull().default("unknown"),
+  channelName: text("channel_name"),
+  channelTokens: text("channel_tokens"), // JSON array token pembanding (id, nama, handle)
+  // ok | claimed | missing — kondisi terakhir hasil videos.list
+  claimState: text("claim_state").notNull().default("ok"),
+  // none | pending | ignored | private | unlisted | deleted — keputusan user atas alert
+  actionStatus: text("action_status").notNull().default("none"),
+  signals: text("signals"), // JSON array [{ type, detail }]
+  privacyStatus: text("privacy_status"),
+  firstClaimAt: timestamp("first_claim_at"), // terisi = pernah kena klaim (dasar rasio)
+  lastCheckedAt: timestamp("last_checked_at"),
+  lastNotifiedAt: timestamp("last_notified_at"),
+  notifiedCount: integer("notified_count").notNull().default(0),
+  decidedAt: timestamp("decided_at"),
+  lastError: text("last_error"),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Blacklist source channel (otomatis dari rasio klaim, atau manual lewat /blacklist).
+export const sourceBlacklist = pgTable("source_blacklist", {
+  id: serial("id").primaryKey(),
+  telegramUserId: text("telegram_user_id").notNull(),
+  channelKey: text("channel_key").notNull(),
+  channelName: text("channel_name"),
+  tokens: text("tokens").notNull().default("[]"), // JSON array token pembanding
+  origin: text("origin").notNull().default("manual"), // auto | manual
+  reason: text("reason"),
+  claims: integer("claims").notNull().default(0),
+  clips: integer("clips").notNull().default(0),
+  ratioPercent: integer("ratio_percent").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type VideoClaimWatchRow = typeof videoClaimWatch.$inferSelect;
+export type SourceBlacklistRow = typeof sourceBlacklist.$inferSelect;

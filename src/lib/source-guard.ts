@@ -29,6 +29,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { clipJobs, sourceGuardLog, sourceWhitelist, youtubeTokens, type SourceGuardLogRow } from "@/db/schema";
 import { normalizeSourceUrl } from "@/lib/duplicate-filter";
+import { getBlacklistEnforce } from "@/lib/claim-monitor-config"; // 🚨 Claim Monitor: blacklist channel (BARU!)
 import {
   getContentIdKeywords,
   getCopyrightGuardMode,
@@ -51,7 +52,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 // ─── TIPE ────────────────────────────────────────────────────────────────
-export type GuardViolationCode = "not_whitelisted" | "unverified" | "content_id" | "daily_limit";
+export type GuardViolationCode = "not_whitelisted" | "unverified" | "content_id" | "daily_limit" | "blacklisted";
 
 export interface GuardViolation {
   code: GuardViolationCode;
@@ -395,8 +396,15 @@ export async function runSourceGuard(job: GuardJobInput): Promise<GuardOutcome> 
     quota: { limit, used: 0, remaining: null },
   };
 
+  // 🚨 Claim Monitor (BARU!) — blacklist source channel berlaku di semua mode guard (kecuali
+  // CLAIM_BLACKLIST_ENFORCE=off) dan hanya dicek kalau memang ada isi blacklist-nya.
+  const blacklistEnforce = getBlacklistEnforce();
+  const blacklistWanted =
+    blacklistEnforce !== "off" &&
+    (await import("@/lib/source-blacklist").then((m) => m.hasAnyBlacklist(job.telegramUserId)).catch(() => false));
+
   // Tidak ada yang perlu dicek maupun dikredit.
-  if (!active && !isSourceCreditEnabled()) return empty;
+  if (!active && !isSourceCreditEnabled() && !blacklistWanted) return empty;
 
   try {
     await ensureSourceGuardTables();
@@ -471,7 +479,29 @@ export async function runSourceGuard(job: GuardJobInput): Promise<GuardOutcome> 
     }
   }
 
-  const blocked = mode === "block" && active && violations.length > 0;
+  // 🚨 Claim Monitor (BARU!) — channel di blacklist (auto/manual/env): ditolak (enforce=block) atau diperingatkan (warn).
+  let blacklistBlocks = false;
+  if (blacklistWanted && meta) {
+    try {
+      const { findBlacklistMatch } = await import("@/lib/source-blacklist");
+      const hit = await findBlacklistMatch(job.telegramUserId, Array.from(metaTokens(meta)));
+      if (hit) {
+        violations.push({
+          code: "blacklisted",
+          message:
+            `Channel “${describeChannel(meta)}” ada di blacklist` +
+            (hit.origin === "auto" ? ` (auto: rasio klaim ${hit.ratioPercent}%)` : "") +
+            `. Keluarkan lewat /blacklist remove kalau ini salah.`,
+        });
+        blacklistBlocks = blacklistEnforce === "block";
+      }
+    } catch (err) {
+      console.warn("[source-guard] Cek blacklist gagal (dilewati):", err instanceof Error ? err.message : err);
+    }
+  }
+
+  const blocked =
+    (mode === "block" && active && violations.some((v) => v.code !== "blacklisted")) || blacklistBlocks;
   const enforceQuota = mode === "block" && active && limit > 0;
   const outcome: GuardOutcome = {
     active,

@@ -44,6 +44,8 @@ import {
 import { MonitoredChannelRow } from "@/db/schema";
 import { isSourceGuardBlockedError } from "@/lib/source-guard"; // 🛡️ Source Guard (BARU!)
 import { getChannelMonitorPollIntervalMs, isChannelMonitorEnabled } from "@/lib/channel-monitor-config";
+import { getBlacklistEnforce } from "@/lib/claim-monitor-config"; // 🚨 Claim Monitor: blacklist channel (BARU!)
+import { buildChannelTokens, findBlacklistMatch } from "@/lib/source-blacklist";
 
 function safeMd(text: string): string {
   return (text || "").replace(/[_*[\]()~`>#+\-=|{}.!]/g, " ");
@@ -83,6 +85,19 @@ export async function runChannelMonitorOnce(): Promise<MonitorRunResult> {
         access.reason === "banned" ? "User diblokir admin" : `Kuota habis (${access.used}/${access.limit})`
       ).catch(() => {});
       continue;
+    }
+
+    // 🚨 Claim Monitor (BARU!) — channel sumber yang di-blacklist (sering kena klaim) tidak dipantau lagi.
+    // Matikan: CLAIM_BLACKLIST_ENFORCE=off. Kelola: /blacklist di Telegram.
+    if (monitor.sourceType === "channel" && getBlacklistEnforce() === "block") {
+      const hit = await findBlacklistMatch(
+        monitor.telegramUserId,
+        buildChannelTokens([monitor.externalId, monitor.title])
+      ).catch(() => null);
+      if (hit) {
+        await markMonitorChecked(monitor.id, undefined, `Channel di-blacklist (${hit.label}) — lihat /blacklist`).catch(() => {});
+        continue;
+      }
     }
 
     try {

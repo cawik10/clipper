@@ -53,6 +53,7 @@ import AutoTitleDoctorSection from "@/components/AutoTitleDoctorSection";
 import AutoPruneSection from "@/components/AutoPruneSection"; // ✂️ Auto-Prune Klip Gagal (BARU!)
 import AutoCommentSection from "@/components/AutoCommentSection"; // 💬 Auto-First Comment (BARU!)
 import SourceGuardSection from "@/components/SourceGuardSection"; // 🛡️ Source Credit & Copyright Guard (BARU!)
+import ClaimMonitorSection from "@/components/ClaimMonitorSection"; // 🚨 Post-Upload Claim Monitor (BARU!)
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getChannelMonitorStats } from "@/lib/channel-monitor";
 import {
@@ -1266,6 +1267,9 @@ export default async function HomePage() {
 
         {/* 🛡️ SOURCE CREDIT & COPYRIGHT GUARD (FITUR BARU!) — lihat src/components/SourceGuardSection.tsx */}
         <SourceGuardSection />
+
+        {/* 🚨 POST-UPLOAD CLAIM MONITOR (FITUR BARU!) — klaim/pembatasan setelah upload + rasio & auto-blacklist, lihat src/components/ClaimMonitorSection.tsx */}
+        <ClaimMonitorSection />
 
         {/* ══════════════════════════════════════════════════════════
             PIPELINE FLOW

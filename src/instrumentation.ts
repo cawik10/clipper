@@ -22,6 +22,11 @@ export async function register() {
     const { startAnalyticsWorker } = await import("@/lib/analytics-worker");
     startAnalyticsWorker();
 
+    // 🚨 Post-Upload Claim Monitor (BARU!) — cek berkala klaim/pembatasan video yang sudah
+    // diupload (videos.list) + auto-blacklist channel sumber. Mati kalau CLAIM_MONITOR_ENABLED=false.
+    const { startClaimMonitorWorker } = await import("@/lib/claim-monitor-worker");
+    startClaimMonitorWorker();
+
     // 🛠️ Admin Panel (BARU!) — error tak tertangani dikirim ke admin Telegram
     // (ADMIN_TELEGRAM_IDS) + dicatat di log. Catatan: dengan listener
     // unhandledRejection, proses tidak lagi crash karena promise yang lupa di-catch.
