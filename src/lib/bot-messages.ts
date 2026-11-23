@@ -11,20 +11,7 @@ Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pend
 2. Bot akan menganalisis dan memilih momen terbaik
 3. Video akan dipotong sesuai durasi pilihanmu (15/20/30/40/60 detik, default 30s)
 4. Upload langsung ke YouTube sebagai Draft
-5. Langsung set auto-monitor biar gak kirim link manual 🔥 Baru Hot!
-
-*Fitur Unggulan:*
-✂️ AutoClip — hingga 10 klip per video (mudah diubah)
-⏱ Durasi klip bisa dipilih: 15 / 20 / 30 / 40 / 60 detik
-🖼 Thumbnail auto-generate
-💧 Watermark custom
-🎬 Intro/Outro otomatis
-🔍 Zoom effect pada highlight
-🎯 Custom Niche Prompt — arahkan fokus AI Analysis ✨ Baru!
-🧹 Duplicate/Repetitive Clip Filter — hindari klip mirip saat video sama diproses ulang ✨ Baru!
-🗓 Scheduler / Queue Posting — jadwalkan upload otomatis sesuai niche ✨ Baru!
-📡 Auto-Monitor — potong otomatis dari channel/playlist ✨ Baru Hot!
-🪝 AI Hook Overlay (teks pembuka) ✨ Baru Hot!
+5. Langsung set auto-monitor biar gak kirim link manual
 
 *Perintah:*
 /start - Menu utama
@@ -42,13 +29,14 @@ Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pend
 /introoutro - Info intro/outro config
 /thumbnail - Info thumbnail config
 /mode - Info aspect ratio
-/niche - Atur Custom Niche Prompt untuk AI Analysis ✨ Baru!
+/niche - Atur Custom Niche Prompt untuk AI Analysis 
 /analytics - Laporan performa klip + AI Smart Learning ✨ Baru!
 /prune - Usulan sembunyikan/hapus klip sepi (Auto-Prune) ✨ Baru!
 /dupfilter - Info Duplicate/Repetitive Clip Filter ✨ Baru!
 /jadwal - Lihat & batalkan antrean jadwal upload ✨ Baru!
 /monitor <link> - Pantau channel/playlist ✨ Baru!
 /monitors - Kelola daftar pantauan ✨ Baru!
+/claims - Info Post-Upload Claim Monitor ✨ Baru!
 
 Kirim link video untuk mulai! 🎬`,
 
