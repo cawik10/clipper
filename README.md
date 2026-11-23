@@ -406,6 +406,48 @@ Perintah Telegram: `/sourceguard` (status, konfigurasi & statistik) · `/whiteli
 
 ---
 
+## 🚨 Post-Upload Claim Monitor (`/claims`, `/blacklist`)
+
+Karena bot mengambil video channel lain, **Copyright Guard sebelum upload belum cukup** — klaim Content ID / pembatasan baru muncul **setelah** video tayang. Fitur ini memantau video yang sudah diupload, dan semua pengaturannya lewat Railway Variables (kode lain tidak perlu disentuh):
+
+| Tahap | Cara kerja |
+| --- | --- |
+| **Cek berkala** | Worker (default tiap 60 menit) memanggil YouTube `videos.list` (`part=status,contentDetails`, 1 unit kuota per 50 video) dan membaca `status.uploadStatus` + `status.rejectionReason`, `contentDetails.licensedContent`, `contentDetails.regionRestriction` (+ opsional `contentRating` age-restricted). |
+| **Alert Telegram** | Klaim/pembatasan baru dikirim dengan tombol **[🗑 Hapus] [🔒 Private] [🙈 Abaikan]**. Bot tidak pernah menghapus/memprivatekan sendiri — hanya setelah kamu menekan tombol (Hapus meminta konfirmasi kedua). |
+| **Rasio klaim per source channel** | `klip kena klaim ÷ klip yang sudah dicek` dihitung per channel sumber (diambil dari log Source Guard, cadangan: monitor channel). |
+| **Auto-blacklist** | Channel yang melewati ambang (default: ≥ 3 klip dicek, ≥ 2 kena klaim, rasio ≥ 30%) masuk blacklist: job dari channel itu **ditolak** oleh Source Guard, Auto-Monitor-nya **dijeda**. Channel whitelist / milik sendiri tidak pernah di-auto-blacklist. Salah blacklist? Tekan **[↩️ Keluarkan]** — channel baru di-blacklist lagi kalau ada klaim *baru*. |
+
+Perintah Telegram: `/claims` (status & rasio) · `/claims list` (alert yang menunggu) · `/claims channels` (rasio per channel) · `/claims run` (cek sekarang) · `/blacklist` · `/blacklist add @channel` · `/blacklist remove <nomor|channel>`.
+
+| Variable | Default | Deskripsi |
+| --- | --- | --- |
+| CLAIM\_MONITOR\_ENABLED | true | Saklar utama (false = mati total) |
+| CLAIM\_MONITOR\_INTERVAL\_MINUTES | 60 | Seberapa sering worker mengecek |
+| CLAIM\_MONITOR\_TRACK\_DAYS | 90 | Hanya cek video yang diupload ≤ N hari lalu |
+| CLAIM\_MONITOR\_FRESH\_DAYS / CLAIM\_MONITOR\_OLD\_RECHECK\_HOURS | 7 / 24 | Video baru dicek tiap siklus; yang lebih tua tiap N jam |
+| CLAIM\_MONITOR\_SIGNALS | rejected,licensed,region | Sinyal yang dianggap klaim: `rejected` \| `licensed` \| `region` \| `age` |
+| CLAIM\_MONITOR\_NOTIFY | true | Kirim alert ke Telegram |
+| CLAIM\_MONITOR\_ACTIONS | delete,private | Tombol yang ditawarkan (Abaikan selalu ada) |
+| CLAIM\_MONITOR\_HIDE\_TO | private | Tombol "Private" mengubah ke `private` \| `unlisted` |
+| CLAIM\_MONITOR\_DELETE\_CONFIRM | true | Hapus butuh konfirmasi tombol kedua |
+| CLAIM\_MONITOR\_MAX\_ALERTS\_PER\_CYCLE | 10 | Maks alert per user per siklus |
+| CLAIM\_MONITOR\_REMINDER\_HOURS | 0 | Ingatkan lagi alert yang belum diputuskan tiap N jam (0 = tidak) |
+| CLAIM\_MONITOR\_REQUEST\_SCOPE | true | Minta izin `youtube.force-ssl` saat `/connect` (dibutuhkan tombol Hapus/Private) |
+| CLAIM\_AUTO\_BLACKLIST | true | Auto-blacklist channel sumber yang sering kena klaim |
+| CLAIM\_BLACKLIST\_MIN\_CLIPS / CLAIM\_BLACKLIST\_MIN\_CLAIMS | 3 / 2 | Minimal klip dicek / minimal klip kena klaim |
+| CLAIM\_BLACKLIST\_RATIO\_PERCENT | 30 | Rasio klaim minimal (%) |
+| CLAIM\_RATIO\_COUNT\_IGNORED | true | Klaim yang di-"Abaikan" tetap dihitung di rasio |
+| CLAIM\_BLACKLIST\_ENFORCE | block | `block` = job ditolak \| `warn` = peringatan saja \| `off` = hanya dicatat |
+| CLAIM\_BLACKLIST\_PAUSE\_MONITORS | true | Jeda Auto-Monitor yang menunjuk channel blacklist |
+| CLAIM\_BLACKLIST\_CHANNELS | – | Blacklist global manual: `UCxxx` / `@handle` / nama / URL, pisah koma |
+| CLAIM\_BLACKLIST\_NOTIFY | true | Kabari saat channel di-auto-blacklist |
+
+> 🔑 **Setelah deploy, kirim `/connect` sekali lagi** supaya Google memberi izin `youtube.force-ssl` (baca status klaim + tombol Hapus/Private). Tanpa itu, cek tetap jalan lewat izin baca yang sudah ada / `YOUTUBE_API_KEY` (hanya video public/unlisted, tanpa `rejectionReason`), tapi tombol Hapus/Private akan meminta `/connect` ulang.
+>
+> 🔎 YouTube **tidak punya API klaim Content ID** — yang dibaca adalah sinyal dari `videos.list`. Klaim parsial pada audio sering **tidak** muncul di API; cek juga YouTube Studio → Konten → kolom "Pembatasan". Pesan, label alasan penolakan & default bisa diubah di `src/lib/claim-monitor-config.ts`; logika di `src/lib/claim-monitor.ts`. Tabel `video_claim_watch` & `source_blacklist` dibuat **otomatis** saat runtime. Endpoint cadangan Railway Cron: `GET /api/claims/run?secret=SETUP_SECRET` (`&force=1` cek semua, `&notify=0` tanpa alert).
+
+---
+
 ## 🛠️ Admin Panel Telegram (`/admin`, `/broadcast`)
 
 Panel khusus admin langsung di Telegram: statistik global, daftar user, ban/unban, atur kuota, broadcast, dan notifikasi error otomatis. **Tidak mengubah dashboard web** — hanya fitur tambahan.
@@ -499,6 +541,7 @@ curl "https://cawik-clipper.up.railway.app/api/webhook/setup?secret=<SETUP_SECRE
 | `/api/telegram/webhook` | POST | Telegram webhook receiver |
 | `/api/youtube/callback` | GET | Google OAuth callback |
 | `/api/webhook/setup` | GET | Setup Telegram webhook |
+| `/api/claims/run` | GET | Paksa satu siklus Claim Monitor (`?secret=SETUP_SECRET`) |
 
 ---
 
