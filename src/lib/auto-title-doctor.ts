@@ -26,6 +26,7 @@ import { getTrackDays } from "@/lib/analytics-config";
 import { ensureAnalyticsTables, resolveChatId } from "@/lib/analytics-store";
 import { escapeHtml } from "@/lib/analytics-report";
 import { generateAiText, hasAnyAiProvider } from "@/lib/ai-provider";
+import { isAiBudgetExceededError } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
 import { isTokenExpired, refreshAccessToken } from "@/lib/youtube-uploader";
 import {
   DEFAULT_RETITLE_VIEWS_THRESHOLD,
@@ -219,7 +220,8 @@ async function generateNewTitle(args: {
     .filter((l): l is string => l !== null)
     .join("\n");
 
-  const ai = await generateAiText(RETITLE_SYSTEM_PROMPT, user);
+  // 💰 Cost Tracker: label fitur + user pemilik klip untuk pencatatan biaya
+  const ai = await generateAiText(RETITLE_SYSTEM_PROMPT, user, { feature: "title_doctor", userId: row.telegramUserId });
   const parsed = parseJsonObject<{ title?: unknown; hashtags?: unknown }>(ai.text);
   const title = typeof parsed?.title === "string" ? cleanTitle(parsed.title) : "";
   if (!title) throw new Error("AI tidak mengembalikan judul yang valid");
@@ -509,6 +511,12 @@ export async function runAutoRetitle(userId: string, opts: { force?: boolean; dr
         hours,
       });
     } catch (err) {
+      // 💰 Cost Tracker — AI dijeda karena batas biaya harian: berhenti tanpa mencatat "failed"
+      // (supaya klip tidak kena cooldown gagal; dicoba lagi otomatis setelah reset).
+      if (isAiBudgetExceededError(err)) {
+        summary.errors.push("Batas biaya AI harian tercapai — Title Doctor dijeda sampai reset.");
+        break;
+      }
       const message = err instanceof Error ? err.message : String(err);
       summary.failed++;
       summary.errors.push(`${row.youtubeVideoId}: ${message}`);

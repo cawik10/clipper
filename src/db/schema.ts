@@ -6,6 +6,7 @@ import {
   jsonb,
   serial,
   boolean,
+  doublePrecision,
 } from "drizzle-orm/pg-core";
 
 export const clipJobs = pgTable("clip_jobs", {
@@ -561,3 +562,27 @@ export const sourceBlacklist = pgTable("source_blacklist", {
 
 export type VideoClaimWatchRow = typeof videoClaimWatch.$inferSelect;
 export type SourceBlacklistRow = typeof sourceBlacklist.$inferSelect;
+
+// =====================================================================
+// 💰 COST TRACKER (BARU!)
+// =====================================================================
+// Tabel tambahan — TIDAK mengubah tabel/kolom yang sudah ada. Satu baris = satu
+// panggilan AI (OpenAI / Gemini / Groq / Whisper) beserta biayanya dalam USD.
+// Dibuat otomatis saat runtime (lihat ensureCostTable di src/lib/cost-tracker.ts),
+// jadi tidak wajib `drizzle-kit push`. Konfigurasi & harga: src/lib/cost-config.ts
+export const aiCostLog = pgTable("ai_cost_log", {
+  id: serial("id").primaryKey(),
+  jobId: text("job_id"), // null = panggilan di luar job (mis. Title Doctor, Smart Learning)
+  telegramUserId: text("telegram_user_id"), // null = tidak bisa dikaitkan ke user
+  feature: text("feature").notNull().default("other"), // analysis | transcribe | title_doctor | learning | schedule | other
+  provider: text("provider").notNull(), // openai | gemini | groq
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  audioSeconds: doublePrecision("audio_seconds").notNull().default(0),
+  costUsd: doublePrecision("cost_usd").notNull().default(0),
+  estimated: boolean("estimated").notNull().default(false), // true = token diperkirakan / harga model tidak dikenal
+  createdAt: timestamp("created_at").notNull(),
+});
+
+export type AiCostLogRow = typeof aiCostLog.$inferSelect;

@@ -38,6 +38,7 @@ import {
   syncUserStats,
 } from "@/lib/analytics-store";
 import { buildAnalyticsReport } from "@/lib/analytics-report";
+import { buildWeeklyCostSection } from "@/lib/cost-report"; // 💰 Cost Tracker (BARU!)
 import { runSmartLearning } from "@/lib/analytics-learning";
 import { runAutoRetitleForUsers } from "@/lib/auto-title-doctor";
 import { isAutoRetitleEnabled } from "@/lib/auto-title-doctor-config";
@@ -129,7 +130,18 @@ export async function sendWeeklyReport(userId: string): Promise<WeeklyReportResu
     }
     const report = await buildAnalyticsReport(userId, { weekly: true });
     const chatId = await resolveChatId(userId);
-    await sendTelegram(chatId, report + learningNote);
+    // 💰 Cost Tracker (BARU!) — biaya AI minggu ini ditempel di laporan (kosong kalau fitur mati / belum ada biaya).
+    // Kalau terlalu panjang untuk satu pesan Telegram, dikirim sebagai pesan terpisah.
+    const costNote = await buildWeeklyCostSection(userId).catch((err) => {
+      console.warn("[cost] Bagian biaya laporan mingguan gagal:", err);
+      return "";
+    });
+    if (costNote && (report + learningNote + costNote).length > 4000) {
+      await sendTelegram(chatId, report + learningNote);
+      await sendTelegram(chatId, costNote.trim());
+    } else {
+      await sendTelegram(chatId, report + learningNote + costNote);
+    }
     await markReportBaseline(userId);
     return { userId, sent: true };
   } catch (err) {

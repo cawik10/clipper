@@ -3,6 +3,7 @@ import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
 import { analyzeVideoForClips } from "@/lib/ai-analyzer";
+import { AiBudgetExceededError, budgetBlockedMessage, checkAiBudget, runWithCostContext } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
 import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
 import { getDefaultNichePrompt } from "@/lib/niche-prompt";
 // 📈 AI Analytics & Feedback Loop (BARU!) — import terpisah.
@@ -90,6 +91,29 @@ async function getEffectiveSettings(telegramUserId: string): Promise<EffectiveSe
  * thumbnail) — siap dipublish kapan saja lewat `publishJobClips(jobId)`.
  */
 export async function processClipsOnly(
+  jobId: string,
+  onStatusUpdate?: StatusUpdateFn
+): Promise<{ successfulClipsCount: number; platform: string }> {
+  // 💰 Cost Tracker (BARU!) — (1) cek batas biaya AI harian SEBELUM job mulai (mode pause → job ditolak),
+  // (2) bungkus job dengan konteks {jobId, userId} supaya setiap panggilan AI (Whisper, analisis)
+  // otomatis tercatat biayanya per job & per user. Job yang sudah mulai dibiarkan selesai.
+  // Konfigurasi: src/lib/cost-config.ts · Matikan: COST_TRACKER_ENABLED=false.
+  const owner = await db.select({ userId: clipJobs.telegramUserId }).from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  const userId = owner[0]?.userId ?? null;
+  const budget = await checkAiBudget({ userId });
+  if (!budget.allowed) {
+    const msg = budgetBlockedMessage(budget);
+    await db
+      .update(clipJobs)
+      .set({ status: "error", errorMessage: msg, updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+    if (onStatusUpdate) await onStatusUpdate("error", `⏸️ ${msg}`, { step: "error" });
+    throw new AiBudgetExceededError(budget);
+  }
+  return runWithCostContext({ jobId, userId, budgetChecked: true }, () => processClipsOnlyInner(jobId, onStatusUpdate));
+}
+
+async function processClipsOnlyInner(
   jobId: string,
   onStatusUpdate?: StatusUpdateFn
 ): Promise<{ successfulClipsCount: number; platform: string }> {

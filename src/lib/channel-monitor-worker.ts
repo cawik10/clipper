@@ -26,6 +26,7 @@ import { InputFile } from "grammy";
 import { bot } from "@/lib/telegram-bot";
 import { processJob } from "@/lib/job-processor";
 import { checkUserAccess } from "@/lib/admin-store"; // 🛠️ Admin Panel: ban & kuota (BARU!)
+import { checkAiBudget, budgetBlockedMessage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
 import { db } from "@/db";
 import { clipJobs, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -84,6 +85,14 @@ export async function runChannelMonitorOnce(): Promise<MonitorRunResult> {
         undefined,
         access.reason === "banned" ? "User diblokir admin" : `Kuota habis (${access.used}/${access.limit})`
       ).catch(() => {});
+      continue;
+    }
+
+    // 💰 Cost Tracker (BARU!) — batas biaya AI harian tercapai → monitor ditunda
+    // (video baru tidak hilang: diproses di siklus berikutnya setelah budget reset / dinaikkan).
+    const budget = await checkAiBudget({ userId: monitor.telegramUserId });
+    if (!budget.allowed) {
+      await markMonitorChecked(monitor.id, undefined, `AI dijeda: ${budgetBlockedMessage(budget)}`.slice(0, 300)).catch(() => {});
       continue;
     }
 

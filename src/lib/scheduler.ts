@@ -19,6 +19,7 @@
 import { and, asc, eq, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { scheduledUploads, ScheduledUploadRow } from "@/db/schema";
+import { checkAiBudget, recordAiUsage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
 import {
   getSchedulerMaxDaysAhead,
   getSchedulerSlotCount,
@@ -86,6 +87,9 @@ async function refineHoursWithAI(
     `untuk mem-publish video pendek agar mendapat views & engagement maksimal. ` +
     `Balas HANYA dengan JSON: {"hours": [number,...], "reason": "alasan singkat 1-2 kalimat dalam Bahasa Indonesia"}.`;
 
+  // 💰 Cost Tracker — batas biaya harian tercapai → lewati AI (caller otomatis memakai jam heuristik).
+  if (!(await checkAiBudget()).allowed) return null;
+
   if (process.env.OPENAI_API_KEY) {
     try {
       const OpenAI = (await import("openai")).default;
@@ -101,6 +105,16 @@ async function refineHoursWithAI(
         response_format: { type: "json_object" },
       });
       const content = response.choices[0]?.message?.content || "{}";
+      // 💰 Cost Tracker
+      await recordAiUsage({
+        provider: "openai",
+        model: "gpt-4o-mini",
+        feature: "schedule",
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        inputChars: prompt.length,
+        outputChars: content.length,
+      });
       const parsed = JSON.parse(content);
       const hours = normalizeHours(parsed.hours);
       if (hours.length) return { hours, reason: String(parsed.reason || "").slice(0, 300) };
@@ -116,6 +130,19 @@ async function refineHoursWithAI(
       const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
       const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON.");
       const text = result.response.text();
+      // 💰 Cost Tracker
+      const usage = result.response.usageMetadata as
+        | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+        | undefined;
+      await recordAiUsage({
+        provider: "gemini",
+        model: "gemini-3.1-flash-lite",
+        feature: "schedule",
+        inputTokens: usage?.promptTokenCount,
+        outputTokens: usage ? (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0) : undefined,
+        inputChars: prompt.length,
+        outputChars: text.length,
+      });
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);

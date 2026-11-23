@@ -150,7 +150,8 @@ TUGAS:
 FORMAT:
 {"learned_prompt":"...","insights":["...","...","..."],"best_niche":"..."}`;
 
-  const result = await generateAiText(system, user);
+  // 💰 Cost Tracker: label fitur + user pemilik klip untuk pencatatan biaya
+  const result = await generateAiText(system, user, { feature: "learning", userId: args.winners[0]?.telegramUserId });
   const parsed = parseJsonObject<{ learned_prompt?: string; insights?: unknown; best_niche?: string }>(result.text);
   const prompt = typeof parsed?.learned_prompt === "string" ? clamp(parsed.learned_prompt, args.maxLen) : "";
   if (!prompt) throw new Error("AI tidak mengembalikan learned_prompt yang valid");

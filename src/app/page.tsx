@@ -54,6 +54,7 @@ import AutoPruneSection from "@/components/AutoPruneSection"; // ✂️ Auto-Pru
 import AutoCommentSection from "@/components/AutoCommentSection"; // 💬 Auto-First Comment (BARU!)
 import SourceGuardSection from "@/components/SourceGuardSection"; // 🛡️ Source Credit & Copyright Guard (BARU!)
 import ClaimMonitorSection from "@/components/ClaimMonitorSection"; // 🚨 Post-Upload Claim Monitor (BARU!)
+import CostTrackerSection from "@/components/CostTrackerSection"; // 💰 Cost Tracker (BARU!)
 // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getChannelMonitorStats } from "@/lib/channel-monitor";
 import {
@@ -1270,6 +1271,9 @@ export default async function HomePage() {
 
         {/* 🚨 POST-UPLOAD CLAIM MONITOR (FITUR BARU!) — klaim/pembatasan setelah upload + rasio & auto-blacklist, lihat src/components/ClaimMonitorSection.tsx */}
         <ClaimMonitorSection />
+
+        {/* 💰 COST TRACKER (FITUR BARU!) — biaya OpenAI/Gemini/Whisper per job & user + batas harian, lihat src/components/CostTrackerSection.tsx */}
+        <CostTrackerSection />
 
         {/* ══════════════════════════════════════════════════════════
             PIPELINE FLOW

@@ -50,6 +50,7 @@ import { registerAutoPruneCommands } from "@/lib/auto-prune-telegram"; // ✂️
 // 🛡️ Source Credit & Copyright Guard (BARU!) — import terpisah, tidak mengubah import di atas.
 import { registerSourceGuardCommands, SOURCE_GUARD_HELP } from "@/lib/source-guard-telegram";
 import { registerClaimMonitorCommands, CLAIM_MONITOR_HELP } from "@/lib/claim-monitor-telegram"; // 🚨 Post-Upload Claim Monitor (BARU!)
+import { registerCostCommands, guardAiBudget, COST_HELP } from "@/lib/cost-telegram"; // 💰 Cost Tracker (BARU!)
 import { NICHE_PRESETS, getNichePromptLabel, getDefaultNichePrompt } from "@/lib/niche-prompt";
 import {
   getDuplicateFilterConfig,
@@ -135,7 +136,7 @@ bot.command("start", async (ctx) => {
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP + SOURCE_GUARD_HELP + CLAIM_MONITOR_HELP, { parse_mode: "Markdown" });
+  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP + SOURCE_GUARD_HELP + CLAIM_MONITOR_HELP + COST_HELP, { parse_mode: "Markdown" });
 });
 
 bot.command("connect", async (ctx) => {
@@ -410,6 +411,7 @@ registerAnalyticsCommands(bot);
 registerAutoPruneCommands(bot); // ✂️ /prune + tombol Sembunyikan/Hapus/Pertahankan (BARU!)
 registerSourceGuardCommands(bot); // 🛡️ /sourceguard & /whitelist (BARU!)
 registerClaimMonitorCommands(bot); // 🚨 /claims & /blacklist + tombol Hapus/Private/Abaikan (BARU!)
+registerCostCommands(bot); // 💰 /cost — biaya AI per job & per user + batas harian (BARU!)
 registerAdminCommands(bot); // 🛠️ /admin & /broadcast — khusus ADMIN_TELEGRAM_IDS (BARU!)
 
 // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — info read-only, konfigurasi
@@ -1270,6 +1272,9 @@ async function handleVideoUrl(ctx: Context, url: string) {
 
   // 🛠️ Admin Panel (BARU!) — tolak kalau user kena ban / kuota habis.
   if (!(await guardJobQuota(ctx, userId))) return;
+
+  // 💰 Cost Tracker (BARU!) — tolak job baru kalau batas biaya AI harian (DAILY_BUDGET_USD) tercapai.
+  if (!(await guardAiBudget(ctx, userId))) return;
 
   const jobId = uuidv4();
   await db.insert(clipJobs).values({

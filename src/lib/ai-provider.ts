@@ -30,7 +30,16 @@
  *    `callXxx()` baru lalu daftarkan di `PROVIDERS` di bawah.
  */
 
+import { recordAiUsage, checkAiBudget, AiBudgetExceededError } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+
 export type AiProviderName = "gemini" | "groq";
+
+/** 💰 Cost Tracker — label fitur & user untuk pencatatan biaya (opsional, semua boleh kosong). */
+export interface AiCallMeta {
+  /** analysis | title_doctor | learning | schedule | other */
+  feature?: string;
+  userId?: string | null;
+}
 
 export interface AiTextResult {
   provider: AiProviderName;
@@ -78,7 +87,7 @@ function getProviderOrder(): AiProviderName[] {
   return order;
 }
 
-async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
+async function callGemini(systemPrompt: string, userPrompt: string, meta: AiCallMeta = {}): Promise<string> {
   if (!hasGemini()) throw new Error("GEMINI_API_KEY tidak dikonfigurasi");
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -87,10 +96,25 @@ async function callGemini(systemPrompt: string, userPrompt: string): Promise<str
     systemInstruction: systemPrompt,
   });
   const result = await model.generateContent(userPrompt);
-  return result.response?.text() || "";
+  const text = result.response?.text() || "";
+  // 💰 Cost Tracker — token dari usageMetadata (thoughtsTokenCount ditagih sebagai output)
+  const usage = result.response?.usageMetadata as
+    | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+    | undefined;
+  await recordAiUsage({
+    provider: "gemini",
+    model: getGeminiModel(),
+    feature: meta.feature,
+    userId: meta.userId,
+    inputTokens: usage?.promptTokenCount,
+    outputTokens: usage ? (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0) : undefined,
+    inputChars: systemPrompt.length + userPrompt.length,
+    outputChars: text.length,
+  });
+  return text;
 }
 
-async function callGroq(systemPrompt: string, userPrompt: string): Promise<string> {
+async function callGroq(systemPrompt: string, userPrompt: string, meta: AiCallMeta = {}): Promise<string> {
   if (!hasGroq()) throw new Error("GROQ_API_KEY tidak dikonfigurasi");
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -115,11 +139,24 @@ async function callGroq(systemPrompt: string, userPrompt: string): Promise<strin
 
   const data = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
   };
-  return data.choices?.[0]?.message?.content || "";
+  const text = data.choices?.[0]?.message?.content || "";
+  // 💰 Cost Tracker
+  await recordAiUsage({
+    provider: "groq",
+    model: getGroqModel(),
+    feature: meta.feature,
+    userId: meta.userId,
+    inputTokens: data.usage?.prompt_tokens,
+    outputTokens: data.usage?.completion_tokens,
+    inputChars: systemPrompt.length + userPrompt.length,
+    outputChars: text.length,
+  });
+  return text;
 }
 
-const PROVIDERS: Record<AiProviderName, (system: string, user: string) => Promise<string>> = {
+const PROVIDERS: Record<AiProviderName, (system: string, user: string, meta?: AiCallMeta) => Promise<string>> = {
   gemini: callGemini,
   groq: callGroq,
 };
@@ -131,7 +168,11 @@ const PROVIDERS: Record<AiProviderName, (system: string, user: string) => Promis
  * sekali) — caller sebaiknya selalu punya fallback non-AI (lihat ai-analyzer.ts
  * & scheduler.ts) supaya bot tetap jalan walau AI down.
  */
-export async function generateAiText(systemPrompt: string, userPrompt: string): Promise<AiTextResult> {
+export async function generateAiText(systemPrompt: string, userPrompt: string, meta: AiCallMeta = {}): Promise<AiTextResult> {
+  // 💰 Cost Tracker — batas biaya harian tercapai → AI dijeda (caller memakai fallback non-AI).
+  const budget = await checkAiBudget({ userId: meta.userId });
+  if (!budget.allowed) throw new AiBudgetExceededError(budget);
+
   const order = getProviderOrder();
   const errors: string[] = [];
 
@@ -140,7 +181,7 @@ export async function generateAiText(systemPrompt: string, userPrompt: string): 
     if (!hasKey) continue;
 
     try {
-      const text = await PROVIDERS[providerName](systemPrompt, userPrompt);
+      const text = await PROVIDERS[providerName](systemPrompt, userPrompt, meta);
       if (text && text.trim()) {
         return { provider: providerName, text };
       }

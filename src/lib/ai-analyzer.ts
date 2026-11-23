@@ -3,6 +3,7 @@ import { ClipResult } from "@/db/schema";
 import { getMaxClipsConfig } from "@/lib/video-config";
 import { buildNicheInstruction } from "@/lib/niche-prompt";
 import { getHookConfig, sanitizeHookText, buildFallbackHook } from "@/lib/hook-config"; // 🪝 AI Hook Overlay (BARU!)
+import { checkAiBudget, recordAiUsage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
 // 💬 Auto-First Comment (BARU!) — komentar pancingan dibuat AI dalam prompt yang sama.
 import {
   isAutoCommentEnabled,
@@ -12,6 +13,11 @@ import {
   buildAutoCommentPromptInstruction,
   sanitizeCommentText,
 } from "@/lib/auto-comment-config";
+
+/** Model OpenAI untuk analisis momen viral (juga dipakai Cost Tracker untuk menghitung harga). */
+const OPENAI_ANALYSIS_MODEL = "gpt-4o-mini";
+/** Model Gemini untuk analisis (nilai tetap seperti sebelumnya; harga dihitung dari nama ini). */
+const GEMINI_ANALYSIS_MODEL = "gemini-3.5-flash-lite";
 
 function getOpenAIClient(): OpenAI | null {
   if (process.env.OPENAI_API_KEY) {
@@ -111,10 +117,18 @@ Output JSON array (tanpa markdown):
   }
 ]`;
 
+  // 💰 Cost Tracker — batas biaya harian tercapai → lewati AI, pakai analisis heuristik (non-AI).
+  // Job yang sudah berjalan tidak terpengaruh (lolos pengecekan saat dimulai).
+  const budget = await checkAiBudget();
+  if (!budget.allowed) {
+    console.warn("[ai-analyzer] Batas biaya AI harian tercapai — memakai analisis fallback tanpa AI.");
+    return fallbackAnalysis(input, maxClips, minDuration, maxDuration, targetDuration);
+  }
+
   if (openai) {
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: OPENAI_ANALYSIS_MODEL,
         messages: [
           {
             role: "system",
@@ -129,6 +143,16 @@ Output JSON array (tanpa markdown):
         response_format: { type: "json_object" },
       });
       const content = response.choices[0]?.message?.content || "{}";
+      // 💰 Cost Tracker — catat token & biaya panggilan analisis
+      await recordAiUsage({
+        provider: "openai",
+        model: OPENAI_ANALYSIS_MODEL,
+        feature: "analysis",
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        inputChars: prompt.length,
+        outputChars: content.length,
+      });
       try {
         const parsed = JSON.parse(content);
         const clips = Array.isArray(parsed) ? parsed : parsed.clips || parsed.moments || [];
@@ -162,9 +186,22 @@ async function analyzeWithGemini(
 ): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_ANALYSIS_MODEL });
   const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON ARRAY.");
   const text = result.response.text();
+  // 💰 Cost Tracker — catat token & biaya (thoughtsTokenCount ditagih sebagai output)
+  const usage = result.response.usageMetadata as
+    | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+    | undefined;
+  await recordAiUsage({
+    provider: "gemini",
+    model: GEMINI_ANALYSIS_MODEL,
+    feature: "analysis",
+    inputTokens: usage?.promptTokenCount,
+    outputTokens: usage ? (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0) : undefined,
+    inputChars: prompt.length,
+    outputChars: text.length,
+  });
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (jsonMatch) {
     const clips = JSON.parse(jsonMatch[0]);

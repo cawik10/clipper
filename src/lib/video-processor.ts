@@ -28,6 +28,8 @@ import type { ClipResult } from "@/db/schema";
 import { getAutoReframeConfig } from "@/lib/reframe-config";
 import { buildReframeFilter } from "@/lib/auto-reframe";
 import { applyHookOverlay } from "@/lib/hook-overlay"; // 🪝 AI Hook Overlay (BARU!)
+import { checkAiBudget, recordAiUsage, getAudioSeconds } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+import { getGroqWhisperModel } from "@/lib/ai-provider";
 
 const execAsync = promisify(exec);
 
@@ -112,6 +114,14 @@ export async function transcribeAudio(
   videoPath: string,
   language: string = "id"
 ): Promise<TranscriptSegmentWithWords[]> {
+  // 💰 Cost Tracker — batas biaya harian tercapai → skip transkripsi (job berjalan tetap lanjut tanpa transkrip).
+  // Job yang sudah berjalan tidak terpengaruh (lolos pengecekan saat dimulai).
+  const budget = await checkAiBudget();
+  if (!budget.allowed) {
+    console.warn("[transcribe] Batas biaya AI harian tercapai — transkripsi dilewati");
+    return [];
+  }
+
   ensureDir(TMP_DIR);
   const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
   const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
@@ -172,6 +182,9 @@ function attachWordsToSegments(
   return result;
 }
 
+/** Model Whisper OpenAI (juga dipakai Cost Tracker untuk menghitung harga). */
+const OPENAI_WHISPER_MODEL = "whisper-1";
+
 async function transcribeWithOpenAI(
   audioPath: string,
   language: string,
@@ -184,7 +197,7 @@ async function transcribeWithOpenAI(
   const blob = new Blob([audioBuffer], { type: "audio/mp3" });
   const file = new File([blob], "audio.mp3", { type: "audio/mp3" });
   const response = await client.audio.transcriptions.create({
-    model: "whisper-1",
+    model: OPENAI_WHISPER_MODEL,
     file,
     language: language === "id" ? "id" : language,
     response_format: "verbose_json",
@@ -193,7 +206,15 @@ async function transcribeWithOpenAI(
   const data = response as unknown as {
     segments?: { start: number; end: number; text: string }[];
     words?: RawWord[];
+    duration?: number;
   };
+  // 💰 Cost Tracker — Whisper ditagih per durasi audio
+  await recordAiUsage({
+    provider: "openai",
+    model: OPENAI_WHISPER_MODEL,
+    feature: "transcribe",
+    audioSeconds: typeof data.duration === "number" && data.duration > 0 ? data.duration : await getAudioSeconds(audioPath),
+  });
   return attachWordsToSegments(data.segments || [], wantWords ? data.words : undefined);
 }
 
@@ -207,7 +228,8 @@ async function transcribeWithGroq(
   const axios = (await import("axios")).default;
   const form = new FormData();
   form.append("file", fs.createReadStream(audioPath), { filename: "audio.mp3" });
-  form.append("model", "whisper-large-v3");
+  const groqWhisperModel = getGroqWhisperModel(); // env GROQ_WHISPER_MODEL (default whisper-large-v3)
+  form.append("model", groqWhisperModel);
   form.append("language", language);
   form.append("response_format", "verbose_json");
   if (wantWords) {
@@ -224,6 +246,14 @@ async function transcribeWithGroq(
     }
   );
   const segments = response.data?.segments || [];
+  // 💰 Cost Tracker — Whisper ditagih per durasi audio (Groq: minimal 10 detik/request)
+  const reportedDuration = Number(response.data?.duration);
+  await recordAiUsage({
+    provider: "groq",
+    model: groqWhisperModel,
+    feature: "transcribe",
+    audioSeconds: reportedDuration > 0 ? reportedDuration : await getAudioSeconds(audioPath),
+  });
   return attachWordsToSegments(segments, wantWords ? response.data?.words : undefined);
 }
 
