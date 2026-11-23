@@ -406,6 +406,47 @@ Perintah Telegram: `/sourceguard` (status, konfigurasi & statistik) · `/whiteli
 
 ---
 
+## 🛠️ Admin Panel Telegram (`/admin`, `/broadcast`)
+
+Panel khusus admin langsung di Telegram: statistik global, daftar user, ban/unban, atur kuota, broadcast, dan notifikasi error otomatis. **Tidak mengubah dashboard web** — hanya fitur tambahan.
+
+**Aktifkan:** set `ADMIN_TELEGRAM_IDS=123,456` di Railway Variables (ID Telegram admin, cek lewat @userinfobot), lalu redeploy. Kosong = fitur admin nonaktif.
+
+```
+/admin                                  - Panel utama (tombol: Statistik, Daftar User, Broadcast, Konfigurasi)
+/admin stats                            - Statistik global (user, job, klip, error, top user, server)
+/admin users [halaman]                  - Daftar user (tombol → detail & aksi)
+/admin user <id|@username>              - Detail user + tombol Ban/Unban/Kuota
+/admin ban <id|@username> [alasan]      - Blokir user
+/admin unban <id|@username>             - Buka blokir
+/admin quota <id|@username> <n|default|unlimited> - Atur kuota job user
+/broadcast <pesan>                      - Kirim pesan ke semua user (dengan konfirmasi)
+```
+
+| Variable | Default | Deskripsi |
+| --- | --- | --- |
+| ADMIN_TELEGRAM_IDS | – | ID admin, pisah koma |
+| ADMIN_DEFAULT_QUOTA | 0 | Kuota job default per user (0 = tanpa batas) |
+| ADMIN_QUOTA_PERIOD | day | `day` \| `month` — periode reset kuota |
+| ADMIN_QUOTA_TIMEZONE | ikut SCHEDULER_TIMEZONE | Zona waktu reset kuota |
+| ADMIN_EXEMPT_QUOTA | true | Admin bebas kuota |
+| ADMIN_ERROR_NOTIFY | true | Notifikasi error otomatis ke admin |
+| ADMIN_ERROR_DEDUPE_SECONDS | 300 | Error identik hanya dikirim sekali per N detik |
+| ADMIN_ERROR_MAX_PER_MINUTE | 10 | Batas pesan error per menit |
+| ADMIN_ERROR_IGNORE | – | Kata kunci error yang diabaikan (pisah koma) |
+| BROADCAST_CONFIRM | true | Minta konfirmasi tombol sebelum broadcast |
+| BROADCAST_DELAY_MS | 50 | Jeda antar pesan broadcast |
+| BROADCAST_INCLUDE_BANNED | false | Kirim juga ke user yang diban |
+| BROADCAST_HEADER | 📢 Pengumuman | Judul di atas pesan broadcast |
+| ADMIN_USERS_PER_PAGE | 8 | Jumlah user per halaman |
+| ADMIN_NOTIFY_USER_ON_BAN | true | Beri tahu user saat di-ban/unban |
+
+**Cara kerja:** user yang diban tidak bisa memakai bot (termasuk Auto-Monitor miliknya ditunda). Kuota dihitung dari jumlah job (selain yang error) per hari/bulan; saat habis user mendapat pesan dan job tidak dibuat. Error dari bot, job (clip/publish), webhook, dan unhandled rejection dikirim ke semua admin (dengan dedupe & batas per menit).
+
+Semua pengaturan & teks pesan untuk user ada di `src/lib/admin-config.ts`. Logika Telegram: `src/lib/admin-telegram.ts`, data: `src/lib/admin-store.ts`, notifikasi error: `src/lib/admin-notify.ts`. Tabel `admin_users` & `admin_broadcasts` dibuat **otomatis** saat runtime.
+
+---
+
 ## 🚂 Deployment
 
 Proyek ini sudah **live di Railway**: **https://cawik-clipper.up.railway.app/**

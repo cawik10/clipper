@@ -21,5 +21,21 @@ export async function register() {
     // Smart Learning. Mati otomatis kalau ANALYTICS_ENABLED=false.
     const { startAnalyticsWorker } = await import("@/lib/analytics-worker");
     startAnalyticsWorker();
+
+    // 🛠️ Admin Panel (BARU!) — error tak tertangani dikirim ke admin Telegram
+    // (ADMIN_TELEGRAM_IDS) + dicatat di log. Catatan: dengan listener
+    // unhandledRejection, proses tidak lagi crash karena promise yang lupa di-catch.
+    const { reportError } = await import("@/lib/admin-notify");
+    const g = globalThis as typeof globalThis & { __adminErrorHooks?: boolean };
+    if (!g.__adminErrorHooks) {
+      g.__adminErrorHooks = true;
+      process.on("unhandledRejection", (reason) => {
+        console.error("[unhandledRejection]", reason);
+        void reportError("Unhandled rejection", reason);
+      });
+      process.on("uncaughtExceptionMonitor", (err) => {
+        void reportError("Uncaught exception", err);
+      });
+    }
   }
 }

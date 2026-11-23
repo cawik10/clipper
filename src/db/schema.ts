@@ -447,6 +447,37 @@ export const sourceWhitelist = pgTable("source_whitelist", {
 export type SourceGuardLogRow = typeof sourceGuardLog.$inferSelect;
 export type SourceWhitelistRow = typeof sourceWhitelist.$inferSelect;
 
+// =====================================================================
+// 🛠️ ADMIN PANEL TELEGRAM (BARU!) — tabel tambahan, TIDAK mengubah tabel lain.
+// Juga dibuat OTOMATIS saat runtime (ensureAdminTables di src/lib/admin-store.ts),
+// jadi tidak wajib `drizzle-kit push`. Konfigurasi: src/lib/admin-config.ts
+// =====================================================================
+export const adminUsers = pgTable("admin_users", {
+  telegramUserId: text("telegram_user_id").primaryKey(),
+  chatId: text("chat_id"),
+  username: text("username"),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  isBanned: boolean("is_banned").notNull().default(false),
+  banReason: text("ban_reason"),
+  bannedAt: timestamp("banned_at"),
+  bannedBy: text("banned_by"),
+  quotaOverride: integer("quota_override"), // NULL = pakai ADMIN_DEFAULT_QUOTA, 0 = tanpa batas
+  firstSeen: timestamp("first_seen").defaultNow().notNull(),
+  lastSeen: timestamp("last_seen").defaultNow().notNull(),
+});
+
+export const adminBroadcasts = pgTable("admin_broadcasts", {
+  id: serial("id").primaryKey(),
+  adminId: text("admin_id").notNull(),
+  message: text("message").notNull(),
+  total: integer("total").notNull().default(0),
+  sent: integer("sent").notNull().default(0),
+  failed: integer("failed").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  finishedAt: timestamp("finished_at"),
+});
+
 export interface ClipResult {
   index: number;
   startTime: number;

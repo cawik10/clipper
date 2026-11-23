@@ -25,6 +25,7 @@ import fs from "fs";
 import { InputFile } from "grammy";
 import { bot } from "@/lib/telegram-bot";
 import { processJob } from "@/lib/job-processor";
+import { checkUserAccess } from "@/lib/admin-store"; // 🛠️ Admin Panel: ban & kuota (BARU!)
 import { db } from "@/db";
 import { clipJobs, ClipResult } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -72,6 +73,18 @@ export async function runChannelMonitorOnce(): Promise<MonitorRunResult> {
   let errors = 0;
 
   for (const monitor of dueMonitors) {
+    // 🛠️ Admin Panel (BARU!) — monitor user yang diban / kuotanya habis ditunda
+    // (video baru tidak hilang: akan diproses di siklus berikutnya setelah unban / kuota reset).
+    const access = await checkUserAccess(monitor.telegramUserId);
+    if (!access.allowed) {
+      await markMonitorChecked(
+        monitor.id,
+        undefined,
+        access.reason === "banned" ? "User diblokir admin" : `Kuota habis (${access.used}/${access.limit})`
+      ).catch(() => {});
+      continue;
+    }
+
     try {
       const fresh = await findNewVideos(monitor);
       newVideos += fresh.length;

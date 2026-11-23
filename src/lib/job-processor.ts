@@ -14,6 +14,7 @@ import {
 } from "@/lib/youtube-uploader";
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
 import { postAutoCommentsForClips } from "@/lib/auto-comment"; // 💬 Auto-First Comment (BARU!)
+import { reportError } from "@/lib/admin-notify"; // 🛠️ Notifikasi error ke admin (BARU!)
 import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
 import type { TranscriptSegmentWithWords } from "@/lib/subtitle-config"; // 💬 Subtitle (BARU!)
 // 🛡️ Source Credit & Copyright Guard (BARU!) — import terpisah. Lihat src/lib/source-guard.ts
@@ -328,6 +329,7 @@ export async function processClipsOnly(
     const rawError = err instanceof Error ? err.message : String(err);
     const errorMsg = rawError.replace(/([_*`\[\]])/g, "\\$1");
     console.error(`Job ${jobId} failed (clip stage):`, err);
+    void reportError("Job gagal (clip stage)", err, { jobId });
     await db
       .update(clipJobs)
       .set({ status: "error", errorMessage: errorMsg, updatedAt: new Date() })
@@ -537,6 +539,7 @@ export async function publishJobClips(
     const rawError = err instanceof Error ? err.message : String(err);
     const errorMsg = rawError.replace(/([_*`\[\]])/g, "\\$1");
     console.error(`Job ${jobId} failed (publish stage):`, err);
+    void reportError("Job gagal (publish stage)", err, { jobId });
     await db
       .update(clipJobs)
       .set({ status: "error", errorMessage: errorMsg, updatedAt: new Date() })

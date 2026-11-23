@@ -103,8 +103,15 @@ import {
 } from "@/lib/channel-monitor";
 import { isChannelMonitorEnabled, getMaxMonitorsPerUser } from "@/lib/channel-monitor-config";
 
+// 🛠️ Admin Panel (BARU!) — import terpisah, tidak mengubah import di atas. Lihat src/lib/admin-telegram.ts
+import { registerAdminGuard, registerAdminCommands, guardJobQuota } from "@/lib/admin-telegram";
+import { reportError } from "@/lib/admin-notify";
+
 const token = process.env.TELEGRAM_BOT_TOKEN || "placeholder_token_for_build";
 export const bot = new Bot(token);
+
+// 🛠️ Admin Panel (BARU!) — middleware paling awal: catat user & blokir user yang diban.
+registerAdminGuard(bot);
 
 const URL_REGEX =
   /https?:\/\/(www\.)?(youtube\.com\/watch|youtu\.be|youtube\.com\/shorts|facebook\.com\/(watch|video)|fb\.watch|tiktok\.com\/@[^/]+\/video|instagram\.com\/(reel|p|tv))[^\s]*/i;
@@ -401,6 +408,7 @@ bot.callbackQuery("niche_menu", async (ctx) => {
 registerAnalyticsCommands(bot);
 registerAutoPruneCommands(bot); // ✂️ /prune + tombol Sembunyikan/Hapus/Pertahankan (BARU!)
 registerSourceGuardCommands(bot); // 🛡️ /sourceguard & /whitelist (BARU!)
+registerAdminCommands(bot); // 🛠️ /admin & /broadcast — khusus ADMIN_TELEGRAM_IDS (BARU!)
 
 // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — info read-only, konfigurasi
 // via Railway Variables. Lihat src/lib/duplicate-filter-config.ts.
@@ -1258,6 +1266,9 @@ async function handleVideoUrl(ctx: Context, url: string) {
     return;
   }
 
+  // 🛠️ Admin Panel (BARU!) — tolak kalau user kena ban / kuota habis.
+  if (!(await guardJobQuota(ctx, userId))) return;
+
   const jobId = uuidv4();
   await db.insert(clipJobs).values({
     jobId,
@@ -1678,6 +1689,8 @@ async function ensureUserSettings(userId: string): Promise<void> {
 
 bot.catch((err) => {
   console.error("Bot error:", err);
+  // 🛠️ Admin Panel (BARU!) — notifikasi error otomatis ke admin.
+  void reportError("Bot error", err.error ?? err, { userId: err.ctx?.from?.id });
 });
 
 export default bot;

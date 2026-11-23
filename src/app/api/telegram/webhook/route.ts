@@ -1,5 +1,6 @@
 import { webhookCallback } from "grammy";
 import { bot } from "@/lib/telegram-bot";
+import { reportError } from "@/lib/admin-notify"; // 🛠️ Notifikasi error ke admin (BARU!)
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -12,6 +13,7 @@ export async function POST(req: Request) {
     return await handler(req);
   } catch (err) {
     console.error("Webhook error:", err);
+    void reportError("Telegram webhook", err);
     return new Response("OK", { status: 200 });
   }
 }
