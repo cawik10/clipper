@@ -1,0 +1,2379 @@
+diff --git a/README.md b/README.md
+index ae3a453..e9cf33b 100644
+--- a/README.md
++++ b/README.md
+@@ -177,6 +177,7 @@ curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
+ /drive            - Google Drive: status, hubungkan, ganti akun
+ /drivefolder      - Ganti folder tujuan Drive (link / reset)
+ /driveon /driveoff - Nyalakan / matikan auto-upload Drive
++/cost             - Biaya AI per job & per user (/cost models, /cost jobs, /cost users)
+ /cancel           - Batalkan proses
+ ```
+ 
+@@ -489,6 +490,52 @@ Semua pengaturan & teks pesan untuk user ada di `src/lib/admin-config.ts`. Logik
+ 
+ ---
+ 
++## 💰 Cost Tracker (`/cost`, `DAILY_BUDGET_USD`)
++
++Melacak biaya **OpenAI / Gemini / Groq / Whisper per job dan per user**, menampilkannya di `/cost`, di **laporan mingguan** Telegram, dan di dashboard web (section baru, section lain tidak berubah). Saat biaya hari ini melewati `DAILY_BUDGET_USD`, **AI dijeda otomatis**. Berguna untuk menentukan model mana yang layak dan, kalau bot dijual sebagai layanan, untuk menghitung harga langganan.
++
++| Yang dicatat | Cara hitung |
++| --- | --- |
++| **Analisis momen viral** (GPT / Gemini) | token masuk + keluar dari respons API × harga model |
++| **Transkripsi** (Whisper OpenAI / Groq) | durasi audio × harga per jam |
++| **Title Doctor, Smart Learning, rekomendasi jam upload** | token × harga model (tanpa job, tetap per user kalau bisa) |
++
++Setiap panggilan disimpan di tabel `ai_cost_log` (dibuat **otomatis** saat runtime) lengkap dengan job, user, fitur, model, token/durasi, dan biaya USD. Biaya per job dikaitkan lewat `AsyncLocalStorage`, jadi tidak ada fungsi lama yang berubah signature.
++
++**Perilaku saat batas terlewati** (`COST_BUDGET_MODE=pause`):
++
++* Link baru dari user **ditolak** dengan pesan jelas (job yang sudah berjalan dibiarkan selesai).
++* Auto-Monitor **menunda** channel (video baru tidak hilang, diproses setelah reset).
++* Title Doctor, Smart Learning, dan rekomendasi jam **di-skip** memakai fallback non-AI.
++* Admin dikabari saat 80% dan 100% batas. Reset otomatis tengah malam (`COST_TIMEZONE`), atau naikkan `DAILY_BUDGET_USD` lalu redeploy/restart.
++
++Perintah Telegram: `/cost` (admin: semua user · user biasa: akunnya sendiri) · `/cost 30` · `/cost models` (bandingkan model) · `/cost jobs` (biaya per job) · `/cost me` · `/cost users` (admin) · `/cost price` (admin, harga yang dipakai). Biaya global **tidak** ditampilkan ke user biasa; admin = ID di `ADMIN_TELEGRAM_IDS`.
++
++| Variable | Default | Deskripsi |
++| --- | --- | --- |
++| DAILY\_BUDGET\_USD | 5 | Batas biaya AI per hari, semua user (USD). 0 = tanpa batas |
++| USER\_DAILY\_BUDGET\_USD | 0 | Batas per user per hari (USD). 0 = tanpa batas — untuk model bisnis layanan |
++| COST\_BUDGET\_MODE | pause | `pause` AI dijeda · `warn` hanya notifikasi admin · `off` tanpa batas |
++| COST\_BUDGET\_NOTIFY\_ADMIN | true | Kabari admin saat mendekati/melewati batas |
++| COST\_BUDGET\_WARN\_PERCENT | 80 | Peringatan dini (0 = nonaktif) |
++| COST\_TRACKER\_ENABLED | true | Saklar utama (false = tidak mencatat & tidak membatasi) |
++| COST\_TIMEZONE | ikut ANALYTICS\_TIMEZONE | Zona waktu pergantian hari |
++| COST\_IDR\_RATE | 16000 | Kurs USD→Rp untuk tampilan (0 = sembunyikan) |
++| COST\_WEEKLY\_REPORT | true | Sertakan biaya di laporan mingguan |
++| COST\_REPORT\_DAYS | 7 | Periode laporan mingguan (hari) |
++| COST\_TOP\_N | 5 | Jumlah baris teratas di laporan |
++| COST\_PRICE\_OVERRIDES | – | JSON harga: `{"gemini-3.5-flash-lite":{"in":0.1,"out":0.4},"whisper-1":{"perHour":0.36}}` (`in`/`out` = USD per 1 juta token) |
++
++> 🏷️ **Harga model** ada di `MODEL_PRICES` (`src/lib/cost-config.ts`) — ubah satu baris saat tarif provider berubah, atau timpa lewat `COST_PRICE_OVERRIDES` tanpa deploy kode. Model yang tidak ada di tabel memakai harga perkiraan dan ditandai `≈` di laporan. Teks pesan jeda ada di `COST_TEXT` pada file yang sama; tampilan laporan di `src/lib/cost-report.ts`.
++>
++> 🔎 Biaya adalah **estimasi dari harga publik** × pemakaian yang dilaporkan API (token/durasi), bukan tagihan resmi — cocokkan sesekali dengan dashboard billing provider. Kalau API tidak mengembalikan token, dipakai perkiraan ≈ karakter/4 dan ditandai `≈`. Gemini: token "thinking" dihitung sebagai output.
++>
++> 🧪 **Membandingkan model:** ganti `GEMINI_MODEL` / `GROQ_MODEL` / `GROQ_WHISPER_MODEL` / `AI_PROVIDER_ORDER` di Railway, proses beberapa video, lalu lihat `/cost models` dan `/cost jobs` (biaya per job & per klip). Ekspor JSON: `GET /api/cost/summary?secret=SETUP_SECRET&days=30`.
++
++Logika: `src/lib/cost-tracker.ts` · konfigurasi & harga: `src/lib/cost-config.ts` · laporan: `src/lib/cost-report.ts` · Telegram: `src/lib/cost-telegram.ts` · dashboard: `src/components/CostTrackerSection.tsx`.
++
++---
++
+ ## 🚂 Deployment
+ 
+ Proyek ini sudah **live di Railway**: **https://cawik-clipper.up.railway.app/**
+@@ -542,6 +589,7 @@ curl "https://cawik-clipper.up.railway.app/api/webhook/setup?secret=<SETUP_SECRE
+ | `/api/youtube/callback` | GET | Google OAuth callback |
+ | `/api/webhook/setup` | GET | Setup Telegram webhook |
+ | `/api/claims/run` | GET | Paksa satu siklus Claim Monitor (`?secret=SETUP_SECRET`) |
++| `/api/cost/summary` | GET | Ekspor ringkasan biaya AI (JSON) (`?secret=SETUP_SECRET&days=30&user=ID`) |
+ 
+ ---
+ 
+diff --git a/src/app/api/cost/summary/route.ts b/src/app/api/cost/summary/route.ts
+new file mode 100644
+index 0000000..a45c4e1
+--- /dev/null
++++ b/src/app/api/cost/summary/route.ts
+@@ -0,0 +1,72 @@
++import { NextRequest, NextResponse } from "next/server";
++import { getCostReportDays } from "@/lib/cost-config";
++import {
++  getBudgetStatus,
++  getByFeature,
++  getByModel,
++  getByUser,
++  getRecentJobCosts,
++  getTotals,
++  periodStart,
++  startOfLocalDay,
++} from "@/lib/cost-tracker";
++
++/**
++ * 💰 Cost Tracker (BARU!)
++ * =====================================================================
++ * Ekspor ringkasan biaya AI sebagai JSON (mis. untuk spreadsheet, dashboard
++ * billing, atau menghitung harga bila bot dijual sebagai layanan).
++ * Diamankan pakai SETUP_SECRET (pola sama dengan /api/claims/run).
++ *
++ *   GET /api/cost/summary?secret=...              → periode default (COST_REPORT_DAYS)
++ *   GET /api/cost/summary?secret=...&days=30      → periode 30 hari (1–365)
++ *   GET /api/cost/summary?secret=...&user=12345   → hanya satu user Telegram
++ */
++export const dynamic = "force-dynamic";
++
++export async function GET(req: NextRequest) {
++  const params = req.nextUrl.searchParams;
++  if (!process.env.SETUP_SECRET || params.get("secret") !== process.env.SETUP_SECRET) {
++    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
++  }
++  try {
++    const rawDays = parseInt(params.get("days") ?? "", 10);
++    const days = Number.isFinite(rawDays) ? Math.min(365, Math.max(1, rawDays)) : getCostReportDays();
++    const userId = params.get("user")?.trim() || null;
++    const since = periodStart(days);
++
++    const [budget, today, period, byModel, byFeature, byUser, jobs] = await Promise.all([
++      getBudgetStatus(userId),
++      getTotals(startOfLocalDay(), userId),
++      getTotals(since, userId),
++      getByModel(since, userId),
++      getByFeature(since, userId),
++      userId ? Promise.resolve([]) : getByUser(since, 50),
++      getRecentJobCosts(userId, 50, since),
++    ]);
++
++    return NextResponse.json({
++      days,
++      userId,
++      currency: "USD",
++      budget: {
++        allowed: budget.allowed,
++        mode: budget.mode,
++        scope: budget.scope,
++        dailyLimitUsd: budget.dailyLimit,
++        userLimitUsd: budget.userLimit,
++        spentTodayUsd: budget.spentToday,
++        userSpentTodayUsd: budget.userSpentToday,
++        resetAt: budget.resetAt.toISOString(),
++      },
++      today,
++      period,
++      byModel,
++      byFeature,
++      byUser,
++      jobs,
++    });
++  } catch (err) {
++    return NextResponse.json({ error: String(err) }, { status: 500 });
++  }
++}
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index d9fc21a..6c16257 100644
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -54,6 +54,7 @@ import AutoPruneSection from "@/components/AutoPruneSection"; // ✂️ Auto-Pru
+ import AutoCommentSection from "@/components/AutoCommentSection"; // 💬 Auto-First Comment (BARU!)
+ import SourceGuardSection from "@/components/SourceGuardSection"; // 🛡️ Source Credit & Copyright Guard (BARU!)
+ import ClaimMonitorSection from "@/components/ClaimMonitorSection"; // 🚨 Post-Upload Claim Monitor (BARU!)
++import CostTrackerSection from "@/components/CostTrackerSection"; // 💰 Cost Tracker (BARU!)
+ // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
+ import { getChannelMonitorStats } from "@/lib/channel-monitor";
+ import {
+@@ -1271,6 +1272,9 @@ export default async function HomePage() {
+         {/* 🚨 POST-UPLOAD CLAIM MONITOR (FITUR BARU!) — klaim/pembatasan setelah upload + rasio & auto-blacklist, lihat src/components/ClaimMonitorSection.tsx */}
+         <ClaimMonitorSection />
+ 
++        {/* 💰 COST TRACKER (FITUR BARU!) — biaya OpenAI/Gemini/Whisper per job & user + batas harian, lihat src/components/CostTrackerSection.tsx */}
++        <CostTrackerSection />
++
+         {/* ══════════════════════════════════════════════════════════
+             PIPELINE FLOW
+         ══════════════════════════════════════════════════════════ */}
+diff --git a/src/components/CostTrackerSection.tsx b/src/components/CostTrackerSection.tsx
+new file mode 100644
+index 0000000..99beac1
+--- /dev/null
++++ b/src/components/CostTrackerSection.tsx
+@@ -0,0 +1,263 @@
++/**
++ * 💰 COST TRACKER — section dashboard (FITUR BARU!)
++ * Server component terpisah (seperti SourceGuardSection) supaya section lain tidak berubah.
++ * Konfigurasi & tabel harga: src/lib/cost-config.ts · Logika: src/lib/cost-tracker.ts
++ * Catatan privasi: dashboard ini publik, jadi ID user hanya tampil disamarkan.
++ */
++import {
++  FEATURE_LABELS,
++  featureLabel,
++  getBudgetMode,
++  getCostReportDays,
++  getCostTimezone,
++  getDailyBudgetUsd,
++  getIdrRate,
++  getUserDailyBudgetUsd,
++  isCostTrackerEnabled,
++} from "@/lib/cost-config";
++import {
++  formatMoney,
++  formatUsd,
++  getBudgetStatus,
++  getByFeature,
++  getByModel,
++  getByUser,
++  getDailySeries,
++  getTotals,
++  periodStart,
++  startOfLocalDay,
++} from "@/lib/cost-tracker";
++
++async function loadData() {
++  try {
++    const days = getCostReportDays();
++    const since = periodStart(days);
++    const [budget, today, period, month, models, features, users, series] = await Promise.all([
++      getBudgetStatus(null),
++      getTotals(startOfLocalDay(), null),
++      getTotals(since, null),
++      getTotals(periodStart(30), null),
++      getByModel(since, null),
++      getByFeature(since, null),
++      getByUser(since, 5),
++      getDailySeries(7, null),
++    ]);
++    return { ok: true as const, days, budget, today, period, month, models, features, users, series };
++  } catch {
++    return { ok: false as const };
++  }
++}
++
++function Row({ k, v, hint }: { k: string; v: string; hint?: string }) {
++  return (
++    <div>
++      <span className="text-yellow-300">{k}</span> = <span className="text-emerald-400">{v}</span>
++      {hint && <span className="text-slate-600"> ← {hint}</span>}
++    </div>
++  );
++}
++
++function maskId(id: string): string {
++  return /^-?\d+$/.test(id) && id.length > 4 ? `••••${id.slice(-4)}` : id;
++}
++
++const MODE_STYLE = {
++  pause: { label: "⏸️ PAUSE — AI dijeda saat batas lewat", cls: "bg-amber-500/20 border-amber-500/40 text-amber-300" },
++  warn: { label: "⚠️ WARN — notifikasi saja", cls: "bg-sky-500/20 border-sky-500/40 text-sky-300" },
++  off: { label: "⚪ OFF — tanpa batas", cls: "bg-slate-700/40 border-slate-600 text-slate-400" },
++} as const;
++
++export default async function CostTrackerSection() {
++  const enabled = isCostTrackerEnabled();
++  const mode = MODE_STYLE[getBudgetMode()];
++  const dailyLimit = getDailyBudgetUsd();
++  const userLimit = getUserDailyBudgetUsd();
++  const data = enabled ? await loadData() : null;
++  const days = data && data.ok ? data.days : getCostReportDays();
++
++  const pct = data && data.ok ? Math.min(100, data.budget.percent) : 0;
++  const barColor = pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-400" : "bg-emerald-400";
++  const maxDay = data && data.ok ? Math.max(0.0001, ...data.series.map((d) => d.cost)) : 1;
++
++  return (
++    <section className="bg-gradient-to-br from-amber-500/10 to-yellow-500/10 border-2 border-amber-500/40 rounded-2xl p-6 space-y-5">
++      <div className="flex items-start justify-between flex-wrap gap-3">
++        <div>
++          <h2 className="text-xl font-bold text-amber-400 flex items-center gap-2 flex-wrap">
++            💰 Cost Tracker
++            <span className="text-xs bg-amber-500/20 border border-amber-500/40 text-amber-300 px-2 py-0.5 rounded-full">
++              Fitur Baru!
++            </span>
++          </h2>
++          <p className="text-slate-400 text-sm mt-1 max-w-3xl">
++            Melacak biaya OpenAI / Gemini / Groq / Whisper per job dan per user, lengkap dengan batas biaya harian. Saat batas
++            terlewati, AI dijeda otomatis. Berguna untuk memilih model yang layak dan menghitung harga bila bot dijual sebagai
++            layanan.
++          </p>
++        </div>
++        <span className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${enabled ? mode.cls : "bg-slate-700/40 border-slate-600 text-slate-400"}`}>
++          {enabled ? mode.label : "⚪ Cost Tracker nonaktif"}
++        </span>
++      </div>
++
++      {enabled && data && !data.ok && (
++        <div className="text-sm text-slate-400 bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++          Data biaya belum bisa dibaca (database belum siap). Coba muat ulang halaman.
++        </div>
++      )}
++
++      {data && data.ok && (
++        <>
++          <div className="bg-slate-900/60 rounded-xl p-4 border border-slate-700/50 space-y-2">
++            <div className="flex justify-between flex-wrap gap-2 text-sm">
++              <span className="text-slate-300 font-semibold">
++                {data.budget.allowed ? "💳 Batas harian" : "⏸️ AI DIJEDA — batas harian tercapai"}
++              </span>
++              <span className="text-slate-400">
++                {dailyLimit > 0 ? (
++                  <>
++                    <span className="text-amber-300 font-bold">{formatUsd(data.budget.spentToday)}</span> dari {formatUsd(dailyLimit)} (
++                    {Math.round(data.budget.percent)}%)
++                  </>
++                ) : (
++                  <>
++                    <span className="text-amber-300 font-bold">{formatUsd(data.budget.spentToday)}</span> hari ini · tanpa batas
++                  </>
++                )}
++              </span>
++            </div>
++            {dailyLimit > 0 && (
++              <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
++                <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
++              </div>
++            )}
++          </div>
++
++          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
++            <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++              <div className="text-xs text-slate-500">Hari ini</div>
++              <div className="text-amber-300 font-bold text-xl mt-1">{formatUsd(data.today.cost)}</div>
++              <div className="text-[11px] text-slate-600">{data.today.calls} panggilan</div>
++            </div>
++            <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++              <div className="text-xs text-slate-500">{days} hari terakhir</div>
++              <div className="text-amber-300 font-bold text-xl mt-1">{formatUsd(data.period.cost)}</div>
++              <div className="text-[11px] text-slate-600">{data.period.jobs} job</div>
++            </div>
++            <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++              <div className="text-xs text-slate-500">30 hari terakhir</div>
++              <div className="text-amber-300 font-bold text-xl mt-1">{formatUsd(data.month.cost)}</div>
++              <div className="text-[11px] text-slate-600">{getIdrRate() ? `≈ Rp ${Math.round(data.month.cost * getIdrRate()).toLocaleString("id-ID")}` : `${data.month.calls} panggilan`}</div>
++            </div>
++            <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++              <div className="text-xs text-slate-500">Rata-rata / job</div>
++              <div className="text-amber-300 font-bold text-xl mt-1">
++                {data.period.jobs > 0 ? formatUsd(data.period.jobCost / data.period.jobs) : "–"}
++              </div>
++              <div className="text-[11px] text-slate-600">{days} hari terakhir</div>
++            </div>
++          </div>
++
++          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++            <div className="text-sm font-semibold text-slate-300 mb-3">📅 Biaya 7 hari terakhir</div>
++            <div className="flex items-end gap-2 h-24">
++              {data.series.map((d) => (
++                <div key={d.day} className="flex-1 flex flex-col items-center justify-end h-full gap-1">
++                  <div className="text-[10px] text-slate-500">{d.cost > 0 ? formatUsd(d.cost) : ""}</div>
++                  <div
++                    className="w-full rounded-t bg-amber-400/70"
++                    style={{ height: `${d.cost > 0 ? Math.max(4, (d.cost / maxDay) * 70) : 2}%`, opacity: d.cost > 0 ? 1 : 0.25 }}
++                  />
++                  <div className="text-[10px] text-slate-600">{d.day.slice(5)}</div>
++                </div>
++              ))}
++            </div>
++          </div>
++
++          <div className="grid md:grid-cols-2 gap-4">
++            <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++              <div className="text-sm font-semibold text-slate-300 mb-2">🤖 Per Model ({days} hari)</div>
++              {data.models.length === 0 ? (
++                <div className="text-xs text-slate-500">Belum ada panggilan AI tercatat.</div>
++              ) : (
++                <div className="space-y-1.5">
++                  {data.models.slice(0, 6).map((m) => (
++                    <div key={`${m.provider}-${m.model}`} className="flex justify-between gap-2 text-xs">
++                      <span className="text-slate-300 truncate">
++                        {m.model} <span className="text-slate-600">({m.provider})</span>
++                      </span>
++                      <span className="text-amber-300 font-semibold whitespace-nowrap">
++                        {formatUsd(m.cost)} <span className="text-slate-600 font-normal">· {m.calls}×</span>
++                      </span>
++                    </div>
++                  ))}
++                </div>
++              )}
++            </div>
++            <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++              <div className="text-sm font-semibold text-slate-300 mb-2">🧩 Per Fitur ({days} hari)</div>
++              {data.features.length === 0 ? (
++                <div className="text-xs text-slate-500">Belum ada data.</div>
++              ) : (
++                <div className="space-y-1.5">
++                  {data.features.map((f) => (
++                    <div key={f.feature} className="flex justify-between gap-2 text-xs">
++                      <span className="text-slate-300 truncate">{featureLabel(f.feature)}</span>
++                      <span className="text-amber-300 font-semibold whitespace-nowrap">{formatUsd(f.cost)}</span>
++                    </div>
++                  ))}
++                </div>
++              )}
++            </div>
++          </div>
++
++          {data.users.length > 0 && (
++            <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++              <div className="text-sm font-semibold text-slate-300 mb-2">👥 Pemakai terbesar ({days} hari)</div>
++              <div className="space-y-1.5">
++                {data.users.map((u, i) => (
++                  <div key={u.userId} className="flex justify-between gap-2 text-xs">
++                    <span className="text-slate-300">
++                      {i + 1}. <span className="font-mono">{maskId(u.userId)}</span>
++                    </span>
++                    <span className="text-amber-300 font-semibold whitespace-nowrap">
++                      {formatMoney(u.cost)} <span className="text-slate-600 font-normal">· {u.jobs} job</span>
++                    </span>
++                  </div>
++                ))}
++              </div>
++              <div className="text-[11px] text-slate-600 mt-2">ID user disamarkan. Detail lengkap hanya untuk admin lewat /cost users di Telegram.</div>
++            </div>
++          )}
++        </>
++      )}
++
++      <div className="bg-amber-950/30 border border-amber-500/20 rounded-xl p-4 space-y-3">
++        <div className="text-sm font-semibold text-amber-300">🔧 Cara Atur di Railway Variables:</div>
++        <div className="font-mono text-sm bg-slate-900/80 rounded-lg p-3 space-y-1 overflow-x-auto">
++          <Row k="DAILY_BUDGET_USD" v={String(dailyLimit)} hint="batas biaya AI per hari (semua user), 0 = tanpa batas" />
++          <Row k="USER_DAILY_BUDGET_USD" v={String(userLimit)} hint="batas per user per hari, 0 = tanpa batas" />
++          <Row k="COST_BUDGET_MODE" v={getBudgetMode()} hint="pause | warn | off" />
++          <Row k="COST_TRACKER_ENABLED" v={String(enabled)} />
++          <Row k="COST_TIMEZONE" v={getCostTimezone()} hint="pergantian hari" />
++          <Row k="COST_IDR_RATE" v={String(getIdrRate())} hint="kurs USD→Rp, 0 = sembunyikan" />
++          <Row k="COST_REPORT_DAYS" v={String(getCostReportDays())} hint="periode laporan mingguan" />
++          <Row k="COST_PRICE_OVERRIDES" v={'{"nama-model":{"in":0.1,"out":0.4}}'} hint="timpa harga per 1 juta token / perHour audio" />
++        </div>
++        <div className="text-xs text-slate-400 space-y-1.5">
++          <div>
++            🤖 Telegram: <code className="text-yellow-300">/cost</code> (ringkasan) · <code className="text-yellow-300">/cost models</code> (banding model) ·{" "}
++            <code className="text-yellow-300">/cost jobs</code> (per job) · <code className="text-yellow-300">/cost users</code> (admin)
++          </div>
++          <div>
++            📈 Biaya juga masuk ke <span className="text-slate-300">laporan mingguan</span> Telegram (matikan: <code className="text-slate-300">COST_WEEKLY_REPORT=false</code>).
++          </div>
++          <div>
++            🏷️ Harga model bawaan ({Object.keys(FEATURE_LABELS).length} fitur dilacak) ada di{" "}
++            <code className="text-slate-300">src/lib/cost-config.ts</code> (MODEL_PRICES) — edit satu baris atau pakai COST_PRICE_OVERRIDES.
++          </div>
++        </div>
++      </div>
++    </section>
++  );
++}
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index e7e3c7b..8b5830f 100644
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -6,6 +6,7 @@ import {
+   jsonb,
+   serial,
+   boolean,
++  doublePrecision,
+ } from "drizzle-orm/pg-core";
+ 
+ export const clipJobs = pgTable("clip_jobs", {
+@@ -561,3 +562,27 @@ export const sourceBlacklist = pgTable("source_blacklist", {
+ 
+ export type VideoClaimWatchRow = typeof videoClaimWatch.$inferSelect;
+ export type SourceBlacklistRow = typeof sourceBlacklist.$inferSelect;
++
++// =====================================================================
++// 💰 COST TRACKER (BARU!)
++// =====================================================================
++// Tabel tambahan — TIDAK mengubah tabel/kolom yang sudah ada. Satu baris = satu
++// panggilan AI (OpenAI / Gemini / Groq / Whisper) beserta biayanya dalam USD.
++// Dibuat otomatis saat runtime (lihat ensureCostTable di src/lib/cost-tracker.ts),
++// jadi tidak wajib `drizzle-kit push`. Konfigurasi & harga: src/lib/cost-config.ts
++export const aiCostLog = pgTable("ai_cost_log", {
++  id: serial("id").primaryKey(),
++  jobId: text("job_id"), // null = panggilan di luar job (mis. Title Doctor, Smart Learning)
++  telegramUserId: text("telegram_user_id"), // null = tidak bisa dikaitkan ke user
++  feature: text("feature").notNull().default("other"), // analysis | transcribe | title_doctor | learning | schedule | other
++  provider: text("provider").notNull(), // openai | gemini | groq
++  model: text("model").notNull(),
++  inputTokens: integer("input_tokens").notNull().default(0),
++  outputTokens: integer("output_tokens").notNull().default(0),
++  audioSeconds: doublePrecision("audio_seconds").notNull().default(0),
++  costUsd: doublePrecision("cost_usd").notNull().default(0),
++  estimated: boolean("estimated").notNull().default(false), // true = token diperkirakan / harga model tidak dikenal
++  createdAt: timestamp("created_at").notNull(),
++});
++
++export type AiCostLogRow = typeof aiCostLog.$inferSelect;
+diff --git a/src/lib/ai-analyzer.ts b/src/lib/ai-analyzer.ts
+index cd0cca1..c6f24dd 100644
+--- a/src/lib/ai-analyzer.ts
++++ b/src/lib/ai-analyzer.ts
+@@ -3,6 +3,7 @@ import { ClipResult } from "@/db/schema";
+ import { getMaxClipsConfig } from "@/lib/video-config";
+ import { buildNicheInstruction } from "@/lib/niche-prompt";
+ import { getHookConfig, sanitizeHookText, buildFallbackHook } from "@/lib/hook-config"; // 🪝 AI Hook Overlay (BARU!)
++import { checkAiBudget, recordAiUsage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+ // 💬 Auto-First Comment (BARU!) — komentar pancingan dibuat AI dalam prompt yang sama.
+ import {
+   isAutoCommentEnabled,
+@@ -13,6 +14,11 @@ import {
+   sanitizeCommentText,
+ } from "@/lib/auto-comment-config";
+ 
++/** Model OpenAI untuk analisis momen viral (juga dipakai Cost Tracker untuk menghitung harga). */
++const OPENAI_ANALYSIS_MODEL = "gpt-4o-mini";
++/** Model Gemini untuk analisis (nilai tetap seperti sebelumnya; harga dihitung dari nama ini). */
++const GEMINI_ANALYSIS_MODEL = "gemini-3.5-flash-lite";
++
+ function getOpenAIClient(): OpenAI | null {
+   if (process.env.OPENAI_API_KEY) {
+     return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+@@ -111,10 +117,18 @@ Output JSON array (tanpa markdown):
+   }
+ ]`;
+ 
++  // 💰 Cost Tracker — batas biaya harian tercapai → lewati AI, pakai analisis heuristik (non-AI).
++  // Job yang sudah berjalan tidak terpengaruh (lolos pengecekan saat dimulai).
++  const budget = await checkAiBudget();
++  if (!budget.allowed) {
++    console.warn("[ai-analyzer] Batas biaya AI harian tercapai — memakai analisis fallback tanpa AI.");
++    return fallbackAnalysis(input, maxClips, minDuration, maxDuration, targetDuration);
++  }
++
+   if (openai) {
+     try {
+       const response = await openai.chat.completions.create({
+-        model: "gpt-4o-mini",
++        model: OPENAI_ANALYSIS_MODEL,
+         messages: [
+           {
+             role: "system",
+@@ -129,6 +143,16 @@ Output JSON array (tanpa markdown):
+         response_format: { type: "json_object" },
+       });
+       const content = response.choices[0]?.message?.content || "{}";
++      // 💰 Cost Tracker — catat token & biaya panggilan analisis
++      await recordAiUsage({
++        provider: "openai",
++        model: OPENAI_ANALYSIS_MODEL,
++        feature: "analysis",
++        inputTokens: response.usage?.prompt_tokens,
++        outputTokens: response.usage?.completion_tokens,
++        inputChars: prompt.length,
++        outputChars: content.length,
++      });
+       try {
+         const parsed = JSON.parse(content);
+         const clips = Array.isArray(parsed) ? parsed : parsed.clips || parsed.moments || [];
+@@ -162,9 +186,22 @@ async function analyzeWithGemini(
+ ): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
+   const { GoogleGenerativeAI } = await import("@google/generative-ai");
+   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+-  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
++  const model = genAI.getGenerativeModel({ model: GEMINI_ANALYSIS_MODEL });
+   const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON ARRAY.");
+   const text = result.response.text();
++  // 💰 Cost Tracker — catat token & biaya (thoughtsTokenCount ditagih sebagai output)
++  const usage = result.response.usageMetadata as
++    | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
++    | undefined;
++  await recordAiUsage({
++    provider: "gemini",
++    model: GEMINI_ANALYSIS_MODEL,
++    feature: "analysis",
++    inputTokens: usage?.promptTokenCount,
++    outputTokens: usage ? (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0) : undefined,
++    inputChars: prompt.length,
++    outputChars: text.length,
++  });
+   const jsonMatch = text.match(/\[[\s\S]*\]/);
+   if (jsonMatch) {
+     const clips = JSON.parse(jsonMatch[0]);
+diff --git a/src/lib/ai-provider.ts b/src/lib/ai-provider.ts
+index 8647e14..4f3b826 100644
+--- a/src/lib/ai-provider.ts
++++ b/src/lib/ai-provider.ts
+@@ -30,8 +30,17 @@
+  *    `callXxx()` baru lalu daftarkan di `PROVIDERS` di bawah.
+  */
+ 
++import { recordAiUsage, checkAiBudget, AiBudgetExceededError } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
++
+ export type AiProviderName = "gemini" | "groq";
+ 
++/** 💰 Cost Tracker — label fitur & user untuk pencatatan biaya (opsional, semua boleh kosong). */
++export interface AiCallMeta {
++  /** analysis | title_doctor | learning | schedule | other */
++  feature?: string;
++  userId?: string | null;
++}
++
+ export interface AiTextResult {
+   provider: AiProviderName;
+   text: string;
+@@ -78,7 +87,7 @@ function getProviderOrder(): AiProviderName[] {
+   return order;
+ }
+ 
+-async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
++async function callGemini(systemPrompt: string, userPrompt: string, meta: AiCallMeta = {}): Promise<string> {
+   if (!hasGemini()) throw new Error("GEMINI_API_KEY tidak dikonfigurasi");
+   const { GoogleGenerativeAI } = await import("@google/generative-ai");
+   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+@@ -87,10 +96,25 @@ async function callGemini(systemPrompt: string, userPrompt: string): Promise<str
+     systemInstruction: systemPrompt,
+   });
+   const result = await model.generateContent(userPrompt);
+-  return result.response?.text() || "";
++  const text = result.response?.text() || "";
++  // 💰 Cost Tracker — token dari usageMetadata (thoughtsTokenCount ditagih sebagai output)
++  const usage = result.response?.usageMetadata as
++    | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
++    | undefined;
++  await recordAiUsage({
++    provider: "gemini",
++    model: getGeminiModel(),
++    feature: meta.feature,
++    userId: meta.userId,
++    inputTokens: usage?.promptTokenCount,
++    outputTokens: usage ? (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0) : undefined,
++    inputChars: systemPrompt.length + userPrompt.length,
++    outputChars: text.length,
++  });
++  return text;
+ }
+ 
+-async function callGroq(systemPrompt: string, userPrompt: string): Promise<string> {
++async function callGroq(systemPrompt: string, userPrompt: string, meta: AiCallMeta = {}): Promise<string> {
+   if (!hasGroq()) throw new Error("GROQ_API_KEY tidak dikonfigurasi");
+   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+     method: "POST",
+@@ -115,11 +139,24 @@ async function callGroq(systemPrompt: string, userPrompt: string): Promise<strin
+ 
+   const data = (await response.json()) as {
+     choices?: Array<{ message?: { content?: string } }>;
++    usage?: { prompt_tokens?: number; completion_tokens?: number };
+   };
+-  return data.choices?.[0]?.message?.content || "";
++  const text = data.choices?.[0]?.message?.content || "";
++  // 💰 Cost Tracker
++  await recordAiUsage({
++    provider: "groq",
++    model: getGroqModel(),
++    feature: meta.feature,
++    userId: meta.userId,
++    inputTokens: data.usage?.prompt_tokens,
++    outputTokens: data.usage?.completion_tokens,
++    inputChars: systemPrompt.length + userPrompt.length,
++    outputChars: text.length,
++  });
++  return text;
+ }
+ 
+-const PROVIDERS: Record<AiProviderName, (system: string, user: string) => Promise<string>> = {
++const PROVIDERS: Record<AiProviderName, (system: string, user: string, meta?: AiCallMeta) => Promise<string>> = {
+   gemini: callGemini,
+   groq: callGroq,
+ };
+@@ -131,7 +168,11 @@ const PROVIDERS: Record<AiProviderName, (system: string, user: string) => Promis
+  * sekali) — caller sebaiknya selalu punya fallback non-AI (lihat ai-analyzer.ts
+  * & scheduler.ts) supaya bot tetap jalan walau AI down.
+  */
+-export async function generateAiText(systemPrompt: string, userPrompt: string): Promise<AiTextResult> {
++export async function generateAiText(systemPrompt: string, userPrompt: string, meta: AiCallMeta = {}): Promise<AiTextResult> {
++  // 💰 Cost Tracker — batas biaya harian tercapai → AI dijeda (caller memakai fallback non-AI).
++  const budget = await checkAiBudget({ userId: meta.userId });
++  if (!budget.allowed) throw new AiBudgetExceededError(budget);
++
+   const order = getProviderOrder();
+   const errors: string[] = [];
+ 
+@@ -140,7 +181,7 @@ export async function generateAiText(systemPrompt: string, userPrompt: string):
+     if (!hasKey) continue;
+ 
+     try {
+-      const text = await PROVIDERS[providerName](systemPrompt, userPrompt);
++      const text = await PROVIDERS[providerName](systemPrompt, userPrompt, meta);
+       if (text && text.trim()) {
+         return { provider: providerName, text };
+       }
+diff --git a/src/lib/analytics-learning.ts b/src/lib/analytics-learning.ts
+index 3cc6f61..f34b31e 100644
+--- a/src/lib/analytics-learning.ts
++++ b/src/lib/analytics-learning.ts
+@@ -150,7 +150,8 @@ TUGAS:
+ FORMAT:
+ {"learned_prompt":"...","insights":["...","...","..."],"best_niche":"..."}`;
+ 
+-  const result = await generateAiText(system, user);
++  // 💰 Cost Tracker: label fitur + user pemilik klip untuk pencatatan biaya
++  const result = await generateAiText(system, user, { feature: "learning", userId: args.winners[0]?.telegramUserId });
+   const parsed = parseJsonObject<{ learned_prompt?: string; insights?: unknown; best_niche?: string }>(result.text);
+   const prompt = typeof parsed?.learned_prompt === "string" ? clamp(parsed.learned_prompt, args.maxLen) : "";
+   if (!prompt) throw new Error("AI tidak mengembalikan learned_prompt yang valid");
+diff --git a/src/lib/analytics-worker.ts b/src/lib/analytics-worker.ts
+index 891def6..fa2718a 100644
+--- a/src/lib/analytics-worker.ts
++++ b/src/lib/analytics-worker.ts
+@@ -38,6 +38,7 @@ import {
+   syncUserStats,
+ } from "@/lib/analytics-store";
+ import { buildAnalyticsReport } from "@/lib/analytics-report";
++import { buildWeeklyCostSection } from "@/lib/cost-report"; // 💰 Cost Tracker (BARU!)
+ import { runSmartLearning } from "@/lib/analytics-learning";
+ import { runAutoRetitleForUsers } from "@/lib/auto-title-doctor";
+ import { isAutoRetitleEnabled } from "@/lib/auto-title-doctor-config";
+@@ -129,7 +130,18 @@ export async function sendWeeklyReport(userId: string): Promise<WeeklyReportResu
+     }
+     const report = await buildAnalyticsReport(userId, { weekly: true });
+     const chatId = await resolveChatId(userId);
+-    await sendTelegram(chatId, report + learningNote);
++    // 💰 Cost Tracker (BARU!) — biaya AI minggu ini ditempel di laporan (kosong kalau fitur mati / belum ada biaya).
++    // Kalau terlalu panjang untuk satu pesan Telegram, dikirim sebagai pesan terpisah.
++    const costNote = await buildWeeklyCostSection(userId).catch((err) => {
++      console.warn("[cost] Bagian biaya laporan mingguan gagal:", err);
++      return "";
++    });
++    if (costNote && (report + learningNote + costNote).length > 4000) {
++      await sendTelegram(chatId, report + learningNote);
++      await sendTelegram(chatId, costNote.trim());
++    } else {
++      await sendTelegram(chatId, report + learningNote + costNote);
++    }
+     await markReportBaseline(userId);
+     return { userId, sent: true };
+   } catch (err) {
+diff --git a/src/lib/auto-title-doctor.ts b/src/lib/auto-title-doctor.ts
+index 3d5f1c3..427f10f 100644
+--- a/src/lib/auto-title-doctor.ts
++++ b/src/lib/auto-title-doctor.ts
+@@ -26,6 +26,7 @@ import { getTrackDays } from "@/lib/analytics-config";
+ import { ensureAnalyticsTables, resolveChatId } from "@/lib/analytics-store";
+ import { escapeHtml } from "@/lib/analytics-report";
+ import { generateAiText, hasAnyAiProvider } from "@/lib/ai-provider";
++import { isAiBudgetExceededError } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+ import { isTokenExpired, refreshAccessToken } from "@/lib/youtube-uploader";
+ import {
+   DEFAULT_RETITLE_VIEWS_THRESHOLD,
+@@ -219,7 +220,8 @@ async function generateNewTitle(args: {
+     .filter((l): l is string => l !== null)
+     .join("\n");
+ 
+-  const ai = await generateAiText(RETITLE_SYSTEM_PROMPT, user);
++  // 💰 Cost Tracker: label fitur + user pemilik klip untuk pencatatan biaya
++  const ai = await generateAiText(RETITLE_SYSTEM_PROMPT, user, { feature: "title_doctor", userId: row.telegramUserId });
+   const parsed = parseJsonObject<{ title?: unknown; hashtags?: unknown }>(ai.text);
+   const title = typeof parsed?.title === "string" ? cleanTitle(parsed.title) : "";
+   if (!title) throw new Error("AI tidak mengembalikan judul yang valid");
+@@ -509,6 +511,12 @@ export async function runAutoRetitle(userId: string, opts: { force?: boolean; dr
+         hours,
+       });
+     } catch (err) {
++      // 💰 Cost Tracker — AI dijeda karena batas biaya harian: berhenti tanpa mencatat "failed"
++      // (supaya klip tidak kena cooldown gagal; dicoba lagi otomatis setelah reset).
++      if (isAiBudgetExceededError(err)) {
++        summary.errors.push("Batas biaya AI harian tercapai — Title Doctor dijeda sampai reset.");
++        break;
++      }
+       const message = err instanceof Error ? err.message : String(err);
+       summary.failed++;
+       summary.errors.push(`${row.youtubeVideoId}: ${message}`);
+diff --git a/src/lib/channel-monitor-worker.ts b/src/lib/channel-monitor-worker.ts
+index d1a4c32..8290fbf 100644
+--- a/src/lib/channel-monitor-worker.ts
++++ b/src/lib/channel-monitor-worker.ts
+@@ -26,6 +26,7 @@ import { InputFile } from "grammy";
+ import { bot } from "@/lib/telegram-bot";
+ import { processJob } from "@/lib/job-processor";
+ import { checkUserAccess } from "@/lib/admin-store"; // 🛠️ Admin Panel: ban & kuota (BARU!)
++import { checkAiBudget, budgetBlockedMessage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+ import { db } from "@/db";
+ import { clipJobs, ClipResult } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+@@ -87,6 +88,14 @@ export async function runChannelMonitorOnce(): Promise<MonitorRunResult> {
+       continue;
+     }
+ 
++    // 💰 Cost Tracker (BARU!) — batas biaya AI harian tercapai → monitor ditunda
++    // (video baru tidak hilang: diproses di siklus berikutnya setelah budget reset / dinaikkan).
++    const budget = await checkAiBudget({ userId: monitor.telegramUserId });
++    if (!budget.allowed) {
++      await markMonitorChecked(monitor.id, undefined, `AI dijeda: ${budgetBlockedMessage(budget)}`.slice(0, 300)).catch(() => {});
++      continue;
++    }
++
+     // 🚨 Claim Monitor (BARU!) — channel sumber yang di-blacklist (sering kena klaim) tidak dipantau lagi.
+     // Matikan: CLAIM_BLACKLIST_ENFORCE=off. Kelola: /blacklist di Telegram.
+     if (monitor.sourceType === "channel" && getBlacklistEnforce() === "block") {
+diff --git a/src/lib/cost-config.ts b/src/lib/cost-config.ts
+new file mode 100644
+index 0000000..9280d58
+--- /dev/null
++++ b/src/lib/cost-config.ts
+@@ -0,0 +1,246 @@
++/**
++ * 💰 COST TRACKER — KONFIGURASI & TABEL HARGA (FITUR BARU!)
++ * =====================================================================
++ * Melacak biaya OpenAI / Gemini / Groq / Whisper per job dan per user,
++ * menampilkannya di /cost, laporan mingguan & dashboard, dan MENJEDA AI saat
++ * batas biaya harian terlewati.
++ *
++ * 👉 SEMUANYA MUDAH DIGANTI lewat Railway Variables (tanpa menyentuh kode):
++ *
++ *   — Batas biaya —
++ *   DAILY_BUDGET_USD=5              Batas biaya AI per HARI untuk SEMUA user (USD). 0 = tanpa batas.
++ *   USER_DAILY_BUDGET_USD=0         Batas biaya AI per HARI per user (USD). 0 = tanpa batas.
++ *                                   Berguna kalau bot dijual sebagai layanan.
++ *   COST_BUDGET_MODE=pause          pause = AI dijeda saat batas terlewati (job baru ditolak, fitur AI
++ *                                           lain di-skip memakai fallback non-AI)
++ *                                   warn  = hanya notifikasi ke admin, AI tetap jalan
++ *                                   off   = tanpa batas (biaya tetap dicatat)
++ *   COST_BUDGET_NOTIFY_ADMIN=true   Kabari admin (ADMIN_TELEGRAM_IDS) saat mendekati / melewati batas.
++ *   COST_BUDGET_WARN_PERCENT=80     Peringatan dini di N% batas harian (0 = tanpa peringatan dini).
++ *
++ *   — Pencatatan & laporan —
++ *   COST_TRACKER_ENABLED=true       Saklar utama (false = tidak mencatat & tidak membatasi).
++ *   COST_TIMEZONE=Asia/Jakarta      Zona waktu pergantian hari (default ikut ANALYTICS_TIMEZONE).
++ *   COST_IDR_RATE=16000             Kurs USD→Rupiah untuk tampilan "≈ Rp" (0 = sembunyikan Rupiah).
++ *   COST_WEEKLY_REPORT=true         Sertakan biaya AI di laporan mingguan Telegram.
++ *   COST_REPORT_DAYS=7              Periode laporan mingguan (hari).
++ *   COST_TOP_N=5                    Jumlah baris teratas (user / job / model) di laporan.
++ *
++ *   — Harga model —
++ *   COST_PRICE_OVERRIDES='{"gemini-3.5-flash-lite":{"in":0.10,"out":0.40},"whisper-1":{"perHour":0.36}}'
++ *       Timpa / tambah harga model tanpa deploy kode. `in`/`out` = USD per 1 JUTA token,
++ *       `perHour` = USD per jam audio. Kunci dicocokkan dengan nama model (sebagian nama cukup).
++ *
++ * Harga bawaan ada di MODEL_PRICES di bawah — tinggal edit/tambah satu baris kalau
++ * provider mengubah tarif atau kamu pindah model (GEMINI_MODEL, GROQ_MODEL, GROQ_WHISPER_MODEL).
++ * Model yang tidak dikenal memakai HARGA_TIDAK_DIKENAL dan ditandai "estimasi" (≈) di laporan.
++ */
++
++import { getAnalyticsTimezone } from "@/lib/analytics-config";
++
++function envBool(name: string, def: boolean): boolean {
++  const v = process.env[name]?.trim().toLowerCase();
++  if (!v) return def;
++  return ["1", "true", "yes", "on", "ya"].includes(v);
++}
++
++function envNum(name: string, def: number, min: number, max: number): number {
++  const raw = (process.env[name] ?? "").trim().replace(",", ".");
++  if (!raw) return def;
++  const n = parseFloat(raw);
++  if (!Number.isFinite(n)) return def;
++  return Math.min(max, Math.max(min, n));
++}
++
++// ─── SAKLAR & BATAS ──────────────────────────────────────────────────────
++
++export function isCostTrackerEnabled(): boolean {
++  return envBool("COST_TRACKER_ENABLED", true);
++}
++
++/** Batas biaya harian semua user (USD). 0 = tanpa batas. Default 5. */
++export function getDailyBudgetUsd(): number {
++  return envNum("DAILY_BUDGET_USD", 5, 0, 1_000_000);
++}
++
++/** Batas biaya harian per user (USD). 0 = tanpa batas. */
++export function getUserDailyBudgetUsd(): number {
++  return envNum("USER_DAILY_BUDGET_USD", 0, 0, 1_000_000);
++}
++
++export type CostBudgetMode = "pause" | "warn" | "off";
++
++export function getBudgetMode(): CostBudgetMode {
++  const v = (process.env.COST_BUDGET_MODE || "pause").trim().toLowerCase();
++  return v === "warn" || v === "off" ? v : "pause";
++}
++
++export function shouldNotifyAdminOnBudget(): boolean {
++  return envBool("COST_BUDGET_NOTIFY_ADMIN", true);
++}
++
++export function getBudgetWarnPercent(): number {
++  return envNum("COST_BUDGET_WARN_PERCENT", 80, 0, 99);
++}
++
++// ─── LAPORAN ─────────────────────────────────────────────────────────────
++
++export function getCostTimezone(): string {
++  return (process.env.COST_TIMEZONE || getAnalyticsTimezone() || "Asia/Jakarta").trim();
++}
++
++export function getIdrRate(): number {
++  return envNum("COST_IDR_RATE", 16000, 0, 1_000_000);
++}
++
++export function isCostInWeeklyReport(): boolean {
++  return envBool("COST_WEEKLY_REPORT", true);
++}
++
++export function getCostReportDays(): number {
++  return Math.round(envNum("COST_REPORT_DAYS", 7, 1, 90));
++}
++
++export function getCostTopN(): number {
++  return Math.round(envNum("COST_TOP_N", 5, 1, 20));
++}
++
++// ─── FITUR AI (label di laporan) ─────────────────────────────────────────
++
++/** Kunci `feature` yang dicatat → label tampilan. Tambah baris baru kalau ada fitur AI baru. */
++export const FEATURE_LABELS: Record<string, string> = {
++  analysis: "🧠 Analisis momen viral",
++  transcribe: "🎙️ Transkripsi (Whisper)",
++  title_doctor: "🩺 Auto-Title Doctor",
++  learning: "📈 Smart Learning",
++  schedule: "🕐 Rekomendasi jam upload",
++  other: "✨ Lainnya",
++};
++
++export function featureLabel(key: string): string {
++  return FEATURE_LABELS[key] || `✨ ${key}`;
++}
++
++// ─── TABEL HARGA MODEL ───────────────────────────────────────────────────
++
++export interface ModelPrice {
++  /** Potongan nama model (huruf kecil). Dicocokkan dengan `includes`; yang paling PANJANG menang. */
++  match: string;
++  /** USD per 1 juta token input (model teks). */
++  in?: number;
++  /** USD per 1 juta token output (model teks). */
++  out?: number;
++  /** USD per jam audio (model transkripsi). */
++  perHour?: number;
++}
++
++/**
++ * Harga publik (USD) — periksa halaman pricing provider secara berkala, atau timpa lewat
++ * COST_PRICE_OVERRIDES tanpa deploy ulang kode.
++ *   OpenAI: platform.openai.com/docs/pricing · Gemini: ai.google.dev/pricing · Groq: groq.com/pricing
++ */
++export const MODEL_PRICES: ModelPrice[] = [
++  // ── OpenAI (teks) ──
++  { match: "gpt-4o-mini", in: 0.15, out: 0.6 },
++  { match: "gpt-4o", in: 2.5, out: 10 },
++  { match: "gpt-4.1-nano", in: 0.1, out: 0.4 },
++  { match: "gpt-4.1-mini", in: 0.4, out: 1.6 },
++  { match: "gpt-4.1", in: 2, out: 8 },
++  { match: "gpt-5-nano", in: 0.05, out: 0.4 },
++  { match: "gpt-5-mini", in: 0.25, out: 2 },
++  { match: "gpt-5", in: 1.25, out: 10 },
++  // ── OpenAI (transkripsi): whisper-1 = $0.006/menit ──
++  { match: "whisper-1", perHour: 0.36 },
++  { match: "gpt-4o-mini-transcribe", perHour: 0.18 },
++  { match: "gpt-4o-transcribe", perHour: 0.36 },
++
++  // ── Gemini ──
++  { match: "gemini-2.5-pro", in: 1.25, out: 10 },
++  { match: "gemini-2.5-flash-lite", in: 0.1, out: 0.4 },
++  { match: "gemini-2.5-flash", in: 0.3, out: 2.5 },
++  { match: "gemini-2.0-flash-lite", in: 0.075, out: 0.3 },
++  { match: "gemini-2.0-flash", in: 0.1, out: 0.4 },
++  { match: "gemini-1.5-flash", in: 0.075, out: 0.3 },
++  { match: "gemini-1.5-pro", in: 1.25, out: 5 },
++  // Keluarga model (untuk versi baru yang belum ada di daftar, mis. gemini-3.x-flash-lite)
++  { match: "flash-lite", in: 0.1, out: 0.4 },
++  { match: "flash", in: 0.3, out: 2.5 },
++  { match: "gemini", in: 1.25, out: 10 },
++
++  // ── Groq (teks) ──
++  { match: "llama-3.3-70b", in: 0.59, out: 0.79 },
++  { match: "llama-3.1-8b", in: 0.05, out: 0.08 },
++  { match: "llama-4-scout", in: 0.11, out: 0.34 },
++  { match: "llama-4-maverick", in: 0.2, out: 0.6 },
++  { match: "gpt-oss-120b", in: 0.15, out: 0.75 },
++  { match: "gpt-oss-20b", in: 0.075, out: 0.3 },
++  { match: "qwen3-32b", in: 0.29, out: 0.59 },
++  // ── Groq (transkripsi) ──
++  { match: "whisper-large-v3-turbo", perHour: 0.04 },
++  { match: "whisper-large-v3", perHour: 0.111 },
++  { match: "distil-whisper", perHour: 0.02 },
++];
++
++/** Dipakai kalau nama model tidak ada di tabel (hasil ditandai estimasi). */
++export const HARGA_TIDAK_DIKENAL = {
++  text: { in: 0.3, out: 2.5 }, // setara gemini-2.5-flash
++  audioPerHour: 0.36, // setara whisper-1
++};
++
++/** Groq menagih minimal 10 detik per request transkripsi. */
++export const MIN_BILLED_AUDIO_SECONDS: Record<string, number> = { groq: 10 };
++
++function parseOverrides(): ModelPrice[] {
++  const raw = process.env.COST_PRICE_OVERRIDES?.trim();
++  if (!raw) return [];
++  try {
++    const obj = JSON.parse(raw) as Record<string, { in?: number; out?: number; perHour?: number }>;
++    const num = (v: unknown) => (v !== undefined && v !== null && Number.isFinite(Number(v)) ? Number(v) : undefined);
++    return Object.entries(obj)
++      .filter(([, v]) => v && typeof v === "object")
++      .map(([k, v]) => ({ match: k.toLowerCase(), in: num(v.in), out: num(v.out), perHour: num(v.perHour) }));
++  } catch {
++    console.warn("[cost] COST_PRICE_OVERRIDES bukan JSON valid — diabaikan.");
++    return [];
++  }
++}
++
++export interface ResolvedPrice {
++  in?: number;
++  out?: number;
++  perHour?: number;
++  /** true = model tidak ada di tabel → harga perkiraan. */
++  estimated: boolean;
++  source: "override" | "default" | "unknown";
++  matched: string | null;
++}
++
++/** Cari harga untuk sebuah model: override env > tabel bawaan; kecocokan terpanjang menang. */
++export function resolvePrice(model: string, kind: "text" | "audio"): ResolvedPrice {
++  const name = (model || "").toLowerCase();
++  const overrides = parseOverrides().map((p) => ({ ...p, src: "override" as const }));
++  const builtin = MODEL_PRICES.map((p) => ({ ...p, src: "default" as const }));
++  const fits = [...overrides, ...builtin].filter((p) => {
++    if (!name.includes(p.match)) return false;
++    return kind === "audio" ? p.perHour !== undefined : p.in !== undefined || p.out !== undefined;
++  });
++  fits.sort((a, b) => b.match.length - a.match.length || (a.src === "override" ? -1 : 1));
++  const best = fits[0];
++  if (best) {
++    return { in: best.in, out: best.out, perHour: best.perHour, estimated: false, source: best.src, matched: best.match };
++  }
++  return kind === "audio"
++    ? { perHour: HARGA_TIDAK_DIKENAL.audioPerHour, estimated: true, source: "unknown", matched: null }
++    : { in: HARGA_TIDAK_DIKENAL.text.in, out: HARGA_TIDAK_DIKENAL.text.out, estimated: true, source: "unknown", matched: null };
++}
++
++// ─── TEKS PESAN ──────────────────────────────────────────────────────────
++
++export const COST_TEXT = {
++  /** Pesan ke user saat job ditolak karena batas harian global tercapai. */
++  globalPaused:
++    "⏸️ <b>AI dijeda sementara</b> — batas biaya AI harian bot sudah tercapai.\nCoba lagi besok (reset otomatis tengah malam), atau hubungi admin.",
++  /** Pesan ke user saat batas harian PER USER tercapai. */
++  userPaused:
++    "⏸️ <b>Batas pemakaian AI harianmu sudah tercapai.</b>\nCoba lagi besok (reset otomatis tengah malam), atau hubungi admin untuk menambah kuota.",
++};
+diff --git a/src/lib/cost-report.ts b/src/lib/cost-report.ts
+new file mode 100644
+index 0000000..a941d53
+--- /dev/null
++++ b/src/lib/cost-report.ts
+@@ -0,0 +1,331 @@
++/**
++ * 💰 COST TRACKER — LAPORAN (FITUR BARU!)
++ * =====================================================================
++ * Membangun teks (format HTML Telegram) untuk:
++ *   • /cost, /cost 30, /cost models, /cost jobs, /cost users   → src/lib/cost-telegram.ts
++ *   • Bagian "Biaya AI" di laporan mingguan                    → src/lib/analytics-worker.ts
++ *
++ * Mau ubah tampilan/isi laporan? Cukup edit file ini. Label fitur ada di
++ * FEATURE_LABELS (src/lib/cost-config.ts).
++ */
++
++import { inArray } from "drizzle-orm";
++import { db } from "@/db";
++import { adminUsers } from "@/db/schema";
++import { isAdmin } from "@/lib/admin-config";
++import { ensureAdminTables } from "@/lib/admin-store";
++import { escapeHtml } from "@/lib/analytics-report";
++import {
++  featureLabel,
++  getBudgetMode,
++  getCostReportDays,
++  getCostTopN,
++  getCostTimezone,
++  getDailyBudgetUsd,
++  getUserDailyBudgetUsd,
++  isCostInWeeklyReport,
++  isCostTrackerEnabled,
++  resolvePrice,
++} from "@/lib/cost-config";
++import {
++  budgetBlockedMessage,
++  formatMoney,
++  formatUsd,
++  getBudgetStatus,
++  getByFeature,
++  getByModel,
++  getByUser,
++  getRecentJobCosts,
++  getTotals,
++  periodStart,
++  startOfLocalDay,
++  type BudgetStatus,
++  type ModelRow,
++} from "@/lib/cost-tracker";
++
++function bar(percent: number): string {
++  const filled = Math.round(Math.min(100, Math.max(0, percent)) / 10);
++  return "█".repeat(filled) + "░".repeat(10 - filled);
++}
++
++function trunc(s: string, n: number): string {
++  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
++}
++
++function modelLabel(r: Pick<ModelRow, "provider" | "model">): string {
++  return `${escapeHtml(r.model)} <i>(${escapeHtml(r.provider)})</i>`;
++}
++
++function hours(seconds: number): string {
++  return seconds >= 3600 ? `${(seconds / 3600).toFixed(2)} jam` : `${Math.round(seconds / 60)} mnt`;
++}
++
++function tokens(n: number): string {
++  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
++}
++
++async function userNames(ids: string[]): Promise<Map<string, string>> {
++  const map = new Map<string, string>();
++  const real = ids.filter((i) => /^-?\d+$/.test(i));
++  if (!real.length) return map;
++  try {
++    await ensureAdminTables();
++    const rows = await db.select().from(adminUsers).where(inArray(adminUsers.telegramUserId, real));
++    for (const u of rows) {
++      const name = u.username ? `@${u.username}` : [u.firstName, u.lastName].filter(Boolean).join(" ");
++      if (name) map.set(u.telegramUserId, name);
++    }
++  } catch {
++    /* nama hanya pemanis — pakai ID */
++  }
++  return map;
++}
++
++// ─── BARIS BUDGET ────────────────────────────────────────────────────────
++
++/** Baris status batas harian. `global` = lihat batas semua user (admin), selain itu batas milik user. */
++export function budgetLines(s: BudgetStatus, view: "global" | "user"): string[] {
++  const lines: string[] = [];
++  const mode = getBudgetMode();
++  const resetNote = `reset ${s.resetAt.toLocaleTimeString("id-ID", { timeZone: getCostTimezone(), hour: "2-digit", minute: "2-digit" })} (${getCostTimezone()})`;
++
++  if (view === "global") {
++    if (s.dailyLimit > 0) {
++      const icon = s.scope === "global" ? "⏸️" : s.percent >= 80 ? "⚠️" : "💳";
++      lines.push(
++        `${icon} Batas harian: <b>${formatUsd(s.dailyLimit)}</b> — terpakai ${formatUsd(s.spentToday)} (${Math.round(s.percent)}%)`,
++        `<code>${bar(s.percent)}</code> <i>${resetNote}</i>`
++      );
++    } else {
++      lines.push("💳 Batas harian: <b>tanpa batas</b> (set <code>DAILY_BUDGET_USD</code>)");
++    }
++    if (s.userLimit > 0) lines.push(`👤 Batas per user: <b>${formatUsd(s.userLimit)}</b>/hari`);
++    if (mode === "warn") lines.push("<i>Mode warn: hanya notifikasi, AI tidak dijeda.</i>");
++    if (mode === "off") lines.push("<i>Mode off: batas tidak diberlakukan.</i>");
++    if (!s.allowed) lines.push(`⏸️ <b>AI sedang DIJEDA.</b> ${escapeHtml(budgetBlockedMessage(s))}`);
++    return lines;
++  }
++
++  // view user: jangan bocorkan biaya global ke user biasa
++  if (s.userLimit > 0 && s.userSpentToday !== null) {
++    const pct = (s.userSpentToday / s.userLimit) * 100;
++    lines.push(
++      `${s.scope === "user" ? "⏸️" : "💳"} Batas harianmu: <b>${formatUsd(s.userLimit)}</b> — terpakai ${formatUsd(s.userSpentToday)} (${Math.round(pct)}%)`,
++      `<code>${bar(pct)}</code> <i>${resetNote}</i>`
++    );
++  }
++  if (!s.allowed) lines.push(`⏸️ <b>AI sedang dijeda.</b> ${s.scope === "user" ? "Batas harianmu tercapai." : "Batas harian bot tercapai."} Coba lagi setelah reset.`);
++  return lines;
++}
++
++// ─── LAPORAN UTAMA (/cost) ───────────────────────────────────────────────
++
++/**
++ * Ringkasan biaya. `userId` kosong = semua user (khusus admin).
++ * Berisi: hari ini + N hari, status batas harian, per fitur, per model, (admin) user teratas.
++ */
++export async function buildCostReport(opts: { userId?: string | null; days: number; weekly?: boolean }): Promise<string> {
++  const { userId = null, days } = opts;
++  const since = periodStart(days);
++  const todayStart = startOfLocalDay();
++  const [today, period, features, models, budget] = await Promise.all([
++    getTotals(todayStart, userId),
++    getTotals(since, userId),
++    getByFeature(since, userId),
++    getByModel(since, userId),
++    getBudgetStatus(userId),
++  ]);
++
++  const scopeLabel = userId ? "akunmu" : "semua user";
++  const lines: string[] = [
++    opts.weekly ? `💰 <b>Biaya AI Mingguan</b> — ${scopeLabel}` : `💰 <b>Biaya AI</b> — ${scopeLabel}`,
++    `🗓 <i>${days} hari terakhir</i>`,
++    "",
++  ];
++
++  lines.push("📊 <b>Ringkasan</b>");
++  lines.push(`• Hari ini: <b>${escapeHtml(formatMoney(today.cost))}</b> (${today.calls} panggilan AI)`);
++  lines.push(`• ${days} hari: <b>${escapeHtml(formatMoney(period.cost))}</b> (${period.calls} panggilan · ${period.jobs} job)`);
++  if (period.jobs > 0) {
++    lines.push(`• Rata-rata per job: <b>${escapeHtml(formatMoney(period.jobCost / period.jobs))}</b>`);
++  }
++  lines.push("");
++
++  const bl = budgetLines(budget, userId ? "user" : "global");
++  if (bl.length) lines.push(...bl, "");
++
++  if (!period.calls) {
++    lines.push("Belum ada biaya AI tercatat di periode ini. Kirim link video ke bot — biaya tiap job akan muncul di sini.");
++    return lines.join("\n");
++  }
++
++  lines.push("🧩 <b>Per Fitur</b>");
++  features.forEach((f) => {
++    const pct = period.cost > 0 ? Math.round((f.cost / period.cost) * 100) : 0;
++    lines.push(`• ${escapeHtml(featureLabel(f.feature))} — ${formatUsd(f.cost)} (${pct}%) · ${f.calls}×`);
++  });
++  lines.push("");
++
++  lines.push("🤖 <b>Per Model</b>");
++  models.slice(0, getCostTopN()).forEach((m) => {
++    lines.push(`• ${modelLabel(m)} — <b>${formatUsd(m.cost)}</b> · ${m.calls}×${m.estimated ? " ≈" : ""}`);
++  });
++  if (models.some((m) => m.estimated)) lines.push("<i>≈ = token/harga diperkirakan (model belum ada di tabel harga).</i>");
++
++  if (!userId) {
++    const users = await getByUser(since, getCostTopN());
++    const names = await userNames(users.map((u) => u.userId));
++    lines.push("", "👥 <b>Pemakai Terbesar</b>");
++    users.forEach((u, i) => {
++      const name = names.get(u.userId);
++      lines.push(
++        `${i + 1}. <code>${escapeHtml(u.userId)}</code>${name ? ` ${escapeHtml(name)}` : ""} — <b>${formatUsd(u.cost)}</b> · ${u.jobs} job`
++      );
++    });
++  }
++
++  return lines.join("\n");
++}
++
++// ─── PERBANDINGAN MODEL (/cost models) ───────────────────────────────────
++
++export async function buildModelReport(opts: { userId?: string | null; days: number }): Promise<string> {
++  const rows = await getByModel(periodStart(opts.days), opts.userId ?? null);
++  const lines = ["🤖 <b>Perbandingan Model</b>", `🗓 <i>${opts.days} hari terakhir</i>`, ""];
++  if (!rows.length) {
++    lines.push("Belum ada data. Proses beberapa video dulu, lalu bandingkan biaya tiap model di sini.");
++    return lines.join("\n");
++  }
++  const total = rows.reduce((n, r) => n + r.cost, 0);
++  rows.forEach((r) => {
++    const share = total > 0 ? Math.round((r.cost / total) * 100) : 0;
++    lines.push(`<b>${modelLabel(r)}</b>${r.estimated ? " ≈" : ""}`);
++    const parts = [`${formatUsd(r.cost)} (${share}%)`, `${r.calls} panggilan`, `${formatUsd(r.cost / Math.max(1, r.calls))}/panggilan`];
++    if (r.jobs > 0) parts.push(`${formatUsd(r.cost / r.jobs)}/job`);
++    lines.push(`   ${parts.join(" · ")}`);
++    if (r.audioSeconds > 0) {
++      lines.push(`   🎧 ${hours(r.audioSeconds)} audio · ${formatUsd((r.cost / r.audioSeconds) * 3600)}/jam`);
++    } else {
++      lines.push(`   🔤 ${tokens(r.inputTokens)} token masuk · ${tokens(r.outputTokens)} keluar`);
++    }
++  });
++  lines.push(
++    "",
++    "💡 <i>Untuk mencoba model lain, ubah GEMINI_MODEL / GROQ_MODEL / GROQ_WHISPER_MODEL / AI_PROVIDER_ORDER di Railway Variables, " +
++      "proses beberapa video, lalu bandingkan biaya per job di sini.</i>"
++  );
++  return lines.join("\n");
++}
++
++// ─── BIAYA PER JOB (/cost jobs) ──────────────────────────────────────────
++
++export async function buildJobsReport(opts: { userId?: string | null; limit?: number }): Promise<string> {
++  const limit = opts.limit ?? 8;
++  const jobs = await getRecentJobCosts(opts.userId ?? null, limit);
++  const lines = ["🧾 <b>Biaya per Job</b>", `<i>${jobs.length} job terakhir</i>`, ""];
++  if (!jobs.length) {
++    lines.push("Belum ada job dengan biaya AI tercatat.");
++    return lines.join("\n");
++  }
++  const names = opts.userId ? new Map<string, string>() : await userNames(jobs.map((j) => j.userId || "").filter(Boolean));
++  jobs.forEach((j, i) => {
++    const title = escapeHtml(trunc(j.title || `Job ${j.jobId.slice(0, 8)}`, 48));
++    const date = j.at.toLocaleString("id-ID", { timeZone: getCostTimezone(), day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
++    const extra = [`${j.calls} panggilan`];
++    if (j.clips) extra.push(`${j.clips} klip · ${formatUsd(j.cost / j.clips)}/klip`);
++    lines.push(`${i + 1}. <b>${title}</b>`);
++    lines.push(`   ${escapeHtml(formatMoney(j.cost))} · ${extra.join(" · ")}`);
++    const who = !opts.userId && j.userId ? ` · 👤 ${escapeHtml(names.get(j.userId) || j.userId)}` : "";
++    lines.push(`   <i>${date}${j.status ? ` · ${escapeHtml(j.status)}` : ""}${who}</i>`);
++  });
++  return lines.join("\n");
++}
++
++// ─── PER USER (/cost users — admin) ──────────────────────────────────────
++
++export async function buildUsersReport(days: number): Promise<string> {
++  const users = await getByUser(periodStart(days), 15);
++  const lines = ["👥 <b>Biaya per User</b>", `🗓 <i>${days} hari terakhir</i>`, ""];
++  if (!users.length) {
++    lines.push("Belum ada data.");
++    return lines.join("\n");
++  }
++  const names = await userNames(users.map((u) => u.userId));
++  const total = users.reduce((n, u) => n + u.cost, 0);
++  users.forEach((u, i) => {
++    const name = names.get(u.userId);
++    lines.push(
++      `${i + 1}. <code>${escapeHtml(u.userId)}</code>${name ? ` ${escapeHtml(name)}` : ""}\n` +
++        `   <b>${escapeHtml(formatMoney(u.cost))}</b> · ${u.jobs} job · ${u.calls} panggilan` +
++        (u.jobs > 0 ? ` · ${formatUsd(u.cost / u.jobs)}/job` : "")
++    );
++  });
++  lines.push("", `Total: <b>${escapeHtml(formatMoney(total))}</b>`);
++  lines.push("<i>Data ini berguna untuk menentukan harga langganan bila bot dijual sebagai layanan.</i>");
++  return lines.join("\n");
++}
++
++// ─── HARGA YANG DIPAKAI (/cost price — admin) ────────────────────────────
++
++export async function buildPriceReport(models: Array<{ label: string; model: string; kind: "text" | "audio" }>): Promise<string> {
++  const lines = ["🏷️ <b>Harga Model yang Dipakai</b>", ""];
++  for (const m of models) {
++    const p = resolvePrice(m.model, m.kind);
++    const price =
++      m.kind === "audio"
++        ? `${formatUsd(p.perHour ?? 0)}/jam audio`
++        : `${formatUsd(p.in ?? 0)} masuk · ${formatUsd(p.out ?? 0)} keluar per 1 juta token`;
++    const src = p.source === "override" ? "override env" : p.source === "unknown" ? "⚠️ tidak dikenal (perkiraan)" : "tabel bawaan";
++    lines.push(`• <b>${escapeHtml(m.label)}</b>: <code>${escapeHtml(m.model)}</code>\n   ${price} <i>(${src})</i>`);
++  }
++  lines.push(
++    "",
++    "<i>Ubah harga tanpa deploy: <code>COST_PRICE_OVERRIDES</code> di Railway Variables, atau edit MODEL_PRICES di src/lib/cost-config.ts.</i>"
++  );
++  return lines.join("\n");
++}
++
++// ─── BAGIAN LAPORAN MINGGUAN ─────────────────────────────────────────────
++
++/**
++ * Blok "Biaya AI" yang ditempel di laporan mingguan Telegram (src/lib/analytics-worker.ts).
++ * Kosong ("") kalau fitur mati atau belum ada biaya — jadi laporan lama tidak berubah.
++ * Admin juga mendapat ringkasan SEMUA user + pemakai terbesar.
++ */
++export async function buildWeeklyCostSection(userId: string): Promise<string> {
++  if (!isCostTrackerEnabled() || !isCostInWeeklyReport()) return "";
++  const days = getCostReportDays();
++  const since = periodStart(days);
++
++  const own = await getTotals(since, userId);
++  const admin = isAdmin(userId);
++  if (!own.calls && !admin) return "";
++
++  const lines: string[] = ["", "", `💰 <b>Biaya AI — ${days} hari terakhir</b>`];
++
++  if (own.calls) {
++    const [features, models] = await Promise.all([getByFeature(since, userId), getByModel(since, userId)]);
++    lines.push(`• Akunmu: <b>${escapeHtml(formatMoney(own.cost))}</b> · ${own.jobs} job${own.jobs ? ` · ≈${escapeHtml(formatUsd(own.jobCost / own.jobs))}/job` : ""}`);
++    features.slice(0, 3).forEach((f) => lines.push(`  ▫️ ${escapeHtml(featureLabel(f.feature))}: ${formatUsd(f.cost)}`));
++    models.slice(0, 3).forEach((m) => lines.push(`  ▫️ ${escapeHtml(m.model)}: ${formatUsd(m.cost)}`));
++  } else {
++    lines.push("• Akunmu: belum ada biaya AI.");
++  }
++
++  if (admin) {
++    const [all, users, budget] = await Promise.all([getTotals(since, null), getByUser(since, getCostTopN()), getBudgetStatus(null)]);
++    lines.push(`• Semua user: <b>${escapeHtml(formatMoney(all.cost))}</b> · ${all.jobs} job · ${all.calls} panggilan`);
++    if (users.length) {
++      const names = await userNames(users.map((u) => u.userId));
++      users.forEach((u, i) =>
++        lines.push(`  ${i + 1}. ${escapeHtml(names.get(u.userId) || u.userId)} — ${formatUsd(u.cost)} (${u.jobs} job)`)
++      );
++    }
++    if (getDailyBudgetUsd() > 0) {
++      lines.push(`• Batas harian ${formatUsd(budget.dailyLimit)} — hari ini terpakai ${formatUsd(budget.spentToday)} (${Math.round(budget.percent)}%)`);
++    }
++    if (getUserDailyBudgetUsd() > 0) lines.push(`• Batas per user: ${formatUsd(getUserDailyBudgetUsd())}/hari`);
++  }
++  lines.push("<i>Detail lengkap: /cost</i>");
++  return lines.join("\n");
++}
+diff --git a/src/lib/cost-telegram.ts b/src/lib/cost-telegram.ts
+new file mode 100644
+index 0000000..9eb1e2e
+--- /dev/null
++++ b/src/lib/cost-telegram.ts
+@@ -0,0 +1,132 @@
++/**
++ * 💰 PERINTAH TELEGRAM — COST TRACKER (FITUR BARU!)
++ * =====================================================================
++ * Didaftarkan ke bot lewat satu baris di src/lib/telegram-bot.ts:
++ *     registerCostCommands(bot);
++ * dan satu baris di handleVideoUrl (setelah guardJobQuota):
++ *     if (!(await guardAiBudget(ctx, userId))) return;
++ *
++ * Perintah:
++ *   /cost                → ringkasan biaya (admin: SEMUA user · user biasa: akunnya sendiri)
++ *   /cost 30             → periode 30 hari (1–90)
++ *   /cost me             → biaya akunmu sendiri (untuk admin)
++ *   /cost models [hari]  → bandingkan biaya per model (menentukan model mana yang layak)
++ *   /cost jobs [n]       → biaya per job terbaru
++ *   /cost users [hari]   → biaya per user (khusus admin)
++ *   /cost price          → harga model yang sedang dipakai (khusus admin)
++ *
++ * Admin = ID di ADMIN_TELEGRAM_IDS. Biaya global tidak ditampilkan ke user biasa.
++ */
++
++import type { Bot, Context } from "grammy";
++import { isAdmin } from "@/lib/admin-config";
++import { getGeminiModel, getGroqModel, getGroqWhisperModel } from "@/lib/ai-provider";
++import { COST_TEXT, getCostReportDays, isCostTrackerEnabled } from "@/lib/cost-config";
++import { buildCostReport, buildJobsReport, buildModelReport, buildPriceReport, buildUsersReport } from "@/lib/cost-report";
++import { checkAiBudget } from "@/lib/cost-tracker";
++
++const HTML = { parse_mode: "HTML" as const, link_preview_options: { is_disabled: true } };
++
++/** Dipakai di /help (format Markdown, sama seperti CLAIM_MONITOR_HELP). */
++export const COST_HELP =
++  `\n\n💰 *Cost Tracker:*\n` +
++  `/cost - Biaya AI (OpenAI/Gemini/Whisper) per job & per user\n` +
++  `/cost models - Bandingkan biaya per model\n` +
++  `/cost jobs - Biaya per job terbaru`;
++
++async function reply(ctx: Context, text: string): Promise<void> {
++  // Batas pesan Telegram 4096 karakter
++  await ctx.reply(text.slice(0, 4000), HTML);
++}
++
++/**
++ * Tolak job baru kalau batas biaya AI harian tercapai (COST_BUDGET_MODE=pause).
++ * Return true = boleh lanjut. Pola sama dengan guardJobQuota (admin-telegram.ts).
++ */
++export async function guardAiBudget(ctx: Context, userId: string): Promise<boolean> {
++  const status = await checkAiBudget({ userId });
++  if (status.allowed) return true;
++  await ctx.reply(status.scope === "user" ? COST_TEXT.userPaused : COST_TEXT.globalPaused, HTML).catch(() => {});
++  return false;
++}
++
++function parseDays(arg: string | undefined, def: number): number {
++  const n = parseInt(arg ?? "", 10);
++  return Number.isFinite(n) ? Math.min(90, Math.max(1, n)) : def;
++}
++
++export function registerCostCommands(bot: Bot<Context>): void {
++  bot.command("cost", async (ctx) => {
++    const userId = ctx.from?.id?.toString();
++    if (!userId) return;
++    if (!isCostTrackerEnabled()) {
++      await reply(ctx, "💰 <b>Cost Tracker</b> sedang nonaktif.\nAdmin bisa menyalakannya dengan <code>COST_TRACKER_ENABLED=true</code> di Railway Variables.");
++      return;
++    }
++
++    const admin = isAdmin(userId);
++    const args = (ctx.match || "").toString().trim().toLowerCase().split(/\s+/).filter(Boolean);
++    const sub = args[0] || "";
++    const defaultDays = getCostReportDays();
++
++    try {
++      // /cost 30 (angka saja = periode)
++      if (!sub || /^\d+$/.test(sub)) {
++        const days = parseDays(sub, defaultDays);
++        await reply(ctx, await buildCostReport({ userId: admin ? null : userId, days }));
++        return;
++      }
++
++      if (sub === "me") {
++        await reply(ctx, await buildCostReport({ userId, days: parseDays(args[1], defaultDays) }));
++        return;
++      }
++
++      if (sub === "models" || sub === "model") {
++        await reply(ctx, await buildModelReport({ userId: admin ? null : userId, days: parseDays(args[1], 30) }));
++        return;
++      }
++
++      if (sub === "jobs" || sub === "job") {
++        const limit = Math.min(20, Math.max(1, parseInt(args[1] ?? "", 10) || 8));
++        await reply(ctx, await buildJobsReport({ userId: admin ? null : userId, limit }));
++        return;
++      }
++
++      if (sub === "users" || sub === "user" || sub === "price" || sub === "harga") {
++        if (!admin) {
++          await reply(ctx, "🔒 Perintah ini khusus admin.");
++          return;
++        }
++        if (sub === "users" || sub === "user") {
++          await reply(ctx, await buildUsersReport(parseDays(args[1], defaultDays)));
++          return;
++        }
++        await reply(
++          ctx,
++          await buildPriceReport([
++            { label: "Gemini (teks)", model: getGeminiModel(), kind: "text" },
++            { label: "Groq (teks)", model: getGroqModel(), kind: "text" },
++            { label: "Groq Whisper", model: getGroqWhisperModel(), kind: "audio" },
++            { label: "OpenAI (analisis)", model: "gpt-4o-mini", kind: "text" },
++            { label: "OpenAI Whisper", model: "whisper-1", kind: "audio" },
++          ])
++        );
++        return;
++      }
++
++      await reply(
++        ctx,
++        "💰 <b>Cost Tracker</b>\n\n" +
++          "<code>/cost</code> — ringkasan biaya AI\n" +
++          "<code>/cost 30</code> — periode 30 hari\n" +
++          "<code>/cost models</code> — bandingkan biaya per model\n" +
++          "<code>/cost jobs</code> — biaya per job terbaru\n" +
++          (admin ? "<code>/cost me</code> — biaya akunmu saja\n<code>/cost users</code> — biaya per user\n<code>/cost price</code> — harga model yang dipakai\n" : "")
++      );
++    } catch (err) {
++      console.error("[cost] /cost gagal:", err);
++      await ctx.reply("⚠️ Terjadi kesalahan saat memproses /cost. Coba lagi sebentar lagi.");
++    }
++  });
++}
+diff --git a/src/lib/cost-tracker.ts b/src/lib/cost-tracker.ts
+new file mode 100644
+index 0000000..1d510d4
+--- /dev/null
++++ b/src/lib/cost-tracker.ts
+@@ -0,0 +1,635 @@
++/**
++ * 💰 COST TRACKER — LOGIKA INTI (FITUR BARU!)
++ * =====================================================================
++ * Semua logika pelacakan biaya AI ada di file ini; env var & tabel harga ada di
++ * src/lib/cost-config.ts; tampilan Telegram di cost-report.ts / cost-telegram.ts.
++ *
++ * Cara kerja singkat:
++ *   1. `processClipsOnly` (job-processor) membungkus job dengan
++ *      `runWithCostContext({ jobId, userId })` → setiap panggilan AI di dalam job
++ *      otomatis tahu job & user-nya (AsyncLocalStorage, tanpa ubah signature fungsi).
++ *   2. Titik panggilan AI (ai-analyzer, video-processor/Whisper, ai-provider,
++ *      scheduler) memanggil `recordAiUsage(...)` setelah respons → hitung biaya dari
++ *      token/durasi audio × harga model → simpan ke tabel `ai_cost_log`.
++ *   3. Sebelum job / panggilan AI di luar job, `checkAiBudget()` membandingkan biaya
++ *      HARI INI dengan DAILY_BUDGET_USD (& USER_DAILY_BUDGET_USD). Lewat batas →
++ *      AI dijeda (lihat COST_BUDGET_MODE). Job yang SUDAH berjalan dibiarkan selesai.
++ *
++ * `recordAiUsage` & `checkAiBudget` tidak pernah melempar error ke pemanggil
++ * (fail-open): kalau DB bermasalah, bot tetap jalan seperti biasa.
++ */
++
++import fs from "fs";
++import { AsyncLocalStorage } from "async_hooks";
++import { execFile } from "child_process";
++import { promisify } from "util";
++import { and, eq, gte, sql } from "drizzle-orm";
++import { db } from "@/db";
++import { aiCostLog } from "@/db/schema";
++import { notifyAdmins, escapeHtmlText } from "@/lib/admin-notify";
++import {
++  MIN_BILLED_AUDIO_SECONDS,
++  getBudgetMode,
++  getBudgetWarnPercent,
++  getCostTimezone,
++  getDailyBudgetUsd,
++  getIdrRate,
++  getUserDailyBudgetUsd,
++  isCostTrackerEnabled,
++  resolvePrice,
++  shouldNotifyAdminOnBudget,
++  type CostBudgetMode,
++} from "@/lib/cost-config";
++
++const execFileAsync = promisify(execFile);
++
++// ─── FORMAT ──────────────────────────────────────────────────────────────
++
++/** 0.00123 → "$0.0012" · 1.5 → "$1.50" */
++export function formatUsd(usd: number): string {
++  const v = Number.isFinite(usd) ? usd : 0;
++  if (v === 0) return "$0";
++  if (v < 0.01) return `$${v.toFixed(4)}`;
++  if (v < 1) return `$${Math.abs(v * 100 - Math.round(v * 100)) < 1e-9 ? v.toFixed(2) : v.toFixed(3)}`;
++  return `$${v.toFixed(2)}`;
++}
++
++/** "$0.123 (≈ Rp 1.968)" — Rupiah disembunyikan kalau COST_IDR_RATE=0. */
++export function formatMoney(usd: number): string {
++  const rate = getIdrRate();
++  if (!rate) return formatUsd(usd);
++  return `${formatUsd(usd)} (≈ Rp ${Math.round(usd * rate).toLocaleString("id-ID")})`;
++}
++
++// ─── KONTEKS JOB (AsyncLocalStorage) ─────────────────────────────────────
++
++export interface CostContext {
++  jobId?: string | null;
++  userId?: string | null;
++  /** Fitur default untuk panggilan di dalam konteks ini. */
++  feature?: string;
++  /** true = job ini sudah lolos pengecekan budget saat dimulai → tidak dijeda di tengah jalan. */
++  budgetChecked?: boolean;
++}
++
++// Disimpan di globalThis supaya satu instance dipakai walau modul ini di-bundle ganda oleh Next.js.
++const g = globalThis as typeof globalThis & { __autoclipCostAls?: AsyncLocalStorage<CostContext> };
++const als: AsyncLocalStorage<CostContext> = (g.__autoclipCostAls ??= new AsyncLocalStorage<CostContext>());
++
++export function runWithCostContext<T>(ctx: CostContext, fn: () => Promise<T>): Promise<T> {
++  return als.run({ ...(als.getStore() || {}), ...ctx }, fn);
++}
++
++export function getCostContext(): CostContext {
++  return als.getStore() || {};
++}
++
++// ─── TABEL ───────────────────────────────────────────────────────────────
++
++let tableReady: Promise<void> | null = null;
++
++export function ensureCostTable(): Promise<void> {
++  if (!tableReady) {
++    tableReady = (async () => {
++      await db.execute(sql`
++        CREATE TABLE IF NOT EXISTS ai_cost_log (
++          id serial PRIMARY KEY,
++          job_id text,
++          telegram_user_id text,
++          feature text NOT NULL DEFAULT 'other',
++          provider text NOT NULL,
++          model text NOT NULL,
++          input_tokens integer NOT NULL DEFAULT 0,
++          output_tokens integer NOT NULL DEFAULT 0,
++          audio_seconds double precision NOT NULL DEFAULT 0,
++          cost_usd double precision NOT NULL DEFAULT 0,
++          estimated boolean NOT NULL DEFAULT false,
++          created_at timestamp NOT NULL DEFAULT (now() AT TIME ZONE 'UTC')
++        )
++      `);
++      await db.execute(sql`CREATE INDEX IF NOT EXISTS ai_cost_log_created_idx ON ai_cost_log (created_at)`);
++      await db.execute(sql`CREATE INDEX IF NOT EXISTS ai_cost_log_user_idx ON ai_cost_log (telegram_user_id, created_at)`);
++      await db.execute(sql`CREATE INDEX IF NOT EXISTS ai_cost_log_job_idx ON ai_cost_log (job_id)`);
++    })().catch((err) => {
++      tableReady = null;
++      throw err;
++    });
++  }
++  return tableReady;
++}
++
++// ─── HITUNG & CATAT BIAYA ────────────────────────────────────────────────
++
++export type AiProviderLabel = "openai" | "gemini" | "groq";
++
++export interface UsageInput {
++  provider: AiProviderLabel;
++  model: string;
++  /** analysis | transcribe | title_doctor | learning | schedule | other (default: dari konteks, lalu "other"). */
++  feature?: string;
++  userId?: string | null;
++  jobId?: string | null;
++  /** Token dari respons API (disarankan). */
++  inputTokens?: number | null;
++  outputTokens?: number | null;
++  /** Cadangan kalau API tidak mengembalikan token: dihitung ≈ karakter/4 dan ditandai estimasi. */
++  inputChars?: number;
++  outputChars?: number;
++  /** Isi untuk model transkripsi (Whisper) — biaya dihitung dari durasi audio. */
++  audioSeconds?: number;
++}
++
++export function calcCost(u: Pick<UsageInput, "provider" | "model" | "audioSeconds"> & { inputTokens: number; outputTokens: number }): {
++  cost: number;
++  priceEstimated: boolean;
++} {
++  if (u.audioSeconds !== undefined) {
++    const price = resolvePrice(u.model, "audio");
++    const seconds = Math.max(u.audioSeconds, MIN_BILLED_AUDIO_SECONDS[u.provider] ?? 0);
++    return { cost: (seconds / 3600) * (price.perHour ?? 0), priceEstimated: price.estimated };
++  }
++  const price = resolvePrice(u.model, "text");
++  const cost = (u.inputTokens / 1_000_000) * (price.in ?? 0) + (u.outputTokens / 1_000_000) * (price.out ?? 0);
++  return { cost, priceEstimated: price.estimated };
++}
++
++/** Catat satu panggilan AI. TIDAK PERNAH melempar error. Mengembalikan biaya (USD). */
++export async function recordAiUsage(u: UsageInput): Promise<number> {
++  if (!isCostTrackerEnabled()) return 0;
++  try {
++    const ctx = getCostContext();
++    const isAudio = u.audioSeconds !== undefined;
++    let inputTokens = Math.max(0, Math.round(u.inputTokens ?? 0));
++    let outputTokens = Math.max(0, Math.round(u.outputTokens ?? 0));
++    let estimated = false;
++    if (!isAudio) {
++      if (u.inputTokens == null && u.inputChars != null) {
++        inputTokens = Math.ceil(u.inputChars / 4);
++        estimated = true;
++      }
++      if (u.outputTokens == null && u.outputChars != null) {
++        outputTokens = Math.ceil(u.outputChars / 4);
++        estimated = true;
++      }
++    }
++
++    const { cost, priceEstimated } = calcCost({
++      provider: u.provider,
++      model: u.model,
++      audioSeconds: u.audioSeconds,
++      inputTokens,
++      outputTokens,
++    });
++    const userId = u.userId ?? ctx.userId ?? null;
++
++    await ensureCostTable();
++    await db.insert(aiCostLog).values({
++      jobId: u.jobId ?? ctx.jobId ?? null,
++      telegramUserId: userId,
++      feature: u.feature ?? ctx.feature ?? "other",
++      provider: u.provider,
++      model: u.model || "unknown",
++      inputTokens,
++      outputTokens,
++      audioSeconds: isAudio ? Math.max(0, u.audioSeconds ?? 0) : 0,
++      costUsd: cost,
++      estimated: estimated || priceEstimated,
++      createdAt: new Date(),
++    });
++
++    bumpSpendCache(userId, cost);
++    void maybeNotifyBudget(userId).catch(() => {});
++    return cost;
++  } catch (err) {
++    console.warn("[cost] Gagal mencatat biaya AI:", err instanceof Error ? err.message : err);
++    return 0;
++  }
++}
++
++/** Durasi audio (detik): ffprobe, cadangan perkiraan dari ukuran file (audio diekstrak 32 kbps). */
++export async function getAudioSeconds(audioPath: string): Promise<number> {
++  try {
++    const { stdout } = await execFileAsync(
++      "ffprobe",
++      ["-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", audioPath],
++      { timeout: 15000 }
++    );
++    const n = parseFloat(stdout.trim());
++    if (Number.isFinite(n) && n > 0) return n;
++  } catch {
++    /* pakai perkiraan di bawah */
++  }
++  try {
++    return fs.statSync(audioPath).size / 4000; // 32 kbps = 4000 byte/detik
++  } catch {
++    return 0;
++  }
++}
++
++// ─── WAKTU (hari lokal) ──────────────────────────────────────────────────
++
++/** Awal hari ini (00:00) di zona waktu COST_TIMEZONE, sebagai Date UTC. */
++export function startOfLocalDay(now = new Date(), timeZone = getCostTimezone()): Date {
++  const parts = new Intl.DateTimeFormat("en-US", {
++    timeZone,
++    year: "numeric",
++    month: "2-digit",
++    day: "2-digit",
++    hour: "2-digit",
++    minute: "2-digit",
++    second: "2-digit",
++    hourCycle: "h23",
++  }).formatToParts(now);
++  const get = (t: string) => parseInt(parts.find((p) => p.type === t)?.value ?? "0", 10);
++  const y = get("year");
++  const mo = get("month");
++  const d = get("day");
++  const localAsUtc = Date.UTC(y, mo - 1, d, get("hour") % 24, get("minute"), get("second"));
++  const offsetMs = localAsUtc - Math.floor(now.getTime() / 1000) * 1000; // waktu lokal − UTC
++  return new Date(Date.UTC(y, mo - 1, d) - offsetMs);
++}
++
++/** Awal periode "N hari terakhir" (bergulir dari sekarang). */
++export function periodStart(days: number): Date {
++  return new Date(Date.now() - days * 86_400_000);
++}
++
++// ─── BUDGET HARIAN ───────────────────────────────────────────────────────
++
++export interface BudgetStatus {
++  /** false = AI harus dijeda (hanya bisa false kalau COST_BUDGET_MODE=pause). */
++  allowed: boolean;
++  mode: CostBudgetMode;
++  /** Batas mana yang terlewati. */
++  scope: "global" | "user" | null;
++  spentToday: number;
++  dailyLimit: number;
++  userSpentToday: number | null;
++  userLimit: number;
++  /** Kapan hitungan harian di-reset (00:00 berikutnya). */
++  resetAt: Date;
++  /** Persen pemakaian terhadap batas global (0 kalau tanpa batas). */
++  percent: number;
++}
++
++const TTL_MS = 10_000;
++const spendCache = new Map<string, { value: number; at: number; day: number }>();
++
++function cacheKey(userId?: string | null): string {
++  return userId ? `u:${userId}` : "g";
++}
++
++function bumpSpendCache(userId: string | null, cost: number): void {
++  for (const key of ["g", userId ? cacheKey(userId) : ""]) {
++    const hit = key ? spendCache.get(key) : undefined;
++    if (hit) hit.value += cost;
++  }
++}
++
++/** Total biaya hari ini (semua user, atau satu user). Cache 10 detik supaya hemat query. */
++export async function getSpentToday(userId?: string | null): Promise<number> {
++  const day = startOfLocalDay().getTime();
++  const key = cacheKey(userId);
++  const hit = spendCache.get(key);
++  if (hit && hit.day === day && Date.now() - hit.at < TTL_MS) return hit.value;
++
++  await ensureCostTable();
++  const since = new Date(day);
++  const rows = await db
++    .select({ total: sql<number>`coalesce(sum(${aiCostLog.costUsd}), 0)` })
++    .from(aiCostLog)
++    .where(userId ? and(gte(aiCostLog.createdAt, since), eq(aiCostLog.telegramUserId, userId)) : gte(aiCostLog.createdAt, since));
++  const value = Number(rows[0]?.total ?? 0);
++  spendCache.set(key, { value, at: Date.now(), day });
++  return value;
++}
++
++export async function getBudgetStatus(userId?: string | null): Promise<BudgetStatus> {
++  const mode = getBudgetMode();
++  const dailyLimit = getDailyBudgetUsd();
++  const userLimit = getUserDailyBudgetUsd();
++  const resetAt = new Date(startOfLocalDay().getTime() + 86_400_000);
++
++  const spentToday = await getSpentToday(null);
++  const userSpentToday = userId ? await getSpentToday(userId) : null;
++
++  let scope: BudgetStatus["scope"] = null;
++  if (dailyLimit > 0 && spentToday >= dailyLimit) scope = "global";
++  else if (userLimit > 0 && userSpentToday !== null && userSpentToday >= userLimit) scope = "user";
++
++  const enforce = isCostTrackerEnabled() && mode === "pause";
++  return {
++    allowed: !(enforce && scope),
++    mode,
++    scope,
++    spentToday,
++    dailyLimit,
++    userSpentToday,
++    userLimit,
++    resetAt,
++    percent: dailyLimit > 0 ? (spentToday / dailyLimit) * 100 : 0,
++  };
++}
++
++function openStatus(): BudgetStatus {
++  return {
++    allowed: true,
++    mode: getBudgetMode(),
++    scope: null,
++    spentToday: 0,
++    dailyLimit: getDailyBudgetUsd(),
++    userSpentToday: null,
++    userLimit: getUserDailyBudgetUsd(),
++    resetAt: new Date(startOfLocalDay().getTime() + 86_400_000),
++    percent: 0,
++  };
++}
++
++/**
++ * Apakah AI boleh dipakai sekarang? Fail-open (DB error → boleh).
++ * Job yang sudah lolos pengecekan saat dimulai (`budgetChecked`) selalu boleh —
++ * jadi job tidak terpotong di tengah jalan hanya karena batas terlewati sesaat.
++ */
++export async function checkAiBudget(opts: { userId?: string | null } = {}): Promise<BudgetStatus> {
++  if (!isCostTrackerEnabled() || getBudgetMode() !== "pause") return openStatus();
++  const ctx = getCostContext();
++  if (ctx.budgetChecked) return openStatus();
++  try {
++    return await getBudgetStatus(opts.userId ?? ctx.userId ?? null);
++  } catch (err) {
++    console.warn("[cost] Cek budget gagal (dianggap boleh):", err instanceof Error ? err.message : err);
++    return openStatus();
++  }
++}
++
++export class AiBudgetExceededError extends Error {
++  readonly status: BudgetStatus;
++  constructor(status: BudgetStatus) {
++    super(budgetBlockedMessage(status));
++    this.name = "AiBudgetExceededError";
++    this.status = status;
++  }
++}
++
++export function isAiBudgetExceededError(err: unknown): err is AiBudgetExceededError {
++  return err instanceof AiBudgetExceededError || (err as { name?: string })?.name === "AiBudgetExceededError";
++}
++
++/** Pesan teks polos (tanpa HTML) — aman disimpan di DB / dikirim sebagai status job. */
++export function budgetBlockedMessage(s: BudgetStatus): string {
++  const reset = s.resetAt.toLocaleString("id-ID", { timeZone: getCostTimezone(), hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
++  if (s.scope === "user") {
++    return `Batas pemakaian AI harianmu sudah tercapai (${formatUsd(s.userSpentToday ?? 0)} dari ${formatUsd(s.userLimit)}). AI dijeda sampai reset ${reset}.`;
++  }
++  return `Batas biaya AI harian bot sudah tercapai (${formatUsd(s.spentToday)} dari ${formatUsd(s.dailyLimit)}). AI dijeda sampai reset ${reset}, atau admin menaikkan DAILY_BUDGET_USD.`;
++}
++
++// ─── NOTIFIKASI ADMIN ────────────────────────────────────────────────────
++
++const notified = new Set<string>();
++
++async function maybeNotifyBudget(userId: string | null): Promise<void> {
++  if (!shouldNotifyAdminOnBudget() || getBudgetMode() === "off") return;
++  const day = startOfLocalDay().getTime();
++  for (const k of notified) if (!k.startsWith(`${day}:`)) notified.delete(k);
++
++  const limit = getDailyBudgetUsd();
++  if (limit > 0) {
++    const spent = await getSpentToday(null);
++    const warnPct = getBudgetWarnPercent();
++    const level = spent >= limit ? "limit" : warnPct > 0 && spent >= (limit * warnPct) / 100 ? "warn" : null;
++    if (level && !notified.has(`${day}:${level}`)) {
++      notified.add(`${day}:${level}`);
++      if (level === "limit") notified.add(`${day}:warn`);
++      const mode = getBudgetMode();
++      await notifyAdmins(
++        level === "limit"
++          ? `⏸️ <b>Batas biaya AI harian tercapai</b>\nTerpakai ${escapeHtmlText(formatMoney(spent))} dari batas ${escapeHtmlText(formatUsd(limit))}.\n` +
++              (mode === "pause"
++                ? "AI <b>dijeda</b>: job baru ditolak & fitur AI lain memakai fallback sampai reset tengah malam.\n"
++                : "Mode <code>warn</code>: AI tetap berjalan.\n") +
++              "Naikkan <code>DAILY_BUDGET_USD</code> di Railway Variables untuk melanjutkan. Detail: /cost"
++          : `⚠️ <b>Biaya AI hari ini ${Math.round((spent / limit) * 100)}% dari batas</b>\nTerpakai ${escapeHtmlText(formatMoney(spent))} dari ${escapeHtmlText(formatUsd(limit))}. Detail: /cost`
++      );
++    }
++  }
++
++  const userLimit = getUserDailyBudgetUsd();
++  if (userLimit > 0 && userId) {
++    const key = `${day}:user:${userId}`;
++    if (!notified.has(key) && (await getSpentToday(userId)) >= userLimit) {
++      notified.add(key);
++      await notifyAdmins(
++        `⏸️ <b>User ${escapeHtmlText(userId)}</b> mencapai batas AI harian (${escapeHtmlText(formatUsd(userLimit))}).` +
++          (getBudgetMode() === "pause" ? " AI-nya dijeda sampai reset." : "")
++      );
++    }
++  }
++}
++
++// ─── QUERY LAPORAN ───────────────────────────────────────────────────────
++
++export interface Totals {
++  cost: number;
++  calls: number;
++  inputTokens: number;
++  outputTokens: number;
++  audioSeconds: number;
++  jobs: number;
++  /** Biaya yang terjadi di dalam job (tanpa fitur sistem seperti Title Doctor). */
++  jobCost: number;
++}
++
++export interface ModelRow {
++  provider: string;
++  model: string;
++  calls: number;
++  cost: number;
++  inputTokens: number;
++  outputTokens: number;
++  audioSeconds: number;
++  jobs: number;
++  estimated: boolean;
++}
++
++export interface FeatureRow {
++  feature: string;
++  calls: number;
++  cost: number;
++}
++
++export interface UserRow {
++  userId: string;
++  calls: number;
++  cost: number;
++  jobs: number;
++}
++
++export interface JobCostRow {
++  jobId: string;
++  userId: string | null;
++  cost: number;
++  calls: number;
++  at: Date;
++  title: string | null;
++  status: string | null;
++  clips: number | null;
++}
++
++export interface DayRow {
++  day: string;
++  cost: number;
++}
++
++function whereSince(since: Date, userId?: string | null) {
++  return userId ? and(gte(aiCostLog.createdAt, since), eq(aiCostLog.telegramUserId, userId)) : gte(aiCostLog.createdAt, since);
++}
++
++const sumCost = sql<number>`coalesce(sum(${aiCostLog.costUsd}), 0)`;
++const countAll = sql<number>`count(*)`;
++const countJobs = sql<number>`count(distinct ${aiCostLog.jobId})`;
++
++export async function getTotals(since: Date, userId?: string | null): Promise<Totals> {
++  await ensureCostTable();
++  const [r] = await db
++    .select({
++      cost: sumCost,
++      calls: countAll,
++      inputTokens: sql<number>`coalesce(sum(${aiCostLog.inputTokens}), 0)`,
++      outputTokens: sql<number>`coalesce(sum(${aiCostLog.outputTokens}), 0)`,
++      audioSeconds: sql<number>`coalesce(sum(${aiCostLog.audioSeconds}), 0)`,
++      jobs: countJobs,
++      jobCost: sql<number>`coalesce(sum(${aiCostLog.costUsd}) filter (where ${aiCostLog.jobId} is not null), 0)`,
++    })
++    .from(aiCostLog)
++    .where(whereSince(since, userId));
++  return {
++    cost: Number(r?.cost ?? 0),
++    calls: Number(r?.calls ?? 0),
++    inputTokens: Number(r?.inputTokens ?? 0),
++    outputTokens: Number(r?.outputTokens ?? 0),
++    audioSeconds: Number(r?.audioSeconds ?? 0),
++    jobs: Number(r?.jobs ?? 0),
++    jobCost: Number(r?.jobCost ?? 0),
++  };
++}
++
++export async function getByModel(since: Date, userId?: string | null): Promise<ModelRow[]> {
++  await ensureCostTable();
++  const rows = await db
++    .select({
++      provider: aiCostLog.provider,
++      model: aiCostLog.model,
++      calls: countAll,
++      cost: sumCost,
++      inputTokens: sql<number>`coalesce(sum(${aiCostLog.inputTokens}), 0)`,
++      outputTokens: sql<number>`coalesce(sum(${aiCostLog.outputTokens}), 0)`,
++      audioSeconds: sql<number>`coalesce(sum(${aiCostLog.audioSeconds}), 0)`,
++      jobs: countJobs,
++      estimated: sql<boolean>`bool_or(${aiCostLog.estimated})`,
++    })
++    .from(aiCostLog)
++    .where(whereSince(since, userId))
++    .groupBy(aiCostLog.provider, aiCostLog.model)
++    .orderBy(sql`sum(${aiCostLog.costUsd}) desc`);
++  return rows.map((r) => ({
++    provider: r.provider,
++    model: r.model,
++    calls: Number(r.calls),
++    cost: Number(r.cost),
++    inputTokens: Number(r.inputTokens),
++    outputTokens: Number(r.outputTokens),
++    audioSeconds: Number(r.audioSeconds),
++    jobs: Number(r.jobs),
++    estimated: !!r.estimated,
++  }));
++}
++
++export async function getByFeature(since: Date, userId?: string | null): Promise<FeatureRow[]> {
++  await ensureCostTable();
++  const rows = await db
++    .select({ feature: aiCostLog.feature, calls: countAll, cost: sumCost })
++    .from(aiCostLog)
++    .where(whereSince(since, userId))
++    .groupBy(aiCostLog.feature)
++    .orderBy(sql`sum(${aiCostLog.costUsd}) desc`);
++  return rows.map((r) => ({ feature: r.feature, calls: Number(r.calls), cost: Number(r.cost) }));
++}
++
++/** Pengguna dengan biaya terbesar. Baris tanpa user (fitur sistem) digabung sebagai "system". */
++export async function getByUser(since: Date, limit = 10): Promise<UserRow[]> {
++  await ensureCostTable();
++  const rows = await db
++    .select({
++      userId: sql<string>`coalesce(${aiCostLog.telegramUserId}, 'system')`,
++      calls: countAll,
++      cost: sumCost,
++      jobs: countJobs,
++    })
++    .from(aiCostLog)
++    .where(gte(aiCostLog.createdAt, since))
++    .groupBy(sql`coalesce(${aiCostLog.telegramUserId}, 'system')`)
++    .orderBy(sql`sum(${aiCostLog.costUsd}) desc`)
++    .limit(limit);
++  return rows.map((r) => ({ userId: r.userId, calls: Number(r.calls), cost: Number(r.cost), jobs: Number(r.jobs) }));
++}
++
++/** Biaya per job (terbaru dulu), dilengkapi judul & jumlah klip dari tabel clip_jobs. */
++export async function getRecentJobCosts(userId: string | null, limit = 5, since?: Date): Promise<JobCostRow[]> {
++  await ensureCostTable();
++  const sinceIso = (since ?? new Date(0)).toISOString();
++  const userFilter = userId ? sql`AND l.telegram_user_id = ${userId}` : sql``;
++  const res = await db.execute(sql`
++    SELECT l.job_id AS job_id,
++           max(l.telegram_user_id) AS user_id,
++           sum(l.cost_usd) AS cost,
++           count(*) AS calls,
++           to_char(min(l.created_at), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
++           max(j.video_title) AS title,
++           max(j.status) AS status,
++           max(CASE WHEN jsonb_typeof(j.clips) = 'array' THEN jsonb_array_length(j.clips) END) AS clips
++    FROM ai_cost_log l
++    LEFT JOIN clip_jobs j ON j.job_id = l.job_id
++    WHERE l.job_id IS NOT NULL AND l.created_at >= ${sinceIso}::timestamp ${userFilter}
++    GROUP BY l.job_id
++    ORDER BY min(l.created_at) DESC
++    LIMIT ${limit}
++  `);
++  const rows = res.rows as Array<Record<string, unknown>>;
++  return rows.map((r) => ({
++    jobId: String(r.job_id),
++    userId: r.user_id ? String(r.user_id) : null,
++    cost: Number(r.cost ?? 0),
++    calls: Number(r.calls ?? 0),
++    at: new Date(String(r.at)),
++    title: r.title ? String(r.title) : null,
++    status: r.status ? String(r.status) : null,
++    clips: r.clips === null || r.clips === undefined ? null : Number(r.clips),
++  }));
++}
++
++/** Biaya per hari (zona waktu COST_TIMEZONE) untuk grafik batang. Hari tanpa biaya diisi 0. */
++export async function getDailySeries(days: number, userId?: string | null): Promise<DayRow[]> {
++  await ensureCostTable();
++  const tz = getCostTimezone();
++  const todayStart = startOfLocalDay();
++  const since = new Date(todayStart.getTime() - (days - 1) * 86_400_000);
++  const userFilter = userId ? sql`AND telegram_user_id = ${userId}` : sql``;
++  const res = await db.execute(sql`
++    SELECT to_char((created_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz}, 'YYYY-MM-DD') AS day,
++           sum(cost_usd) AS cost
++    FROM ai_cost_log
++    WHERE created_at >= ${since.toISOString()}::timestamp ${userFilter}
++    GROUP BY 1
++  `);
++  const map = new Map<string, number>();
++  for (const r of res.rows as Array<Record<string, unknown>>) map.set(String(r.day), Number(r.cost ?? 0));
++
++  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
++  const out: DayRow[] = [];
++  for (let i = 0; i < days; i++) {
++    const key = fmt.format(new Date(since.getTime() + i * 86_400_000 + 12 * 3_600_000));
++    out.push({ day: key, cost: map.get(key) ?? 0 });
++  }
++  return out;
++}
+diff --git a/src/lib/job-processor.ts b/src/lib/job-processor.ts
+index 8b92e8b..f405d24 100644
+--- a/src/lib/job-processor.ts
++++ b/src/lib/job-processor.ts
+@@ -3,6 +3,7 @@ import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
+ import { analyzeVideoForClips } from "@/lib/ai-analyzer";
++import { AiBudgetExceededError, budgetBlockedMessage, checkAiBudget, runWithCostContext } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+ import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
+ import { getDefaultNichePrompt } from "@/lib/niche-prompt";
+ // 📈 AI Analytics & Feedback Loop (BARU!) — import terpisah.
+@@ -92,6 +93,29 @@ async function getEffectiveSettings(telegramUserId: string): Promise<EffectiveSe
+ export async function processClipsOnly(
+   jobId: string,
+   onStatusUpdate?: StatusUpdateFn
++): Promise<{ successfulClipsCount: number; platform: string }> {
++  // 💰 Cost Tracker (BARU!) — (1) cek batas biaya AI harian SEBELUM job mulai (mode pause → job ditolak),
++  // (2) bungkus job dengan konteks {jobId, userId} supaya setiap panggilan AI (Whisper, analisis)
++  // otomatis tercatat biayanya per job & per user. Job yang sudah mulai dibiarkan selesai.
++  // Konfigurasi: src/lib/cost-config.ts · Matikan: COST_TRACKER_ENABLED=false.
++  const owner = await db.select({ userId: clipJobs.telegramUserId }).from(clipJobs).where(eq(clipJobs.jobId, jobId));
++  const userId = owner[0]?.userId ?? null;
++  const budget = await checkAiBudget({ userId });
++  if (!budget.allowed) {
++    const msg = budgetBlockedMessage(budget);
++    await db
++      .update(clipJobs)
++      .set({ status: "error", errorMessage: msg, updatedAt: new Date() })
++      .where(eq(clipJobs.jobId, jobId));
++    if (onStatusUpdate) await onStatusUpdate("error", `⏸️ ${msg}`, { step: "error" });
++    throw new AiBudgetExceededError(budget);
++  }
++  return runWithCostContext({ jobId, userId, budgetChecked: true }, () => processClipsOnlyInner(jobId, onStatusUpdate));
++}
++
++async function processClipsOnlyInner(
++  jobId: string,
++  onStatusUpdate?: StatusUpdateFn
+ ): Promise<{ successfulClipsCount: number; platform: string }> {
+   const update = onStatusUpdate || (async () => {});
+ 
+diff --git a/src/lib/scheduler.ts b/src/lib/scheduler.ts
+index cdc257d..76bbba8 100644
+--- a/src/lib/scheduler.ts
++++ b/src/lib/scheduler.ts
+@@ -19,6 +19,7 @@
+ import { and, asc, eq, lte, sql } from "drizzle-orm";
+ import { db } from "@/db";
+ import { scheduledUploads, ScheduledUploadRow } from "@/db/schema";
++import { checkAiBudget, recordAiUsage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+ import {
+   getSchedulerMaxDaysAhead,
+   getSchedulerSlotCount,
+@@ -86,6 +87,9 @@ async function refineHoursWithAI(
+     `untuk mem-publish video pendek agar mendapat views & engagement maksimal. ` +
+     `Balas HANYA dengan JSON: {"hours": [number,...], "reason": "alasan singkat 1-2 kalimat dalam Bahasa Indonesia"}.`;
+ 
++  // 💰 Cost Tracker — batas biaya harian tercapai → lewati AI (caller otomatis memakai jam heuristik).
++  if (!(await checkAiBudget()).allowed) return null;
++
+   if (process.env.OPENAI_API_KEY) {
+     try {
+       const OpenAI = (await import("openai")).default;
+@@ -101,6 +105,16 @@ async function refineHoursWithAI(
+         response_format: { type: "json_object" },
+       });
+       const content = response.choices[0]?.message?.content || "{}";
++      // 💰 Cost Tracker
++      await recordAiUsage({
++        provider: "openai",
++        model: "gpt-4o-mini",
++        feature: "schedule",
++        inputTokens: response.usage?.prompt_tokens,
++        outputTokens: response.usage?.completion_tokens,
++        inputChars: prompt.length,
++        outputChars: content.length,
++      });
+       const parsed = JSON.parse(content);
+       const hours = normalizeHours(parsed.hours);
+       if (hours.length) return { hours, reason: String(parsed.reason || "").slice(0, 300) };
+@@ -116,6 +130,19 @@ async function refineHoursWithAI(
+       const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
+       const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON.");
+       const text = result.response.text();
++      // 💰 Cost Tracker
++      const usage = result.response.usageMetadata as
++        | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
++        | undefined;
++      await recordAiUsage({
++        provider: "gemini",
++        model: "gemini-3.1-flash-lite",
++        feature: "schedule",
++        inputTokens: usage?.promptTokenCount,
++        outputTokens: usage ? (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0) : undefined,
++        inputChars: prompt.length,
++        outputChars: text.length,
++      });
+       const jsonMatch = text.match(/\{[\s\S]*\}/);
+       if (jsonMatch) {
+         const parsed = JSON.parse(jsonMatch[0]);
+diff --git a/src/lib/telegram-bot.ts b/src/lib/telegram-bot.ts
+index 5d18cc1..35ca3eb 100644
+--- a/src/lib/telegram-bot.ts
++++ b/src/lib/telegram-bot.ts
+@@ -50,6 +50,7 @@ import { registerAutoPruneCommands } from "@/lib/auto-prune-telegram"; // ✂️
+ // 🛡️ Source Credit & Copyright Guard (BARU!) — import terpisah, tidak mengubah import di atas.
+ import { registerSourceGuardCommands, SOURCE_GUARD_HELP } from "@/lib/source-guard-telegram";
+ import { registerClaimMonitorCommands, CLAIM_MONITOR_HELP } from "@/lib/claim-monitor-telegram"; // 🚨 Post-Upload Claim Monitor (BARU!)
++import { registerCostCommands, guardAiBudget, COST_HELP } from "@/lib/cost-telegram"; // 💰 Cost Tracker (BARU!)
+ import { NICHE_PRESETS, getNichePromptLabel, getDefaultNichePrompt } from "@/lib/niche-prompt";
+ import {
+   getDuplicateFilterConfig,
+@@ -135,7 +136,7 @@ bot.command("start", async (ctx) => {
+ });
+ 
+ bot.command("help", async (ctx) => {
+-  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP + SOURCE_GUARD_HELP + CLAIM_MONITOR_HELP, { parse_mode: "Markdown" });
++  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP + SOURCE_GUARD_HELP + CLAIM_MONITOR_HELP + COST_HELP, { parse_mode: "Markdown" });
+ });
+ 
+ bot.command("connect", async (ctx) => {
+@@ -410,6 +411,7 @@ registerAnalyticsCommands(bot);
+ registerAutoPruneCommands(bot); // ✂️ /prune + tombol Sembunyikan/Hapus/Pertahankan (BARU!)
+ registerSourceGuardCommands(bot); // 🛡️ /sourceguard & /whitelist (BARU!)
+ registerClaimMonitorCommands(bot); // 🚨 /claims & /blacklist + tombol Hapus/Private/Abaikan (BARU!)
++registerCostCommands(bot); // 💰 /cost — biaya AI per job & per user + batas harian (BARU!)
+ registerAdminCommands(bot); // 🛠️ /admin & /broadcast — khusus ADMIN_TELEGRAM_IDS (BARU!)
+ 
+ // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — info read-only, konfigurasi
+@@ -1271,6 +1273,9 @@ async function handleVideoUrl(ctx: Context, url: string) {
+   // 🛠️ Admin Panel (BARU!) — tolak kalau user kena ban / kuota habis.
+   if (!(await guardJobQuota(ctx, userId))) return;
+ 
++  // 💰 Cost Tracker (BARU!) — tolak job baru kalau batas biaya AI harian (DAILY_BUDGET_USD) tercapai.
++  if (!(await guardAiBudget(ctx, userId))) return;
++
+   const jobId = uuidv4();
+   await db.insert(clipJobs).values({
+     jobId,
+diff --git a/src/lib/video-processor.ts b/src/lib/video-processor.ts
+index 6587ed4..75e4b61 100644
+--- a/src/lib/video-processor.ts
++++ b/src/lib/video-processor.ts
+@@ -28,6 +28,8 @@ import type { ClipResult } from "@/db/schema";
+ import { getAutoReframeConfig } from "@/lib/reframe-config";
+ import { buildReframeFilter } from "@/lib/auto-reframe";
+ import { applyHookOverlay } from "@/lib/hook-overlay"; // 🪝 AI Hook Overlay (BARU!)
++import { checkAiBudget, recordAiUsage, getAudioSeconds } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
++import { getGroqWhisperModel } from "@/lib/ai-provider";
+ 
+ const execAsync = promisify(exec);
+ 
+@@ -112,6 +114,14 @@ export async function transcribeAudio(
+   videoPath: string,
+   language: string = "id"
+ ): Promise<TranscriptSegmentWithWords[]> {
++  // 💰 Cost Tracker — batas biaya harian tercapai → skip transkripsi (job berjalan tetap lanjut tanpa transkrip).
++  // Job yang sudah berjalan tidak terpengaruh (lolos pengecekan saat dimulai).
++  const budget = await checkAiBudget();
++  if (!budget.allowed) {
++    console.warn("[transcribe] Batas biaya AI harian tercapai — transkripsi dilewati");
++    return [];
++  }
++
+   ensureDir(TMP_DIR);
+   const audioPath = videoPath.replace(/\.[^.]+$/, "_audio.mp3");
+   const extractCmd = `ffmpeg -y -i "${videoPath}" -vn -ar 16000 -ac 1 -b:a 32k "${audioPath}"`;
+@@ -172,6 +182,9 @@ function attachWordsToSegments(
+   return result;
+ }
+ 
++/** Model Whisper OpenAI (juga dipakai Cost Tracker untuk menghitung harga). */
++const OPENAI_WHISPER_MODEL = "whisper-1";
++
+ async function transcribeWithOpenAI(
+   audioPath: string,
+   language: string,
+@@ -184,7 +197,7 @@ async function transcribeWithOpenAI(
+   const blob = new Blob([audioBuffer], { type: "audio/mp3" });
+   const file = new File([blob], "audio.mp3", { type: "audio/mp3" });
+   const response = await client.audio.transcriptions.create({
+-    model: "whisper-1",
++    model: OPENAI_WHISPER_MODEL,
+     file,
+     language: language === "id" ? "id" : language,
+     response_format: "verbose_json",
+@@ -193,7 +206,15 @@ async function transcribeWithOpenAI(
+   const data = response as unknown as {
+     segments?: { start: number; end: number; text: string }[];
+     words?: RawWord[];
++    duration?: number;
+   };
++  // 💰 Cost Tracker — Whisper ditagih per durasi audio
++  await recordAiUsage({
++    provider: "openai",
++    model: OPENAI_WHISPER_MODEL,
++    feature: "transcribe",
++    audioSeconds: typeof data.duration === "number" && data.duration > 0 ? data.duration : await getAudioSeconds(audioPath),
++  });
+   return attachWordsToSegments(data.segments || [], wantWords ? data.words : undefined);
+ }
+ 
+@@ -207,7 +228,8 @@ async function transcribeWithGroq(
+   const axios = (await import("axios")).default;
+   const form = new FormData();
+   form.append("file", fs.createReadStream(audioPath), { filename: "audio.mp3" });
+-  form.append("model", "whisper-large-v3");
++  const groqWhisperModel = getGroqWhisperModel(); // env GROQ_WHISPER_MODEL (default whisper-large-v3)
++  form.append("model", groqWhisperModel);
+   form.append("language", language);
+   form.append("response_format", "verbose_json");
+   if (wantWords) {
+@@ -224,6 +246,14 @@ async function transcribeWithGroq(
+     }
+   );
+   const segments = response.data?.segments || [];
++  // 💰 Cost Tracker — Whisper ditagih per durasi audio (Groq: minimal 10 detik/request)
++  const reportedDuration = Number(response.data?.duration);
++  await recordAiUsage({
++    provider: "groq",
++    model: groqWhisperModel,
++    feature: "transcribe",
++    audioSeconds: reportedDuration > 0 ? reportedDuration : await getAudioSeconds(audioPath),
++  });
+   return attachWordsToSegments(segments, wantWords ? response.data?.words : undefined);
+ }
+ 

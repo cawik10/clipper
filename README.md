@@ -177,6 +177,7 @@ curl "https://<domain-deploy-anda>/api/webhook/setup?secret=setup-autoclip-2024"
 /drive            - Google Drive: status, hubungkan, ganti akun
 /drivefolder      - Ganti folder tujuan Drive (link / reset)
 /driveon /driveoff - Nyalakan / matikan auto-upload Drive
+/cost             - Biaya AI per job & per user (/cost models, /cost jobs, /cost users)
 /cancel           - Batalkan proses
 ```
 
@@ -489,6 +490,52 @@ Semua pengaturan & teks pesan untuk user ada di `src/lib/admin-config.ts`. Logik
 
 ---
 
+## 💰 Cost Tracker (`/cost`, `DAILY_BUDGET_USD`)
+
+Melacak biaya **OpenAI / Gemini / Groq / Whisper per job dan per user**, menampilkannya di `/cost`, di **laporan mingguan** Telegram, dan di dashboard web (section baru, section lain tidak berubah). Saat biaya hari ini melewati `DAILY_BUDGET_USD`, **AI dijeda otomatis**. Berguna untuk menentukan model mana yang layak dan, kalau bot dijual sebagai layanan, untuk menghitung harga langganan.
+
+| Yang dicatat | Cara hitung |
+| --- | --- |
+| **Analisis momen viral** (GPT / Gemini) | token masuk + keluar dari respons API × harga model |
+| **Transkripsi** (Whisper OpenAI / Groq) | durasi audio × harga per jam |
+| **Title Doctor, Smart Learning, rekomendasi jam upload** | token × harga model (tanpa job, tetap per user kalau bisa) |
+
+Setiap panggilan disimpan di tabel `ai_cost_log` (dibuat **otomatis** saat runtime) lengkap dengan job, user, fitur, model, token/durasi, dan biaya USD. Biaya per job dikaitkan lewat `AsyncLocalStorage`, jadi tidak ada fungsi lama yang berubah signature.
+
+**Perilaku saat batas terlewati** (`COST_BUDGET_MODE=pause`):
+
+* Link baru dari user **ditolak** dengan pesan jelas (job yang sudah berjalan dibiarkan selesai).
+* Auto-Monitor **menunda** channel (video baru tidak hilang, diproses setelah reset).
+* Title Doctor, Smart Learning, dan rekomendasi jam **di-skip** memakai fallback non-AI.
+* Admin dikabari saat 80% dan 100% batas. Reset otomatis tengah malam (`COST_TIMEZONE`), atau naikkan `DAILY_BUDGET_USD` lalu redeploy/restart.
+
+Perintah Telegram: `/cost` (admin: semua user · user biasa: akunnya sendiri) · `/cost 30` · `/cost models` (bandingkan model) · `/cost jobs` (biaya per job) · `/cost me` · `/cost users` (admin) · `/cost price` (admin, harga yang dipakai). Biaya global **tidak** ditampilkan ke user biasa; admin = ID di `ADMIN_TELEGRAM_IDS`.
+
+| Variable | Default | Deskripsi |
+| --- | --- | --- |
+| DAILY\_BUDGET\_USD | 5 | Batas biaya AI per hari, semua user (USD). 0 = tanpa batas |
+| USER\_DAILY\_BUDGET\_USD | 0 | Batas per user per hari (USD). 0 = tanpa batas — untuk model bisnis layanan |
+| COST\_BUDGET\_MODE | pause | `pause` AI dijeda · `warn` hanya notifikasi admin · `off` tanpa batas |
+| COST\_BUDGET\_NOTIFY\_ADMIN | true | Kabari admin saat mendekati/melewati batas |
+| COST\_BUDGET\_WARN\_PERCENT | 80 | Peringatan dini (0 = nonaktif) |
+| COST\_TRACKER\_ENABLED | true | Saklar utama (false = tidak mencatat & tidak membatasi) |
+| COST\_TIMEZONE | ikut ANALYTICS\_TIMEZONE | Zona waktu pergantian hari |
+| COST\_IDR\_RATE | 16000 | Kurs USD→Rp untuk tampilan (0 = sembunyikan) |
+| COST\_WEEKLY\_REPORT | true | Sertakan biaya di laporan mingguan |
+| COST\_REPORT\_DAYS | 7 | Periode laporan mingguan (hari) |
+| COST\_TOP\_N | 5 | Jumlah baris teratas di laporan |
+| COST\_PRICE\_OVERRIDES | – | JSON harga: `{"gemini-3.5-flash-lite":{"in":0.1,"out":0.4},"whisper-1":{"perHour":0.36}}` (`in`/`out` = USD per 1 juta token) |
+
+> 🏷️ **Harga model** ada di `MODEL_PRICES` (`src/lib/cost-config.ts`) — ubah satu baris saat tarif provider berubah, atau timpa lewat `COST_PRICE_OVERRIDES` tanpa deploy kode. Model yang tidak ada di tabel memakai harga perkiraan dan ditandai `≈` di laporan. Teks pesan jeda ada di `COST_TEXT` pada file yang sama; tampilan laporan di `src/lib/cost-report.ts`.
+>
+> 🔎 Biaya adalah **estimasi dari harga publik** × pemakaian yang dilaporkan API (token/durasi), bukan tagihan resmi — cocokkan sesekali dengan dashboard billing provider. Kalau API tidak mengembalikan token, dipakai perkiraan ≈ karakter/4 dan ditandai `≈`. Gemini: token "thinking" dihitung sebagai output.
+>
+> 🧪 **Membandingkan model:** ganti `GEMINI_MODEL` / `GROQ_MODEL` / `GROQ_WHISPER_MODEL` / `AI_PROVIDER_ORDER` di Railway, proses beberapa video, lalu lihat `/cost models` dan `/cost jobs` (biaya per job & per klip). Ekspor JSON: `GET /api/cost/summary?secret=SETUP_SECRET&days=30`.
+
+Logika: `src/lib/cost-tracker.ts` · konfigurasi & harga: `src/lib/cost-config.ts` · laporan: `src/lib/cost-report.ts` · Telegram: `src/lib/cost-telegram.ts` · dashboard: `src/components/CostTrackerSection.tsx`.
+
+---
+
 ## 🚂 Deployment
 
 Proyek ini sudah **live di Railway**: **https://cawik-clipper.up.railway.app/**
@@ -542,6 +589,7 @@ curl "https://cawik-clipper.up.railway.app/api/webhook/setup?secret=<SETUP_SECRE
 | `/api/youtube/callback` | GET | Google OAuth callback |
 | `/api/webhook/setup` | GET | Setup Telegram webhook |
 | `/api/claims/run` | GET | Paksa satu siklus Claim Monitor (`?secret=SETUP_SECRET`) |
+| `/api/cost/summary` | GET | Ekspor ringkasan biaya AI (JSON) (`?secret=SETUP_SECRET&days=30&user=ID`) |
 
 ---
 
