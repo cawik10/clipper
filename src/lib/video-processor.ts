@@ -63,19 +63,19 @@ export async function downloadVideo(
   const cmd = [
       "yt-dlp",
       "--no-playlist",
+      "--no-warnings",
+      "--no-progress",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
       "--cookies", "cookies.txt",
       "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"',
-      "--progress",
-      "--newline",
       "-o", `"${outputTemplate}"`,
       `"${url}"`,
     ].join(" ");
 
   console.log(`[download] Starting: ${url}`);
 
-  await execAsync(cmd, { timeout: 600000 });
+  await execAsync(cmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 });
 
   if (onProgress) await onProgress(50);
 
@@ -88,7 +88,7 @@ export async function downloadVideo(
   let title = "Video";
   let duration = 0;
   try {
-    const { stdout } = await execAsync(infoCmd, { timeout: 30000 });
+    const { stdout } = await execAsync(infoCmd, { timeout: 30000, maxBuffer: 50 * 1024 * 1024 });
     const info = JSON.parse(stdout.trim().split("\n")[0]);
     title = info.title || "Video";
     duration = info.duration || 0;
@@ -466,6 +466,6 @@ async function cutAndConvertClip(
     ].join(" ");
   }
 
-  await execAsync(cmd, { timeout: 300000 });
+  await execAsync(cmd, { timeout: 300000, maxBuffer: 50 * 1024 * 1024 });
   if (!fs.existsSync(outputPath)) throw new Error("Cut clip file tidak terbuat");
 }
