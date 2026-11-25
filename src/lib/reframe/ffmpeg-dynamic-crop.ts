@@ -27,11 +27,8 @@ function buildPiecewiseExpr(points: { t: number; v: number }[]): string {
     const dt = p1.t - p0.t || 1e-6;
     const slope = (p1.v - p0.v) / dt;
     const segment = `(${p0.v.toFixed(2)}+(${slope.toFixed(4)})*(t-${p0.t.toFixed(3)}))`;
-    // Catatan: ekspresi ini nanti dibungkus tanda kutip tunggal di filter
-    // FFmpeg (x='...'), jadi koma DI DALAM kutip tunggal aman/literal dan
-    // TIDAK boleh di-escape dengan backslash (di dalam kutip tunggal FFmpeg,
-    // backslash tidak diproses sebagai escape character).
-    expr = `if(lt(t,${p1.t.toFixed(3)}),${segment},${expr})`;
+    // Gunakan \, untuk meng-escape koma tanpa tanda kutip tunggal agar aman di exec/spawn
+    expr = `if(lt(t\\,${p1.t.toFixed(3)})\\,${segment}\\,${expr})`;
   }
   return expr;
 }
@@ -82,7 +79,7 @@ export function buildDynamicCropFilter(
   const yExpr = buildPiecewiseExpr(yPoints);
 
   const filter =
-    `crop=${cropWidth}:${cropHeight}:x='${xExpr}':y='${yExpr}',` +
+    `crop=${cropWidth}:${cropHeight}:x=${xExpr}:y=${yExpr},` +
     `scale=${targetWidth}:${targetHeight},setsar=1`;
 
   return { filter, cropWidth, cropHeight };
