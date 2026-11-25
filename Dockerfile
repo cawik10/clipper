@@ -21,6 +21,7 @@ RUN mkdir -p /usr/share/fonts/truetype/montserrat && \
     fc-cache -fv
 
 # Instal Deno (sekarang akan berhasil karena unzip sudah tersedia)
+ARG DENO_BUILD_DATE=2026-11-25
 RUN curl -fsSL https://deno.land/x/install/install.sh | sh
 ENV PATH="/root/.deno/bin:$PATH"
 
@@ -28,9 +29,9 @@ ENV PATH="/root/.deno/bin:$PATH"
 RUN pip3 install --no-cache-dir --force-reinstall opencv-python-headless numpy --break-system-packages
 RUN pip3 install --no-cache-dir --force-reinstall opencv-contrib-python-headless numpy --break-system-packages
 
-# Install yt-dlp versi nightly terbaru untuk bypass proteksi YouTube terbaru
-RUN pip3 install --no-cache-dir -U --pre "yt-dlp[default]" curl-cffi --break-system-packages || true
-RUN pip3 install --no-cache-dir -U --pre --extra-index-url https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/ "yt-dlp[default]" --break-system-packages || true
+# Ubah nilai tanggal/angka ini kapan saja untuk memaksa Railway mengunduh yt-dlp terbaru
+ARG YTDLP_BUILD_DATE=2026-11-25
+RUN pip3 install --no-cache-dir -U --pre "yt-dlp[default]" curl-cffi --break-system-packages
 
 # Dependencies stage
 FROM base AS deps
