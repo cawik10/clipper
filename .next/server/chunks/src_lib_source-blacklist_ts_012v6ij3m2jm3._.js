@@ -1,0 +1,19 @@
+module.exports=[44120,e=>e.a(async(t,n)=>{try{var i=e.i(36763),r=e.i(33102),a=e.i(33680),l=e.i(30298),s=e.i(48558),o=e.i(71629),c=t([a,o]);[a,o]=c.then?(await c)():c;let E=null;function u(){return E||(E=(async()=>{await a.f.execute(r.B`
+        CREATE TABLE IF NOT EXISTS source_blacklist (
+          id serial PRIMARY KEY,
+          telegram_user_id text NOT NULL,
+          channel_key text NOT NULL,
+          channel_name text,
+          tokens text NOT NULL DEFAULT '[]',
+          origin text NOT NULL DEFAULT 'manual',
+          reason text,
+          claims integer NOT NULL DEFAULT 0,
+          clips integer NOT NULL DEFAULT 0,
+          ratio_percent integer NOT NULL DEFAULT 0,
+          created_at timestamp NOT NULL DEFAULT now()
+        )
+      `),await a.f.execute(r.B`
+        CREATE UNIQUE INDEX IF NOT EXISTS source_blacklist_user_key_idx ON source_blacklist (telegram_user_id, channel_key)
+      `)})().catch(e=>{throw E=null,e})),E}function d(e){let t=new Set;for(let n of e){if(!n)continue;let e=(0,o.F)(n);e&&t.add(e)}return Array.from(t)}function f(e){if(!e)return[];try{let t=JSON.parse(e);return Array.isArray(t)?t.filter(e=>"string"==typeof e&&!!e):[]}catch{return[]}}async function w(e){return await u(),a.f.select().from(l.o).where((0,i.b)((0,i.u)(l.o.telegramUserId,e),(0,i.c)(l.o.origin,"released"))).orderBy(l.o.id)}async function y(e,t){return await u(),(await a.f.select().from(l.o).where((0,i.b)((0,i.u)(l.o.telegramUserId,e),(0,i.u)(l.o.origin,"released")))).find(e=>f(e.tokens).some(e=>t.includes(e))||t.includes(e.channelKey))??null}async function m(e){return(0,s.u)().length>0||(await w(e)).length>0}async function h(e,t){return await u(),(await a.f.select().from(l.o).where((0,i.b)((0,i.u)(l.o.id,t),(0,i.u)(l.o.telegramUserId,e))))[0]??null}async function g(e,t){await u();let n=d(t.identities);if(!n.length)return{added:!1,row:null,tokens:n};let r=(await w(e)).find(e=>f(e.tokens).some(e=>n.includes(e))||n.includes(e.channelKey));if(r)return{added:!1,row:r,tokens:n};let s=await y(e,n);if(s){let[e]=await a.f.update(l.o).set({origin:t.origin,channelName:t.label?.trim()||s.channelName,tokens:JSON.stringify(Array.from(new Set([...f(s.tokens),...n]))),reason:t.reason?.slice(0,300)??null,claims:t.claims??0,clips:t.clips??0,ratioPercent:t.ratioPercent??0,createdAt:new Date}).where((0,i.u)(l.o.id,s.id)).returning();return{added:!!e,row:e??null,tokens:n}}let[o]=await a.f.insert(l.o).values({telegramUserId:e,channelKey:n[0],channelName:t.label?.trim()||null,tokens:JSON.stringify(n),origin:t.origin,reason:t.reason?.slice(0,300)??null,claims:t.claims??0,clips:t.clips??0,ratioPercent:t.ratioPercent??0}).onConflictDoNothing().returning();return{added:!!o,row:o??null,tokens:n}}async function N(e,t){let n,i=await w(e),r=t.trim();if(/^\d+$/.test(r))n=i[parseInt(r,10)-1];else{let e=(0,o.F)(r);n=i.find(t=>t.channelKey===e||f(t.tokens).includes(e))}return n?(await k(n),n):null}async function k(e){"auto"===e.origin?await a.f.update(l.o).set({origin:"released"}).where((0,i.u)(l.o.id,e.id)):await a.f.delete(l.o).where((0,i.u)(l.o.id,e.id))}async function T(e,t){let n=await h(e,t);return n&&"released"!==n.origin?(await k(n),n):null}async function L(e,t){let n=new Set(t.filter(Boolean));if(!n.size)return null;for(let e of(0,s.u)()){let t=(0,o.F)(e);if(t&&n.has(t))return{scope:"env",label:e}}for(let t of(await w(e)))if(Array.from(new Set([t.channelKey,...f(t.tokens)])).some(e=>n.has(e)))return{scope:"user",label:t.channelName||t.channelKey,origin:t.origin,claims:t.claims,clips:t.clips,ratioPercent:t.ratioPercent};return null}e.s(["addBlacklistEntry",0,g,"buildChannelTokens",0,d,"ensureBlacklistTable",0,u,"findBlacklistMatch",0,L,"findReleasedEntry",0,y,"getBlacklistEntry",0,h,"hasAnyBlacklist",0,m,"listBlacklist",0,w,"parseTokens",0,f,"removeBlacklistById",0,T,"removeBlacklistEntry",0,N]),n()}catch(e){n(e)}},!1)];
+
+//# sourceMappingURL=src_lib_source-blacklist_ts_012v6ij3m2jm3._.js.map

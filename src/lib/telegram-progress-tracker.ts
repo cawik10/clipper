@@ -148,15 +148,11 @@ export class TelegramProgressTracker {
     });
   }
 
-  /** Edit pesan Telegram dengan fallback otomatis ke teks polos dan pemotongan batas 4096 karakter. */
+  /** Edit pesan Telegram dengan fallback otomatis ke teks polos jika Markdown tetap gagal di-parse. */
   private async safeEditMessage(text: string, extra?: EditExtra): Promise<void> {
     if (!this.messageId) return;
-
-    const safeText =
-      text.length > 3900 ? text.slice(0, 3900) + "\n\n... _(pesan dipotong)_" : text;
-
     try {
-      await this.api.editMessageText(this.chatId, this.messageId, safeText, {
+      await this.api.editMessageText(this.chatId, this.messageId, text, {
         parse_mode: "Markdown",
         ...(extra as object),
       });
@@ -166,7 +162,7 @@ export class TelegramProgressTracker {
 
       if (msg.includes("can't parse entities")) {
         try {
-          const plainText = safeText.replace(/[*_`\\]/g, "");
+          const plainText = text.replace(/[*_`\\]/g, "");
           await this.api.editMessageText(this.chatId, this.messageId, plainText, {
             ...(extra as object),
           });

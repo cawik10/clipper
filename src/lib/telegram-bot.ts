@@ -77,6 +77,8 @@ import {
 import { renderSubtitlePreview } from "@/lib/subtitle-burner";
 // 🪝 AI Hook Overlay (BARU!) — import terpisah, tidak mengubah import di atas.
 import { getHookConfig, HOOK_STYLES, HOOK_STYLE_PRESETS, getHookStyleLabel } from "@/lib/hook-config";
+// 🎞️ Format Transformatif (BARU!) — import terpisah, tidak mengubah import di atas.
+import { buildTransformInfoMessage } from "@/lib/transform-telegram";
 // 💬 Auto-First Comment (BARU!) — import terpisah, tidak mengubah import di atas.
 import {
   isAutoCommentEnabled,
@@ -697,6 +699,12 @@ bot.command("hook", async (ctx) => {
     `ℹ️ Hook dibuat AI bersamaan dengan analisis momen viral, lalu di-render ke video lewat FFmpeg.`,
     { parse_mode: "Markdown" }
   );
+});
+
+// 🎞️ Format Transformatif (BARU!) — command info terpisah. Konfigurasi lengkap:
+// src/lib/transform-config.ts (env var TRANSFORM_*), renderer: src/lib/transform-format.ts
+bot.command("transform", async (ctx) => {
+  await ctx.reply(buildTransformInfoMessage(), { parse_mode: "Markdown" });
 });
 
 // 💬 Auto-First Comment (BARU!) — command info terpisah. Konfigurasi lengkap:

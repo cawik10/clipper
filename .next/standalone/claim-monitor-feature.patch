@@ -1,0 +1,2466 @@
+diff --git a/README.md b/README.md
+index 03cc20f..ae3a453 100644
+--- a/README.md
++++ b/README.md
+@@ -406,6 +406,48 @@ Perintah Telegram: `/sourceguard` (status, konfigurasi & statistik) · `/whiteli
+ 
+ ---
+ 
++## 🚨 Post-Upload Claim Monitor (`/claims`, `/blacklist`)
++
++Karena bot mengambil video channel lain, **Copyright Guard sebelum upload belum cukup** — klaim Content ID / pembatasan baru muncul **setelah** video tayang. Fitur ini memantau video yang sudah diupload, dan semua pengaturannya lewat Railway Variables (kode lain tidak perlu disentuh):
++
++| Tahap | Cara kerja |
++| --- | --- |
++| **Cek berkala** | Worker (default tiap 60 menit) memanggil YouTube `videos.list` (`part=status,contentDetails`, 1 unit kuota per 50 video) dan membaca `status.uploadStatus` + `status.rejectionReason`, `contentDetails.licensedContent`, `contentDetails.regionRestriction` (+ opsional `contentRating` age-restricted). |
++| **Alert Telegram** | Klaim/pembatasan baru dikirim dengan tombol **[🗑 Hapus] [🔒 Private] [🙈 Abaikan]**. Bot tidak pernah menghapus/memprivatekan sendiri — hanya setelah kamu menekan tombol (Hapus meminta konfirmasi kedua). |
++| **Rasio klaim per source channel** | `klip kena klaim ÷ klip yang sudah dicek` dihitung per channel sumber (diambil dari log Source Guard, cadangan: monitor channel). |
++| **Auto-blacklist** | Channel yang melewati ambang (default: ≥ 3 klip dicek, ≥ 2 kena klaim, rasio ≥ 30%) masuk blacklist: job dari channel itu **ditolak** oleh Source Guard, Auto-Monitor-nya **dijeda**. Channel whitelist / milik sendiri tidak pernah di-auto-blacklist. Salah blacklist? Tekan **[↩️ Keluarkan]** — channel baru di-blacklist lagi kalau ada klaim *baru*. |
++
++Perintah Telegram: `/claims` (status & rasio) · `/claims list` (alert yang menunggu) · `/claims channels` (rasio per channel) · `/claims run` (cek sekarang) · `/blacklist` · `/blacklist add @channel` · `/blacklist remove <nomor|channel>`.
++
++| Variable | Default | Deskripsi |
++| --- | --- | --- |
++| CLAIM\_MONITOR\_ENABLED | true | Saklar utama (false = mati total) |
++| CLAIM\_MONITOR\_INTERVAL\_MINUTES | 60 | Seberapa sering worker mengecek |
++| CLAIM\_MONITOR\_TRACK\_DAYS | 90 | Hanya cek video yang diupload ≤ N hari lalu |
++| CLAIM\_MONITOR\_FRESH\_DAYS / CLAIM\_MONITOR\_OLD\_RECHECK\_HOURS | 7 / 24 | Video baru dicek tiap siklus; yang lebih tua tiap N jam |
++| CLAIM\_MONITOR\_SIGNALS | rejected,licensed,region | Sinyal yang dianggap klaim: `rejected` \| `licensed` \| `region` \| `age` |
++| CLAIM\_MONITOR\_NOTIFY | true | Kirim alert ke Telegram |
++| CLAIM\_MONITOR\_ACTIONS | delete,private | Tombol yang ditawarkan (Abaikan selalu ada) |
++| CLAIM\_MONITOR\_HIDE\_TO | private | Tombol "Private" mengubah ke `private` \| `unlisted` |
++| CLAIM\_MONITOR\_DELETE\_CONFIRM | true | Hapus butuh konfirmasi tombol kedua |
++| CLAIM\_MONITOR\_MAX\_ALERTS\_PER\_CYCLE | 10 | Maks alert per user per siklus |
++| CLAIM\_MONITOR\_REMINDER\_HOURS | 0 | Ingatkan lagi alert yang belum diputuskan tiap N jam (0 = tidak) |
++| CLAIM\_MONITOR\_REQUEST\_SCOPE | true | Minta izin `youtube.force-ssl` saat `/connect` (dibutuhkan tombol Hapus/Private) |
++| CLAIM\_AUTO\_BLACKLIST | true | Auto-blacklist channel sumber yang sering kena klaim |
++| CLAIM\_BLACKLIST\_MIN\_CLIPS / CLAIM\_BLACKLIST\_MIN\_CLAIMS | 3 / 2 | Minimal klip dicek / minimal klip kena klaim |
++| CLAIM\_BLACKLIST\_RATIO\_PERCENT | 30 | Rasio klaim minimal (%) |
++| CLAIM\_RATIO\_COUNT\_IGNORED | true | Klaim yang di-"Abaikan" tetap dihitung di rasio |
++| CLAIM\_BLACKLIST\_ENFORCE | block | `block` = job ditolak \| `warn` = peringatan saja \| `off` = hanya dicatat |
++| CLAIM\_BLACKLIST\_PAUSE\_MONITORS | true | Jeda Auto-Monitor yang menunjuk channel blacklist |
++| CLAIM\_BLACKLIST\_CHANNELS | – | Blacklist global manual: `UCxxx` / `@handle` / nama / URL, pisah koma |
++| CLAIM\_BLACKLIST\_NOTIFY | true | Kabari saat channel di-auto-blacklist |
++
++> 🔑 **Setelah deploy, kirim `/connect` sekali lagi** supaya Google memberi izin `youtube.force-ssl` (baca status klaim + tombol Hapus/Private). Tanpa itu, cek tetap jalan lewat izin baca yang sudah ada / `YOUTUBE_API_KEY` (hanya video public/unlisted, tanpa `rejectionReason`), tapi tombol Hapus/Private akan meminta `/connect` ulang.
++>
++> 🔎 YouTube **tidak punya API klaim Content ID** — yang dibaca adalah sinyal dari `videos.list`. Klaim parsial pada audio sering **tidak** muncul di API; cek juga YouTube Studio → Konten → kolom "Pembatasan". Pesan, label alasan penolakan & default bisa diubah di `src/lib/claim-monitor-config.ts`; logika di `src/lib/claim-monitor.ts`. Tabel `video_claim_watch` & `source_blacklist` dibuat **otomatis** saat runtime. Endpoint cadangan Railway Cron: `GET /api/claims/run?secret=SETUP_SECRET` (`&force=1` cek semua, `&notify=0` tanpa alert).
++
++---
++
+ ## 🛠️ Admin Panel Telegram (`/admin`, `/broadcast`)
+ 
+ Panel khusus admin langsung di Telegram: statistik global, daftar user, ban/unban, atur kuota, broadcast, dan notifikasi error otomatis. **Tidak mengubah dashboard web** — hanya fitur tambahan.
+@@ -499,6 +541,7 @@ curl "https://cawik-clipper.up.railway.app/api/webhook/setup?secret=<SETUP_SECRE
+ | `/api/telegram/webhook` | POST | Telegram webhook receiver |
+ | `/api/youtube/callback` | GET | Google OAuth callback |
+ | `/api/webhook/setup` | GET | Setup Telegram webhook |
++| `/api/claims/run` | GET | Paksa satu siklus Claim Monitor (`?secret=SETUP_SECRET`) |
+ 
+ ---
+ 
+diff --git a/src/app/api/claims/run/route.ts b/src/app/api/claims/run/route.ts
+new file mode 100644
+index 0000000..31f3585
+--- /dev/null
++++ b/src/app/api/claims/run/route.ts
+@@ -0,0 +1,32 @@
++import { NextRequest, NextResponse } from "next/server";
++import { runClaimMonitor } from "@/lib/claim-monitor";
++
++/**
++ * 🚨 Post-Upload Claim Monitor (BARU!)
++ * =====================================================================
++ * Endpoint cadangan untuk memaksa satu siklus pengecekan klaim secara manual
++ * atau lewat Railway Cron / external pinger. Diamankan pakai SETUP_SECRET
++ * (pola sama dengan /api/monitor/run & /api/analytics/run).
++ *
++ *   GET /api/claims/run?secret=...            → siklus normal (hormati jeda per video)
++ *   GET /api/claims/run?secret=...&force=1    → cek semua video sekarang
++ *   GET /api/claims/run?secret=...&notify=0   → tanpa kirim alert Telegram
++ */
++export const dynamic = "force-dynamic";
++export const maxDuration = 300;
++
++export async function GET(req: NextRequest) {
++  const params = req.nextUrl.searchParams;
++  if (params.get("secret") !== process.env.SETUP_SECRET) {
++    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
++  }
++  try {
++    const result = await runClaimMonitor({
++      force: params.get("force") === "1",
++      notify: params.get("notify") === "0" ? false : undefined,
++    });
++    return NextResponse.json(result);
++  } catch (err) {
++    return NextResponse.json({ error: String(err) }, { status: 500 });
++  }
++}
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index 580304c..d9fc21a 100644
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -53,6 +53,7 @@ import AutoTitleDoctorSection from "@/components/AutoTitleDoctorSection";
+ import AutoPruneSection from "@/components/AutoPruneSection"; // ✂️ Auto-Prune Klip Gagal (BARU!)
+ import AutoCommentSection from "@/components/AutoCommentSection"; // 💬 Auto-First Comment (BARU!)
+ import SourceGuardSection from "@/components/SourceGuardSection"; // 🛡️ Source Credit & Copyright Guard (BARU!)
++import ClaimMonitorSection from "@/components/ClaimMonitorSection"; // 🚨 Post-Upload Claim Monitor (BARU!)
+ // 📡 Auto-Monitor Channel/Playlist (BARU!) — import terpisah, tidak mengubah import di atas.
+ import { getChannelMonitorStats } from "@/lib/channel-monitor";
+ import {
+@@ -1267,6 +1268,9 @@ export default async function HomePage() {
+         {/* 🛡️ SOURCE CREDIT & COPYRIGHT GUARD (FITUR BARU!) — lihat src/components/SourceGuardSection.tsx */}
+         <SourceGuardSection />
+ 
++        {/* 🚨 POST-UPLOAD CLAIM MONITOR (FITUR BARU!) — klaim/pembatasan setelah upload + rasio & auto-blacklist, lihat src/components/ClaimMonitorSection.tsx */}
++        <ClaimMonitorSection />
++
+         {/* ══════════════════════════════════════════════════════════
+             PIPELINE FLOW
+         ══════════════════════════════════════════════════════════ */}
+diff --git a/src/components/ClaimMonitorSection.tsx b/src/components/ClaimMonitorSection.tsx
+new file mode 100644
+index 0000000..75768ca
+--- /dev/null
++++ b/src/components/ClaimMonitorSection.tsx
+@@ -0,0 +1,226 @@
++/**
++ * 🚨 POST-UPLOAD CLAIM MONITOR — section dashboard (FITUR BARU!)
++ * Server component terpisah (pola sama dengan SourceGuardSection / AutoPruneSection)
++ * supaya src/app/page.tsx tidak berubah selain satu baris pemasangan.
++ * Konfigurasi: src/lib/claim-monitor-config.ts · Logika: src/lib/claim-monitor.ts
++ * Keputusan (hapus / private / abaikan) diambil lewat tombol di Telegram.
++ */
++import {
++  describeBlacklistRule,
++  getClaimMonitorConfigSummary,
++} from "@/lib/claim-monitor-config";
++import { getChannelClaimStats, getClaimCounts, getClaimHistory, getPendingClaims } from "@/lib/claim-monitor";
++
++async function loadData() {
++  try {
++    const [counts, stats, pending, history] = await Promise.all([
++      getClaimCounts(null),
++      getChannelClaimStats(null),
++      getPendingClaims(null, 5),
++      getClaimHistory(null, 4),
++    ]);
++    return { ok: true as const, counts, stats, pending, history };
++  } catch (err) {
++    console.warn("[claim-monitor] dashboard fallback:", err instanceof Error ? err.message : err);
++    return {
++      ok: false as const,
++      counts: { tracked: 0, checked: 0, claimed: 0, pending: 0, ignored: 0, privated: 0, deleted: 0, lastCheckedAt: null as Date | null },
++      stats: [],
++      pending: [],
++      history: [],
++    };
++  }
++}
++
++function Row({ k, v, hint }: { k: string; v: string; hint?: string }) {
++  return (
++    <div>
++      <span className="text-yellow-300">{k}</span> = <span className="text-emerald-400">{v}</span>
++      {hint && <span className="text-slate-600"> ← {hint}</span>}
++    </div>
++  );
++}
++
++const ACTION_LABEL: Record<string, string> = {
++  private: "🔒 private",
++  unlisted: "🔗 unlisted",
++  deleted: "🗑 dihapus",
++  ignored: "🙈 diabaikan",
++};
++
++export default async function ClaimMonitorSection() {
++  const cfg = getClaimMonitorConfigSummary();
++  const data = await loadData();
++  const { counts, stats } = data;
++
++  return (
++    <section className="bg-gradient-to-br from-rose-500/10 to-orange-600/10 border-2 border-rose-500/40 rounded-2xl p-6 space-y-5">
++      <div className="flex items-start justify-between flex-wrap gap-3">
++        <div>
++          <h2 className="text-xl font-bold text-rose-400 flex items-center gap-2 flex-wrap">
++            🚨 Post-Upload Claim Monitor
++            <span className="text-xs bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-full">
++              Fitur Baru!
++            </span>
++          </h2>
++          <p className="text-slate-400 text-sm mt-1 max-w-3xl">
++            Karena bot mengambil video channel lain, Copyright Guard sebelum upload belum cukup. Monitor ini mengecek
++            status video yang sudah tayang lewat <code className="text-slate-300">videos.list</code> (rejectionReason,
++            licensedContent, regionRestriction), mengirim alert Telegram dengan tombol Hapus / Private / Abaikan, lalu
++            menghitung rasio klaim per source channel dan auto-blacklist channel yang sering menimbulkan klaim.
++          </p>
++        </div>
++        <span
++          className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${
++            cfg.enabled
++              ? "bg-green-500/20 border-green-500/40 text-green-300"
++              : "bg-slate-700/40 border-slate-600 text-slate-400"
++          }`}
++        >
++          {cfg.enabled ? `✅ AKTIF — cek tiap ${cfg.intervalMinutes} menit` : "⚪ NONAKTIF"}
++        </span>
++      </div>
++
++      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Video dipantau</div>
++          <div className="text-slate-200 font-bold text-xl mt-1">{data.ok ? counts.tracked : "–"}</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Sudah dicek</div>
++          <div className="text-slate-200 font-bold text-xl mt-1">{data.ok ? counts.checked : "–"}</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Kena klaim / batasan</div>
++          <div className="text-red-400 font-bold text-xl mt-1">{data.ok ? counts.claimed : "–"}</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Menunggu keputusan</div>
++          <div className="text-amber-300 font-bold text-xl mt-1">{data.ok ? counts.pending : "–"}</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Cek terakhir</div>
++          <div className="text-slate-300 font-semibold text-sm mt-2">
++            {counts.lastCheckedAt ? counts.lastCheckedAt.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) : "belum"}
++          </div>
++        </div>
++      </div>
++
++      <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++        <div className="text-sm font-semibold text-slate-300 mb-1">📊 Rasio klaim per source channel</div>
++        <div className="text-xs text-slate-500 mb-3">
++          Auto-blacklist: {cfg.autoBlacklist ? describeBlacklistRule() : "nonaktif"} · mode:{" "}
++          <code className="text-yellow-300">{cfg.enforce}</code>
++        </div>
++        {stats.length === 0 ? (
++          <div className="text-xs text-slate-500">
++            Belum ada data — rasio muncul setelah klip dari source channel dicek (butuh /connect + izin baca YouTube).
++          </div>
++        ) : (
++          <div className="space-y-2">
++            {stats.slice(0, 8).map((s) => (
++              <div key={s.channelKey} className="text-xs">
++                <div className="flex justify-between gap-2">
++                  <span className="text-slate-300 truncate max-w-[65%]">
++                    {s.blacklisted ? "⛔ " : ""}
++                    {s.channelName}
++                  </span>
++                  <span
++                    className={`font-semibold ${
++                      s.blacklisted ? "text-red-400" : s.ratioPercent >= cfg.ratioPercent ? "text-orange-400" : "text-slate-400"
++                    }`}
++                  >
++                    {s.claims}/{s.clips} klip · {s.ratioPercent}%
++                  </span>
++                </div>
++                <div className="h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden">
++                  <div
++                    className={`h-full rounded-full ${s.blacklisted ? "bg-red-500" : s.ratioPercent >= cfg.ratioPercent ? "bg-orange-500" : "bg-emerald-500"}`}
++                    style={{ width: `${Math.min(100, s.ratioPercent)}%` }}
++                  />
++                </div>
++              </div>
++            ))}
++          </div>
++        )}
++      </div>
++
++      {(data.pending.length > 0 || data.history.length > 0) && (
++        <div className="grid md:grid-cols-2 gap-3">
++          {data.pending.length > 0 && (
++            <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++              <div className="text-sm font-semibold text-amber-300 mb-2">⏳ Menunggu keputusan (Telegram)</div>
++              <div className="space-y-1.5">
++                {data.pending.map((r) => (
++                  <div key={r.id} className="text-xs text-slate-400 truncate">
++                    🎬{" "}
++                    <a href={`https://youtu.be/${r.youtubeVideoId}`} target="_blank" rel="noreferrer" className="text-slate-300 hover:underline">
++                      {r.title}
++                    </a>
++                    {r.channelName ? <span className="text-slate-600"> — {r.channelName}</span> : null}
++                  </div>
++                ))}
++              </div>
++            </div>
++          )}
++          {data.history.length > 0 && (
++            <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++              <div className="text-sm font-semibold text-slate-300 mb-2">🕘 Keputusan terakhir</div>
++              <div className="space-y-1.5">
++                {data.history.map((r) => (
++                  <div key={r.id} className="text-xs text-slate-400 truncate">
++                    {ACTION_LABEL[r.actionStatus] || r.actionStatus} · {r.title}
++                  </div>
++                ))}
++              </div>
++            </div>
++          )}
++        </div>
++      )}
++
++      <div className="bg-rose-950/30 border border-rose-500/20 rounded-xl p-4 space-y-3">
++        <div className="text-sm font-semibold text-rose-300">🔧 Cara Atur di Railway Variables:</div>
++        <div className="font-mono text-sm bg-slate-900/80 rounded-lg p-3 space-y-1 overflow-x-auto">
++          <Row k="CLAIM_MONITOR_ENABLED" v={String(cfg.enabled)} hint="saklar utama" />
++          <Row k="CLAIM_MONITOR_INTERVAL_MINUTES" v={String(cfg.intervalMinutes)} hint="seberapa sering cek" />
++          <Row k="CLAIM_MONITOR_TRACK_DAYS" v={String(cfg.trackDays)} hint="cek video ≤ N hari" />
++          <Row k="CLAIM_MONITOR_SIGNALS" v={cfg.signals.join(",")} hint="rejected | licensed | region | age" />
++          <Row k="CLAIM_MONITOR_NOTIFY" v={String(cfg.notify)} />
++          <Row k="CLAIM_MONITOR_ACTIONS" v={cfg.actions.join(",")} hint="delete | private" />
++          <Row k="CLAIM_MONITOR_HIDE_TO" v={cfg.hideTo} hint="private | unlisted" />
++          <Row k="CLAIM_MONITOR_DELETE_CONFIRM" v={String(cfg.deleteConfirm)} />
++          <Row k="CLAIM_AUTO_BLACKLIST" v={String(cfg.autoBlacklist)} />
++          <Row k="CLAIM_BLACKLIST_MIN_CLIPS" v={String(cfg.minClips)} />
++          <Row k="CLAIM_BLACKLIST_MIN_CLAIMS" v={String(cfg.minClaims)} />
++          <Row k="CLAIM_BLACKLIST_RATIO_PERCENT" v={String(cfg.ratioPercent)} />
++          <Row k="CLAIM_BLACKLIST_ENFORCE" v={cfg.enforce} hint="block | warn | off" />
++          <Row k="CLAIM_BLACKLIST_PAUSE_MONITORS" v={String(cfg.pauseMonitors)} />
++          <Row
++            k="CLAIM_BLACKLIST_CHANNELS"
++            v={cfg.envBlacklist.length ? cfg.envBlacklist.join(",") : "(kosong)"}
++            hint="blacklist global: UCxxx,@handle,nama"
++          />
++        </div>
++        <div className="text-xs text-slate-400 space-y-1">
++          <div>
++            🤖 Telegram: <code className="text-yellow-300">/claims</code> (status &amp; rasio) ·{" "}
++            <code className="text-yellow-300">/claims list</code> · <code className="text-yellow-300">/claims run</code> ·{" "}
++            <code className="text-yellow-300">/blacklist</code> · <code className="text-yellow-300">/blacklist add @channel</code>
++          </div>
++          <div>
++            🔑 Tombol Hapus / Private butuh izin <code className="text-slate-300">youtube.force-ssl</code> — kirim{" "}
++            <code className="text-yellow-300">/connect</code> sekali lagi setelah fitur ini aktif.
++          </div>
++          <div>
++            🔎 Content ID tidak punya API klaim publik; yang dibaca adalah sinyal dari <code className="text-slate-300">videos.list</code>{" "}
++            (klaim parsial pada audio sering <i>tidak</i> muncul). Channel whitelist / milik sendiri tidak pernah di-auto-blacklist.
++          </div>
++          <div>
++            🎨 Teks pesan, label alasan penolakan &amp; default bisa diubah di{" "}
++            <code className="text-slate-300">src/lib/claim-monitor-config.ts</code>
++          </div>
++        </div>
++      </div>
++    </section>
++  );
++}
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index be57386..e7e3c7b 100644
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -506,3 +506,58 @@ export interface ClipResult {
+   driveFileId?: string;
+   driveUrl?: string;
+ }
++
++// =====================================================================
++// 🚨 POST-UPLOAD CLAIM MONITOR (BARU!)
++// =====================================================================
++// Tabel tambahan — TIDAK mengubah tabel/kolom yang sudah ada. Dibuat otomatis
++// saat runtime (lihat ensureClaimTables di src/lib/claim-monitor.ts), jadi di
++// Railway tidak wajib `drizzle-kit push`. Konfigurasi: src/lib/claim-monitor-config.ts
++
++// Satu baris per klip yang sudah diupload + status klaim/pembatasan terakhir dari YouTube.
++export const videoClaimWatch = pgTable("video_claim_watch", {
++  id: serial("id").primaryKey(),
++  youtubeVideoId: text("youtube_video_id").notNull().unique(),
++  jobId: text("job_id").notNull(),
++  telegramUserId: text("telegram_user_id").notNull(),
++  title: text("title").notNull(),
++  sourceUrl: text("source_url"),
++  sourceTitle: text("source_title"),
++  // Identitas source channel (video asal yang diambil). channel_key = token pembanding utama.
++  channelKey: text("channel_key").notNull().default("unknown"),
++  channelName: text("channel_name"),
++  channelTokens: text("channel_tokens"), // JSON array token pembanding (id, nama, handle)
++  // ok | claimed | missing — kondisi terakhir hasil videos.list
++  claimState: text("claim_state").notNull().default("ok"),
++  // none | pending | ignored | private | unlisted | deleted — keputusan user atas alert
++  actionStatus: text("action_status").notNull().default("none"),
++  signals: text("signals"), // JSON array [{ type, detail }]
++  privacyStatus: text("privacy_status"),
++  firstClaimAt: timestamp("first_claim_at"), // terisi = pernah kena klaim (dasar rasio)
++  lastCheckedAt: timestamp("last_checked_at"),
++  lastNotifiedAt: timestamp("last_notified_at"),
++  notifiedCount: integer("notified_count").notNull().default(0),
++  decidedAt: timestamp("decided_at"),
++  lastError: text("last_error"),
++  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
++  createdAt: timestamp("created_at").defaultNow().notNull(),
++  updatedAt: timestamp("updated_at").defaultNow().notNull(),
++});
++
++// Blacklist source channel (otomatis dari rasio klaim, atau manual lewat /blacklist).
++export const sourceBlacklist = pgTable("source_blacklist", {
++  id: serial("id").primaryKey(),
++  telegramUserId: text("telegram_user_id").notNull(),
++  channelKey: text("channel_key").notNull(),
++  channelName: text("channel_name"),
++  tokens: text("tokens").notNull().default("[]"), // JSON array token pembanding
++  origin: text("origin").notNull().default("manual"), // auto | manual
++  reason: text("reason"),
++  claims: integer("claims").notNull().default(0),
++  clips: integer("clips").notNull().default(0),
++  ratioPercent: integer("ratio_percent").notNull().default(0),
++  createdAt: timestamp("created_at").defaultNow().notNull(),
++});
++
++export type VideoClaimWatchRow = typeof videoClaimWatch.$inferSelect;
++export type SourceBlacklistRow = typeof sourceBlacklist.$inferSelect;
+diff --git a/src/instrumentation.ts b/src/instrumentation.ts
+index 8b9134a..308afcc 100644
+--- a/src/instrumentation.ts
++++ b/src/instrumentation.ts
+@@ -22,6 +22,11 @@ export async function register() {
+     const { startAnalyticsWorker } = await import("@/lib/analytics-worker");
+     startAnalyticsWorker();
+ 
++    // 🚨 Post-Upload Claim Monitor (BARU!) — cek berkala klaim/pembatasan video yang sudah
++    // diupload (videos.list) + auto-blacklist channel sumber. Mati kalau CLAIM_MONITOR_ENABLED=false.
++    const { startClaimMonitorWorker } = await import("@/lib/claim-monitor-worker");
++    startClaimMonitorWorker();
++
+     // 🛠️ Admin Panel (BARU!) — error tak tertangani dikirim ke admin Telegram
+     // (ADMIN_TELEGRAM_IDS) + dicatat di log. Catatan: dengan listener
+     // unhandledRejection, proses tidak lagi crash karena promise yang lupa di-catch.
+diff --git a/src/lib/channel-monitor-worker.ts b/src/lib/channel-monitor-worker.ts
+index 5c10b93..d1a4c32 100644
+--- a/src/lib/channel-monitor-worker.ts
++++ b/src/lib/channel-monitor-worker.ts
+@@ -44,6 +44,8 @@ import {
+ import { MonitoredChannelRow } from "@/db/schema";
+ import { isSourceGuardBlockedError } from "@/lib/source-guard"; // 🛡️ Source Guard (BARU!)
+ import { getChannelMonitorPollIntervalMs, isChannelMonitorEnabled } from "@/lib/channel-monitor-config";
++import { getBlacklistEnforce } from "@/lib/claim-monitor-config"; // 🚨 Claim Monitor: blacklist channel (BARU!)
++import { buildChannelTokens, findBlacklistMatch } from "@/lib/source-blacklist";
+ 
+ function safeMd(text: string): string {
+   return (text || "").replace(/[_*[\]()~`>#+\-=|{}.!]/g, " ");
+@@ -85,6 +87,19 @@ export async function runChannelMonitorOnce(): Promise<MonitorRunResult> {
+       continue;
+     }
+ 
++    // 🚨 Claim Monitor (BARU!) — channel sumber yang di-blacklist (sering kena klaim) tidak dipantau lagi.
++    // Matikan: CLAIM_BLACKLIST_ENFORCE=off. Kelola: /blacklist di Telegram.
++    if (monitor.sourceType === "channel" && getBlacklistEnforce() === "block") {
++      const hit = await findBlacklistMatch(
++        monitor.telegramUserId,
++        buildChannelTokens([monitor.externalId, monitor.title])
++      ).catch(() => null);
++      if (hit) {
++        await markMonitorChecked(monitor.id, undefined, `Channel di-blacklist (${hit.label}) — lihat /blacklist`).catch(() => {});
++        continue;
++      }
++    }
++
+     try {
+       const fresh = await findNewVideos(monitor);
+       newVideos += fresh.length;
+diff --git a/src/lib/claim-monitor-config.ts b/src/lib/claim-monitor-config.ts
+new file mode 100644
+index 0000000..adcf1d1
+--- /dev/null
++++ b/src/lib/claim-monitor-config.ts
+@@ -0,0 +1,271 @@
++/**
++ * 🚨 POST-UPLOAD CLAIM MONITOR — KONFIGURASI (FITUR BARU!)
++ * =====================================================================
++ * Satu-satunya tempat untuk membaca/mengubah pengaturan fitur ini — pola sama
++ * dengan source-guard-config.ts / auto-prune-config.ts. Cukup ubah lewat
++ * Railway → Variables (lalu restart service), tanpa menyentuh kode lain.
++ *
++ * Kenapa ada? Karena bot mengambil video channel LAIN, Copyright Guard sebelum
++ * upload (Source Guard) belum cukup — klaim Content ID / pembatasan baru
++ * muncul SETELAH video tayang. Monitor ini:
++ *   1. Mengecek video yang sudah diupload secara berkala lewat YouTube API
++ *      `videos.list` (status.uploadStatus / status.rejectionReason,
++ *      contentDetails.licensedContent, contentDetails.regionRestriction, dst.)
++ *   2. Kalau ada klaim / pembatasan → alert Telegram dengan tombol
++ *        [🗑 Hapus]  [🔒 Private]  [🙈 Abaikan]
++ *   3. Menghitung RASIO KLAIM PER SOURCE CHANNEL (klip yang kena klaim ÷ klip
++ *      yang sudah dicek), lalu AUTO-BLACKLIST channel yang sering menimbulkan
++ *      klaim. Channel di blacklist tidak akan diproses lagi (Source Guard +
++ *      Auto-Monitor), dan monitornya otomatis dijeda.
++ *   4. Perintah Telegram: /claims  dan  /blacklist
++ *
++ * 🧑‍⚖️ Bot TIDAK pernah menghapus / memprivatekan video sendiri — hanya setelah
++ *    kamu menekan tombolnya di Telegram.
++ *
++ * =====================================================================
++ * ENV VARS (semua opsional, semua punya default aman)
++ * =====================================================================
++ * ── Monitor ─────────────────────────────────────────────────────────
++ * CLAIM_MONITOR_ENABLED=true            SAKLAR UTAMA (false = fitur mati total)
++ * CLAIM_MONITOR_INTERVAL_MINUTES=60     seberapa sering worker mengecek (min 5)
++ * CLAIM_MONITOR_TRACK_DAYS=90           hanya cek video yang diupload ≤ N hari lalu
++ * CLAIM_MONITOR_FRESH_DAYS=7            video lebih muda dari N hari dicek tiap siklus
++ * CLAIM_MONITOR_OLD_RECHECK_HOURS=24    video yang lebih tua dicek ulang tiap N jam
++ * CLAIM_MONITOR_SIGNALS=rejected,licensed,region
++ *     Sinyal yang dianggap klaim/pembatasan (pilih salah satu / lebih):
++ *       rejected = status.uploadStatus=rejected + status.rejectionReason
++ *                  (claim, copyright, duplicate, termsOfUse, dst.)
++ *       licensed = contentDetails.licensedContent=true (di-claim content partner / Content ID)
++ *       region   = contentDetails.regionRestriction (diblokir di sebagian negara — biasanya akibat klaim)
++ *       age      = contentDetails.contentRating ytAgeRestricted (pembatasan usia, opsional)
++ * ── Alert Telegram ──────────────────────────────────────────────────
++ * CLAIM_MONITOR_NOTIFY=true             kirim alert ke Telegram
++ * CLAIM_MONITOR_ACTIONS=delete,private  tombol yang ditawarkan (+ "Abaikan" selalu ada)
++ * CLAIM_MONITOR_HIDE_TO=private         tombol "Private" mengubah privasi ke: private | unlisted
++ * CLAIM_MONITOR_DELETE_CONFIRM=true     Hapus butuh konfirmasi tombol kedua
++ * CLAIM_MONITOR_MAX_ALERTS_PER_CYCLE=10 maks alert per user per siklus (hindari spam)
++ * CLAIM_MONITOR_REMINDER_HOURS=0        ingatkan lagi alert yang belum diputuskan tiap N jam (0 = tidak)
++ * CLAIM_MONITOR_REQUEST_SCOPE=true      minta izin youtube.force-ssl saat /connect (dibutuhkan tombol Hapus/Private)
++ * ── Rasio klaim & blacklist ─────────────────────────────────────────
++ * CLAIM_AUTO_BLACKLIST=true             auto-blacklist channel sumber yang sering kena klaim
++ * CLAIM_BLACKLIST_MIN_CLIPS=3           minimal klip yang sudah dicek dari channel itu
++ * CLAIM_BLACKLIST_MIN_CLAIMS=2          minimal klip yang kena klaim
++ * CLAIM_BLACKLIST_RATIO_PERCENT=30      rasio klaim minimal (%) → blacklist
++ * CLAIM_RATIO_COUNT_IGNORED=true        klaim yang di-"Abaikan" tetap dihitung di rasio
++ * CLAIM_BLACKLIST_ENFORCE=block         block = job dari channel blacklist DITOLAK
++ *                                       warn  = hanya peringatan (job lanjut)
++ *                                       off   = daftar blacklist hanya dicatat
++ * CLAIM_BLACKLIST_PAUSE_MONITORS=true   jeda Auto-Monitor yang menunjuk channel blacklist
++ * CLAIM_BLACKLIST_CHANNELS=             blacklist GLOBAL manual (koma): UCxxx,@handle,nama,URL
++ * CLAIM_BLACKLIST_NOTIFY=true           kabari lewat Telegram saat channel di-auto-blacklist
++ *
++ * Whitelist (COPYRIGHT_WHITELIST_CHANNELS / /whitelist) & channel milik sendiri
++ * TIDAK PERNAH di-auto-blacklist.
++ *
++ * Endpoint cadangan (Railway Cron): GET /api/claims/run?secret=SETUP_SECRET
++ */
++
++export type ClaimSignalType = "rejected" | "licensed" | "region" | "age";
++export type ClaimAction = "delete" | "private";
++export type BlacklistEnforce = "block" | "warn" | "off";
++
++const ALL_SIGNALS: ClaimSignalType[] = ["rejected", "licensed", "region", "age"];
++
++function envBool(name: string, fallback: boolean): boolean {
++  const raw = process.env[name];
++  if (raw === undefined || raw.trim() === "") return fallback;
++  return !/^(false|0|off|no|nonaktif)$/i.test(raw.trim());
++}
++
++function envInt(name: string, fallback: number, min: number, max: number): number {
++  const n = parseInt((process.env[name] || "").trim(), 10);
++  if (!Number.isFinite(n)) return fallback;
++  return Math.min(max, Math.max(min, n));
++}
++
++function envList<T extends string>(name: string, fallback: T[], allowed: readonly T[]): T[] {
++  const list = (process.env[name] || "")
++    .toLowerCase()
++    .split(/[,\s;]+/)
++    .map((s) => s.trim())
++    .filter((s): s is T => (allowed as readonly string[]).includes(s));
++  return list.length ? Array.from(new Set(list)) : fallback;
++}
++
++// ─── SAKLAR & JADWAL ─────────────────────────────────────────────────────
++
++export function isClaimMonitorEnabled(): boolean {
++  return envBool("CLAIM_MONITOR_ENABLED", true);
++}
++
++export function getClaimIntervalMinutes(): number {
++  return envInt("CLAIM_MONITOR_INTERVAL_MINUTES", 60, 5, 24 * 60);
++}
++
++export function getClaimTrackDays(): number {
++  return envInt("CLAIM_MONITOR_TRACK_DAYS", 90, 1, 3650);
++}
++
++export function getClaimFreshDays(): number {
++  return envInt("CLAIM_MONITOR_FRESH_DAYS", 7, 0, 365);
++}
++
++export function getClaimOldRecheckHours(): number {
++  return envInt("CLAIM_MONITOR_OLD_RECHECK_HOURS", 24, 1, 24 * 30);
++}
++
++export function getClaimSignals(): ClaimSignalType[] {
++  return envList<ClaimSignalType>("CLAIM_MONITOR_SIGNALS", ["rejected", "licensed", "region"], ALL_SIGNALS);
++}
++
++// ─── ALERT ───────────────────────────────────────────────────────────────
++
++export function isClaimNotifyEnabled(): boolean {
++  return envBool("CLAIM_MONITOR_NOTIFY", true);
++}
++
++export function getClaimActions(): ClaimAction[] {
++  return envList<ClaimAction>("CLAIM_MONITOR_ACTIONS", ["delete", "private"], ["delete", "private"]);
++}
++
++export function getClaimHideTo(): "private" | "unlisted" {
++  return (process.env.CLAIM_MONITOR_HIDE_TO || "").trim().toLowerCase() === "unlisted" ? "unlisted" : "private";
++}
++
++export function isClaimDeleteConfirmRequired(): boolean {
++  return envBool("CLAIM_MONITOR_DELETE_CONFIRM", true);
++}
++
++export function getClaimMaxAlertsPerCycle(): number {
++  return envInt("CLAIM_MONITOR_MAX_ALERTS_PER_CYCLE", 10, 1, 50);
++}
++
++export function getClaimReminderHours(): number {
++  return envInt("CLAIM_MONITOR_REMINDER_HOURS", 0, 0, 24 * 60);
++}
++
++/** Minta scope `youtube.force-ssl` saat /connect (hanya kalau fitur menyala). */
++export function shouldRequestClaimScope(): boolean {
++  return isClaimMonitorEnabled() && envBool("CLAIM_MONITOR_REQUEST_SCOPE", true);
++}
++
++// ─── RASIO & BLACKLIST ───────────────────────────────────────────────────
++
++export function isAutoBlacklistEnabled(): boolean {
++  return envBool("CLAIM_AUTO_BLACKLIST", true);
++}
++
++export function getBlacklistMinClips(): number {
++  return envInt("CLAIM_BLACKLIST_MIN_CLIPS", 3, 1, 1000);
++}
++
++export function getBlacklistMinClaims(): number {
++  return envInt("CLAIM_BLACKLIST_MIN_CLAIMS", 2, 1, 1000);
++}
++
++export function getBlacklistRatioPercent(): number {
++  return envInt("CLAIM_BLACKLIST_RATIO_PERCENT", 30, 1, 100);
++}
++
++export function shouldCountIgnoredClaims(): boolean {
++  return envBool("CLAIM_RATIO_COUNT_IGNORED", true);
++}
++
++export function getBlacklistEnforce(): BlacklistEnforce {
++  const raw = (process.env.CLAIM_BLACKLIST_ENFORCE || "").trim().toLowerCase();
++  if (raw === "warn") return "warn";
++  if (raw === "off" || raw === "false" || raw === "disabled") return "off";
++  return "block";
++}
++
++export function shouldPauseBlacklistedMonitors(): boolean {
++  return envBool("CLAIM_BLACKLIST_PAUSE_MONITORS", true);
++}
++
++export function getEnvBlacklist(): string[] {
++  return (process.env.CLAIM_BLACKLIST_CHANNELS || "")
++    .split(/[,\n;]/)
++    .map((s) => s.trim())
++    .filter(Boolean);
++}
++
++export function isBlacklistNotifyEnabled(): boolean {
++  return envBool("CLAIM_BLACKLIST_NOTIFY", true);
++}
++
++/** Ringkasan aturan auto-blacklist untuk ditampilkan ke user. */
++export function describeBlacklistRule(): string {
++  return (
++    `≥ ${getBlacklistMinClips()} klip dicek, ≥ ${getBlacklistMinClaims()} klip kena klaim, ` +
++    `rasio ≥ ${getBlacklistRatioPercent()}%`
++  );
++}
++
++/** Ringkasan semua konfigurasi aktif — dipakai dashboard & perintah Telegram. */
++export function getClaimMonitorConfigSummary() {
++  return {
++    enabled: isClaimMonitorEnabled(),
++    intervalMinutes: getClaimIntervalMinutes(),
++    trackDays: getClaimTrackDays(),
++    freshDays: getClaimFreshDays(),
++    oldRecheckHours: getClaimOldRecheckHours(),
++    signals: getClaimSignals(),
++    notify: isClaimNotifyEnabled(),
++    actions: getClaimActions(),
++    hideTo: getClaimHideTo(),
++    deleteConfirm: isClaimDeleteConfirmRequired(),
++    maxAlertsPerCycle: getClaimMaxAlertsPerCycle(),
++    reminderHours: getClaimReminderHours(),
++    autoBlacklist: isAutoBlacklistEnabled(),
++    minClips: getBlacklistMinClips(),
++    minClaims: getBlacklistMinClaims(),
++    ratioPercent: getBlacklistRatioPercent(),
++    countIgnored: shouldCountIgnoredClaims(),
++    enforce: getBlacklistEnforce(),
++    pauseMonitors: shouldPauseBlacklistedMonitors(),
++    envBlacklist: getEnvBlacklist(),
++  };
++}
++
++// ─── KONSTANTA (ubah di sini kalau perlu) ────────────────────────────────
++
++/** Scope Google yang cukup untuk `videos.update` & `videos.delete`. */
++export const CLAIM_REQUIRED_SCOPES = [
++  "https://www.googleapis.com/auth/youtube.force-ssl",
++  "https://www.googleapis.com/auth/youtube",
++];
++export const CLAIM_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";
++
++/** Batas video per panggilan videos.list (maks YouTube = 50). */
++export const CLAIM_BATCH_SIZE = 50;
++
++/** Jeda setelah server boot sebelum siklus pertama (ms). */
++export const CLAIM_FIRST_RUN_DELAY_MS = 2 * 60_000;
++
++/** Penjelasan status.rejectionReason dari YouTube — ubah kata-katanya di sini. */
++export const REJECTION_LABELS: Record<string, string> = {
++  claim: "Ditolak: klaim hak cipta (Content ID)",
++  copyright: "Ditolak: pelanggaran hak cipta",
++  duplicate: "Ditolak: video duplikat",
++  inappropriate: "Ditolak: konten tidak pantas",
++  legal: "Ditolak: alasan hukum",
++  length: "Ditolak: durasi tidak valid",
++  termsOfUse: "Ditolak: melanggar Ketentuan Layanan",
++  trademark: "Ditolak: pelanggaran merek dagang",
++  uploaderAccountClosed: "Ditolak: akun uploader ditutup",
++  uploaderAccountSuspended: "Ditolak: akun uploader ditangguhkan",
++};
++
++/** Teks pesan Telegram — ganti kata-katanya di sini. */
++export const CLAIM_TEXT = {
++  header: "🚨 <b>Klaim / Pembatasan Terdeteksi</b>",
++  headerHint:
++    "YouTube menandai klip di bawah ini setelah tayang. Klip dari channel lain berisiko kena Content ID / copyright strike.\n" +
++    "<i>Kamu yang memutuskan — tidak ada yang diubah tanpa tombolmu.</i>",
++  deleted: "🗑 <b>Dihapus dari YouTube</b>",
++  privated: "🔒 <b>Diubah ke private</b>",
++  unlisted: "🔗 <b>Diubah ke unlisted</b>",
++  ignored: "🙈 <b>Diabaikan</b>",
++  confirmDelete: "⚠️ <b>Yakin hapus permanen?</b> Video akan hilang dari YouTube dan tidak bisa dikembalikan.",
++  blacklisted: "⛔ <b>Channel sumber di-blacklist otomatis</b>",
++};
+diff --git a/src/lib/claim-monitor-telegram.ts b/src/lib/claim-monitor-telegram.ts
+new file mode 100644
+index 0000000..45ac338
+--- /dev/null
++++ b/src/lib/claim-monitor-telegram.ts
+@@ -0,0 +1,301 @@
++/**
++ * 🚨 PERINTAH & TOMBOL TELEGRAM — POST-UPLOAD CLAIM MONITOR (FITUR BARU!)
++ * =====================================================================
++ * Didaftarkan ke bot lewat satu baris di src/lib/telegram-bot.ts:
++ *     registerClaimMonitorCommands(bot);
++ *
++ * Perintah:
++ *   /claims                → status, aturan, ringkasan klaim & rasio per channel
++ *   /claims list           → kirim ulang alert yang masih menunggu keputusan (dengan tombol)
++ *   /claims channels       → rasio klaim lengkap per source channel
++ *   /claims run            → cek status video di YouTube sekarang
++ *   /blacklist             → daftar channel yang di-blacklist (auto + manual + env)
++ *   /blacklist add <channel>      → blacklist manual (ID UCxxx / @handle / nama / URL)
++ *   /blacklist remove <nomor|channel> → keluarkan dari blacklist
++ *
++ * Tombol di tiap alert (callback data `claim:<aksi>:<id>`):
++ *   d = hapus (minta konfirmasi) · dc = konfirmasi hapus · p = private · i = abaikan · b = batal
++ * Tombol di notifikasi auto-blacklist: `bl:rm:<id>` = keluarkan dari blacklist.
++ */
++
++import { InlineKeyboard, type Bot, type Context } from "grammy";
++import { escapeHtml } from "@/lib/analytics-report";
++import {
++  applyClaimDecision,
++  blacklistChannelManually,
++  buildClaimKeyboard,
++  buildClaimMessage,
++  getChannelClaimStats,
++  getClaimCounts,
++  getClaimHistory,
++  getOwnedClaim,
++  getPendingClaims,
++  runClaimMonitor,
++  sendClaimAlerts,
++  type ClaimDecision,
++} from "@/lib/claim-monitor";
++import {
++  CLAIM_TEXT,
++  describeBlacklistRule,
++  getBlacklistEnforce,
++  getClaimActions,
++  getClaimHideTo,
++  getClaimIntervalMinutes,
++  getClaimMaxAlertsPerCycle,
++  getClaimSignals,
++  getEnvBlacklist,
++  isAutoBlacklistEnabled,
++  isClaimDeleteConfirmRequired,
++  isClaimMonitorEnabled,
++} from "@/lib/claim-monitor-config";
++import { listBlacklist, removeBlacklistById, removeBlacklistEntry } from "@/lib/source-blacklist";
++
++const HTML = { parse_mode: "HTML" as const, link_preview_options: { is_disabled: true } };
++
++export const CLAIM_MONITOR_HELP =
++  `\n\n🚨 *Post-Upload Claim Monitor:*\n` +
++  `/claims - Status klaim video & rasio klaim per channel sumber\n` +
++  `/blacklist - Lihat / tambah / hapus channel sumber yang di-blacklist`;
++
++const ENFORCE_LABEL: Record<string, string> = {
++  block: "⛔ block (job ditolak)",
++  warn: "⚠️ warn (peringatan saja)",
++  off: "⚪ off (hanya dicatat)",
++};
++
++function bar(percent: number): string {
++  const filled = Math.round(Math.min(100, Math.max(0, percent)) / 10);
++  return "▰".repeat(filled) + "▱".repeat(10 - filled);
++}
++
++function formatChannelLine(s: { channelName: string; claims: number; clips: number; ratioPercent: number; blacklisted: boolean }): string {
++  return (
++    `${s.blacklisted ? "⛔" : s.ratioPercent >= 30 ? "🔴" : s.claims > 0 ? "🟡" : "🟢"} <b>${escapeHtml(s.channelName.slice(0, 40))}</b>\n` +
++    `    ${bar(s.ratioPercent)} ${s.ratioPercent}% (${s.claims}/${s.clips} klip)`
++  );
++}
++
++export function registerClaimMonitorCommands(bot: Bot<Context>): void {
++  // ─── /claims ───────────────────────────────────────────────────────────
++  bot.command("claims", async (ctx) => {
++    const userId = ctx.from?.id?.toString();
++    if (!userId) return;
++    if (!isClaimMonitorEnabled()) {
++      await ctx.reply(
++        "🚨 <b>Post-Upload Claim Monitor</b> sedang nonaktif.\nAdmin bisa menyalakannya dengan <code>CLAIM_MONITOR_ENABLED=true</code> di Railway Variables.",
++        HTML
++      );
++      return;
++    }
++    const sub = (ctx.match || "").toString().trim().split(/\s+/)[0].toLowerCase();
++
++    try {
++      if (sub === "run" || sub === "cek") {
++        const wait = await ctx.reply("🚨 Mengecek status video di YouTube...");
++        const r = await runClaimMonitor({ userId, force: true, notify: false });
++        if (ctx.chat) await ctx.api.deleteMessage(ctx.chat.id, wait.message_id).catch(() => {});
++        const pending = (await getClaimCounts(userId)).pending;
++        await ctx.reply(
++          `🚨 <b>Pengecekan selesai</b>\n• Video dicek: ${r.checked}\n• Klaim baru: ${r.newClaims} · dilepas: ${r.cleared}\n• Video sudah hilang: ${r.missing}\n• Channel di-auto-blacklist: ${r.blacklisted}` +
++            (r.errors.length ? `\n<i>⚠️ ${escapeHtml(r.errors[0].slice(0, 200))}</i>` : "") +
++            (pending ? `\n\n<b>${pending}</b> klip menunggu keputusan — ketik <code>/claims list</code>.` : "\n\n✅ Tidak ada klip yang menunggu keputusan."),
++          HTML
++        );
++        return;
++      }
++
++      if (sub === "list") {
++        const rows = await getPendingClaims(userId, getClaimMaxAlertsPerCycle() * 2);
++        if (!rows.length) {
++          await ctx.reply("✅ Tidak ada klaim yang menunggu keputusan.", HTML);
++          return;
++        }
++        const total = (await getClaimCounts(userId)).pending;
++        await sendClaimAlerts(userId, rows, total);
++        return;
++      }
++
++      if (sub === "channels" || sub === "channel" || sub === "rasio") {
++        const stats = await getChannelClaimStats(userId);
++        if (!stats.length) {
++          await ctx.reply("ℹ️ Belum ada data. Rasio muncul setelah klip dari source channel dicek (<code>/claims run</code>).", HTML);
++          return;
++        }
++        await ctx.reply(
++          `📊 <b>Rasio Klaim per Source Channel</b>\n<i>Auto-blacklist: ${isAutoBlacklistEnabled() ? escapeHtml(describeBlacklistRule()) : "nonaktif"}</i>\n\n` +
++            stats.slice(0, 20).map(formatChannelLine).join("\n\n"),
++          HTML
++        );
++        return;
++      }
++
++      // default: ringkasan
++      const [counts, history, stats] = await Promise.all([getClaimCounts(userId), getClaimHistory(userId, 5), getChannelClaimStats(userId)]);
++      const icon: Record<string, string> = { private: "🔒", unlisted: "🔗", deleted: "🗑", ignored: "🙈" };
++      const lines = history.map((h) => `${icon[h.actionStatus] || "•"} ${escapeHtml(h.title.slice(0, 50))}`);
++      const top = stats.filter((s) => s.claims > 0).slice(0, 3);
++      await ctx.reply(
++        "🚨 <b>Post-Upload Claim Monitor</b> — ON ✅\n" +
++          `<i>Cek tiap ${getClaimIntervalMinutes()} menit · sinyal: ${getClaimSignals().join(", ")}</i>\n` +
++          `<i>Tombol: ${getClaimActions().map((a) => (a === "delete" ? "hapus" : `private → ${getClaimHideTo()}`)).join(", ")}, abaikan</i>\n\n` +
++          `📹 Video dipantau: <b>${counts.tracked}</b> (sudah dicek: ${counts.checked})\n` +
++          `🚩 Kena klaim/pembatasan: <b>${counts.claimed}</b> · menunggu keputusan: <b>${counts.pending}</b>\n` +
++          `🔒 Private: ${counts.privated} · 🗑 Dihapus: ${counts.deleted} · 🙈 Diabaikan: ${counts.ignored}` +
++          (top.length ? `\n\n<b>Channel paling sering diklaim</b>\n${top.map(formatChannelLine).join("\n")}` : "") +
++          (lines.length ? `\n\n<b>Keputusan terakhir</b>\n${lines.join("\n")}` : "") +
++          "\n\n<code>/claims list</code> — lihat alert menunggu\n<code>/claims channels</code> — rasio per channel\n<code>/claims run</code> — cek sekarang\n<code>/blacklist</code> — channel yang diblokir\n" +
++          "<i>Bot hanya memberi alert; kamu yang memutuskan lewat tombol.</i>",
++        HTML
++      );
++    } catch (err) {
++      console.error("[claim-monitor] /claims gagal:", err);
++      await ctx.reply("⚠️ Terjadi kesalahan saat memproses /claims. Coba lagi sebentar lagi.");
++    }
++  });
++
++  // ─── /blacklist ────────────────────────────────────────────────────────
++  bot.command("blacklist", async (ctx) => {
++    const userId = ctx.from?.id?.toString();
++    if (!userId) return;
++
++    const arg = (ctx.match || "").toString().trim();
++    const [rawSub, ...rest] = arg.split(/\s+/);
++    const sub = (rawSub || "").toLowerCase();
++    const value = rest.join(" ").trim();
++
++    try {
++      if (sub === "add" || sub === "tambah") {
++        if (!value) {
++          await ctx.reply("Format: <code>/blacklist add @namachannel</code> (boleh juga ID UCxxx, nama, atau URL channel)", HTML);
++          return;
++        }
++        const res = await blacklistChannelManually(userId, value);
++        await ctx.reply(
++          res.added
++            ? `⛔ <code>${escapeHtml(res.label)}</code> masuk blacklist.` +
++                (res.pausedMonitors ? `\n⏸ ${res.pausedMonitors} Auto-Monitor untuk channel ini dijeda.` : "")
++            : `ℹ️ <code>${escapeHtml(res.label)}</code> sudah ada di blacklist.`,
++          HTML
++        );
++        return;
++      }
++
++      if (sub === "remove" || sub === "hapus" || sub === "del") {
++        if (!value) {
++          await ctx.reply("Format: <code>/blacklist remove &lt;nomor | channel&gt;</code>", HTML);
++          return;
++        }
++        const removed = await removeBlacklistEntry(userId, value);
++        await ctx.reply(
++          removed
++            ? `✅ <code>${escapeHtml(removed.channelName || removed.channelKey)}</code> dikeluarkan dari blacklist.\n<i>Auto-Monitor yang sempat dijeda bisa dinyalakan lagi lewat /monitoron.</i>`
++            : "❌ Tidak ditemukan di blacklist-mu. Cek nomor lewat /blacklist (entri dari env hanya bisa diubah di Railway Variables).",
++          HTML
++        );
++        return;
++      }
++
++      // default: list
++      const mine = await listBlacklist(userId);
++      const envList = getEnvBlacklist();
++      const lines: string[] = [`⛔ <b>Blacklist Source Channel</b> (mode: <code>${ENFORCE_LABEL[getBlacklistEnforce()]}</code>)\n`];
++      lines.push(
++        `<b>Milikmu</b> (${mine.length}):\n` +
++          (mine.length
++            ? mine
++                .map(
++                  (r, i) =>
++                    `${i + 1}. <code>${escapeHtml(r.channelName || r.channelKey)}</code> — ${r.origin === "auto" ? `🤖 auto (${r.claims}/${r.clips} klip, ${r.ratioPercent}%)` : "✍️ manual"}`
++                )
++                .join("\n")
++            : "— kosong —")
++      );
++      lines.push(
++        `\n<b>Global (env CLAIM_BLACKLIST_CHANNELS)</b> (${envList.length}):\n` +
++          (envList.length ? envList.map((e) => `• <code>${escapeHtml(e)}</code>`).join("\n") : "— kosong —")
++      );
++      lines.push(
++        `\n🤖 Auto-blacklist: <b>${isAutoBlacklistEnabled() ? "aktif" : "nonaktif"}</b>` +
++          (isAutoBlacklistEnabled() ? `\n<i>${escapeHtml(describeBlacklistRule())}</i>` : "")
++      );
++      lines.push(
++        `\n➕ <code>/blacklist add @channel</code>\n➖ <code>/blacklist remove 1</code>\n📊 <code>/claims channels</code> — lihat rasio klaim\n\n` +
++          `Channel di blacklist tidak diproses lagi (job ditolak Source Guard & Auto-Monitor dijeda). Channel whitelist / milik sendiri tidak pernah di-auto-blacklist.`
++      );
++      await ctx.reply(lines.join("\n"), HTML);
++    } catch (err) {
++      console.error("[claim-monitor] /blacklist gagal:", err);
++      await ctx.reply(`❌ Gagal: ${escapeHtml(err instanceof Error ? err.message : String(err))}`, HTML);
++    }
++  });
++
++  // ─── Tombol alert klaim: claim:<d|dc|p|i|b>:<id> ───────────────────────
++  bot.callbackQuery(/^claim:(d|dc|p|i|b):(\d+)$/, async (ctx) => {
++    const userId = ctx.from?.id?.toString();
++    const [, act, rawId] = ctx.match as unknown as [string, string, string];
++    const id = parseInt(rawId, 10);
++    if (!userId) return;
++
++    try {
++      // Minta konfirmasi sebelum hapus permanen
++      if (act === "d" && isClaimDeleteConfirmRequired()) {
++        const row = await getOwnedClaim(userId, id);
++        if (!row || row.actionStatus !== "pending") {
++          await ctx.answerCallbackQuery({ text: "Alert sudah diputuskan." });
++          return;
++        }
++        const kb = new InlineKeyboard().text("🗑 Ya, hapus permanen", `claim:dc:${id}`).text("↩️ Batal", `claim:b:${id}`);
++        await ctx.answerCallbackQuery();
++        await ctx.editMessageText(`${buildClaimMessage(row)}\n\n${CLAIM_TEXT.confirmDelete}`, { ...HTML, reply_markup: kb });
++        return;
++      }
++
++      if (act === "b") {
++        const row = await getOwnedClaim(userId, id);
++        await ctx.answerCallbackQuery({ text: "Dibatalkan" });
++        if (row) await ctx.editMessageText(buildClaimMessage(row), { ...HTML, reply_markup: buildClaimKeyboard(id) });
++        return;
++      }
++
++      const decision: ClaimDecision = act === "p" ? "private" : act === "i" ? "ignore" : "delete";
++      await ctx.answerCallbackQuery({ text: "Memproses..." });
++      const result = await applyClaimDecision(userId, id, decision);
++
++      if (result.ok && result.row) {
++        await ctx.editMessageText(`${buildClaimMessage(result.row)}\n\n${result.message}`, { ...HTML, reply_markup: undefined });
++      } else if (result.row && result.status && result.status !== "pending") {
++        // sudah diputuskan sebelumnya → hilangkan tombol
++        await ctx.editMessageText(`${buildClaimMessage(result.row)}\n\nℹ️ ${escapeHtml(result.message)}`, { ...HTML, reply_markup: undefined });
++      } else {
++        // gagal: tombol tetap ada supaya bisa dicoba lagi
++        await ctx.reply(`⚠️ ${escapeHtml(result.message)}`, HTML);
++        if (result.row) await ctx.editMessageReplyMarkup({ reply_markup: buildClaimKeyboard(id) }).catch(() => {});
++      }
++    } catch (err) {
++      console.error("[claim-monitor] tombol gagal:", err);
++      await ctx.answerCallbackQuery({ text: "Terjadi kesalahan, coba lagi." }).catch(() => {});
++    }
++  });
++
++  // ─── Tombol notifikasi auto-blacklist: bl:rm:<id> ──────────────────────
++  bot.callbackQuery(/^bl:rm:(\d+)$/, async (ctx) => {
++    const userId = ctx.from?.id?.toString();
++    const [, rawId] = ctx.match as unknown as [string, string];
++    if (!userId) return;
++    try {
++      const removed = await removeBlacklistById(userId, parseInt(rawId, 10));
++      await ctx.answerCallbackQuery({ text: removed ? "Dikeluarkan dari blacklist" : "Sudah tidak ada di blacklist" });
++      if (removed) {
++        await ctx.editMessageText(
++          `✅ <b>${escapeHtml(removed.channelName || removed.channelKey)}</b> dikeluarkan dari blacklist.\n<i>Auto-Monitor yang sempat dijeda bisa dinyalakan lagi lewat /monitoron.</i>`,
++          { ...HTML, reply_markup: undefined }
++        );
++      } else {
++        await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
++      }
++    } catch (err) {
++      console.error("[claim-monitor] tombol blacklist gagal:", err);
++      await ctx.answerCallbackQuery({ text: "Terjadi kesalahan, coba lagi." }).catch(() => {});
++    }
++  });
++}
+diff --git a/src/lib/claim-monitor-worker.ts b/src/lib/claim-monitor-worker.ts
+new file mode 100644
+index 0000000..c658ef1
+--- /dev/null
++++ b/src/lib/claim-monitor-worker.ts
+@@ -0,0 +1,49 @@
++/**
++ * 🚨 POST-UPLOAD CLAIM MONITOR — BACKGROUND WORKER (FITUR BARU!)
++ * =====================================================================
++ * Dijalankan sekali saat server boot (lihat src/instrumentation.ts), lalu
++ * mengulang setiap CLAIM_MONITOR_INTERVAL_MINUTES (default 60 menit):
++ * cek status video di YouTube → alert klaim → hitung rasio → auto-blacklist.
++ *
++ * Worker ini berdiri sendiri (tidak bergantung ANALYTICS_ENABLED) dan mati total
++ * kalau CLAIM_MONITOR_ENABLED=false. Bisa dipicu manual lewat /claims run di
++ * Telegram atau GET /api/claims/run?secret=... (Railway Cron).
++ */
++
++import { CLAIM_FIRST_RUN_DELAY_MS, getClaimIntervalMinutes, isClaimMonitorEnabled } from "@/lib/claim-monitor-config";
++import { runClaimMonitor } from "@/lib/claim-monitor";
++
++const globalForWorker = globalThis as typeof globalThis & {
++  __claimMonitorWorkerStarted?: boolean;
++  __claimMonitorWorkerTimer?: ReturnType<typeof setInterval>;
++};
++
++export function startClaimMonitorWorker(): void {
++  if (!isClaimMonitorEnabled()) {
++    console.log("[claim-monitor] Worker tidak dijalankan (CLAIM_MONITOR_ENABLED=false).");
++    return;
++  }
++  if (globalForWorker.__claimMonitorWorkerStarted) return;
++  globalForWorker.__claimMonitorWorkerStarted = true;
++
++  const intervalMs = getClaimIntervalMinutes() * 60_000;
++
++  const tick = async () => {
++    try {
++      const r = await runClaimMonitor();
++      if (r.discovered || r.checked || r.newClaims || r.blacklisted || r.errors.length) {
++        console.log(
++          `[claim-monitor] dicek ${r.checked} video • klaim baru ${r.newClaims} • dilepas ${r.cleared} • alert ${r.alerted} • blacklist ${r.blacklisted}` +
++            (r.errors.length ? ` • error: ${r.errors.slice(0, 2).join(" | ")}` : "")
++        );
++      }
++    } catch (err) {
++      console.error("[claim-monitor] Tick worker gagal:", err instanceof Error ? err.message : err);
++    }
++  };
++
++  // Tunda di awal supaya DB & bot Telegram siap, lalu ulangi berkala.
++  setTimeout(tick, CLAIM_FIRST_RUN_DELAY_MS);
++  globalForWorker.__claimMonitorWorkerTimer = setInterval(tick, intervalMs);
++  console.log(`[claim-monitor] Worker aktif — cek klaim setiap ${getClaimIntervalMinutes()} menit.`);
++}
+diff --git a/src/lib/claim-monitor.ts b/src/lib/claim-monitor.ts
+new file mode 100644
+index 0000000..c1995d5
+--- /dev/null
++++ b/src/lib/claim-monitor.ts
+@@ -0,0 +1,976 @@
++/**
++ * 🚨 POST-UPLOAD CLAIM MONITOR — LOGIKA UTAMA (FITUR BARU!)
++ * =====================================================================
++ * Dipanggil berkala oleh src/lib/claim-monitor-worker.ts (atau manual lewat
++ * /claims run & GET /api/claims/run). Alurnya:
++ *
++ *   1. DISCOVER  — klip yang sudah diupload ke YouTube (clip_jobs.clips[].youtubeVideoId)
++ *                  didaftarkan ke tabel `video_claim_watch` + dicatat source channel-nya
++ *                  (dari log Source Guard, atau dari monitor channel).
++ *   2. CHECK     — YouTube `videos.list` (part=status,contentDetails; 1 unit kuota per
++ *                  50 video) → cari klaim / pembatasan:
++ *                    status.uploadStatus=rejected + status.rejectionReason
++ *                    contentDetails.licensedContent=true      (Content ID / content partner)
++ *                    contentDetails.regionRestriction         (diblokir di sebagian negara)
++ *   3. ALERT     — klaim BARU dikirim ke Telegram dengan tombol Hapus / Private / Abaikan.
++ *   4. RASIO     — klaim per source channel dihitung; channel yang melewati ambang
++ *                  di-AUTO-BLACKLIST (lihat source-blacklist.ts) + monitornya dijeda.
++ *
++ * 🧑‍⚖️ Bot TIDAK pernah menghapus / memprivatekan video sendiri. Aksi baru berjalan
++ *    setelah user menekan tombol (applyClaimDecision di bawah).
++ *
++ * Semua pengaturan: src/lib/claim-monitor-config.ts (env Railway).
++ */
++
++import { google, type youtube_v3 } from "googleapis";
++import { and, desc, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
++import { InlineKeyboard } from "grammy";
++import { db } from "@/db";
++import {
++  clipJobs,
++  monitoredChannels,
++  sourceGuardLog,
++  videoClaimWatch,
++  type ClipResult,
++  type VideoClaimWatchRow,
++} from "@/db/schema";
++import { escapeHtml } from "@/lib/analytics-report";
++import { classifyError, getYoutubeClient } from "@/lib/auto-title-doctor";
++import { getYoutubeApiKey } from "@/lib/channel-monitor-config";
++import { ensureChannelMonitorTables, listMonitorsForUser, setMonitorEnabled } from "@/lib/channel-monitor";
++import {
++  CLAIM_BATCH_SIZE,
++  CLAIM_REQUIRED_SCOPES,
++  CLAIM_TEXT,
++  REJECTION_LABELS,
++  describeBlacklistRule,
++  getBlacklistMinClaims,
++  getBlacklistMinClips,
++  getBlacklistRatioPercent,
++  getClaimActions,
++  getClaimFreshDays,
++  getClaimHideTo,
++  getClaimMaxAlertsPerCycle,
++  getClaimOldRecheckHours,
++  getClaimReminderHours,
++  getClaimSignals,
++  getClaimTrackDays,
++  isAutoBlacklistEnabled,
++  isBlacklistNotifyEnabled,
++  isClaimMonitorEnabled,
++  isClaimNotifyEnabled,
++  shouldCountIgnoredClaims,
++  shouldPauseBlacklistedMonitors,
++  type ClaimSignalType,
++} from "@/lib/claim-monitor-config";
++import {
++  addBlacklistEntry,
++  buildChannelTokens,
++  findBlacklistMatch,
++  findReleasedEntry,
++  parseTokens,
++} from "@/lib/source-blacklist";
++import {
++  ensureSourceGuardTables,
++  getOwnChannelTokens,
++  listUserWhitelist,
++  normalizeChannelToken,
++} from "@/lib/source-guard";
++import { getEnvWhitelist, isOwnChannelAllowed } from "@/lib/source-guard-config";
++
++const HOUR = 3_600_000;
++const DAY = 86_400_000;
++
++// ─── TABEL (dibuat otomatis) ─────────────────────────────────────────────
++
++let tableReady: Promise<void> | null = null;
++
++export function ensureClaimTables(): Promise<void> {
++  if (!tableReady) {
++    tableReady = (async () => {
++      await db.execute(sql`
++        CREATE TABLE IF NOT EXISTS video_claim_watch (
++          id serial PRIMARY KEY,
++          youtube_video_id text NOT NULL UNIQUE,
++          job_id text NOT NULL,
++          telegram_user_id text NOT NULL,
++          title text NOT NULL,
++          source_url text,
++          source_title text,
++          channel_key text NOT NULL DEFAULT 'unknown',
++          channel_name text,
++          channel_tokens text,
++          claim_state text NOT NULL DEFAULT 'ok',
++          action_status text NOT NULL DEFAULT 'none',
++          signals text,
++          privacy_status text,
++          first_claim_at timestamp,
++          last_checked_at timestamp,
++          last_notified_at timestamp,
++          notified_count integer NOT NULL DEFAULT 0,
++          decided_at timestamp,
++          last_error text,
++          uploaded_at timestamp NOT NULL DEFAULT now(),
++          created_at timestamp NOT NULL DEFAULT now(),
++          updated_at timestamp NOT NULL DEFAULT now()
++        )
++      `);
++      await db.execute(sql`
++        CREATE INDEX IF NOT EXISTS video_claim_watch_user_idx ON video_claim_watch (telegram_user_id, claim_state)
++      `);
++      await db.execute(sql`
++        CREATE INDEX IF NOT EXISTS video_claim_watch_channel_idx ON video_claim_watch (telegram_user_id, channel_key)
++      `);
++    })().catch((err) => {
++      tableReady = null;
++      throw err;
++    });
++  }
++  return tableReady;
++}
++
++// ─── TIPE ────────────────────────────────────────────────────────────────
++
++export interface ClaimSignal {
++  type: ClaimSignalType;
++  detail: string;
++}
++
++export interface ClaimRunSummary {
++  enabled: boolean;
++  discovered: number;
++  users: number;
++  checked: number;
++  newClaims: number;
++  cleared: number;
++  missing: number;
++  alerted: number;
++  blacklisted: number;
++  errors: string[];
++}
++
++export interface ChannelClaimStat {
++  channelKey: string;
++  channelName: string;
++  tokens: string[];
++  /** Klip dari channel ini yang sudah berhasil dicek. */
++  clips: number;
++  /** Klip yang pernah kena klaim / pembatasan. */
++  claims: number;
++  ratioPercent: number;
++  blacklisted: boolean;
++}
++
++export type ClaimDecision = "delete" | "private" | "ignore";
++
++export interface ClaimDecisionResult {
++  ok: boolean;
++  status?: string;
++  message: string;
++  row?: VideoClaimWatchRow;
++}
++
++// ─── DETEKSI KLAIM / PEMBATASAN ──────────────────────────────────────────
++
++/** Ubah respons videos.list jadi daftar sinyal klaim/pembatasan (hanya sinyal yang diaktifkan). */
++export function detectClaimSignals(
++  video: youtube_v3.Schema$Video,
++  enabled: ClaimSignalType[] = getClaimSignals()
++): ClaimSignal[] {
++  const out: ClaimSignal[] = [];
++  const status = video.status;
++  const details = video.contentDetails;
++
++  if (enabled.includes("rejected")) {
++    const reason = status?.rejectionReason || "";
++    if (status?.uploadStatus === "rejected" || reason) {
++      out.push({
++        type: "rejected",
++        detail: REJECTION_LABELS[reason] || `Ditolak YouTube${reason ? ` (${reason})` : ""}`,
++      });
++    }
++  }
++
++  if (enabled.includes("licensed") && details?.licensedContent === true) {
++    out.push({ type: "licensed", detail: "Konten berlisensi — diklaim content partner (Content ID)" });
++  }
++
++  if (enabled.includes("region")) {
++    const rr = details?.regionRestriction;
++    if (rr?.blocked && rr.blocked.length > 0) {
++      out.push({
++        type: "region",
++        detail: `Diblokir di ${rr.blocked.length} negara (${rr.blocked.slice(0, 6).join(", ")}${rr.blocked.length > 6 ? ", …" : ""})`,
++      });
++    } else if (Array.isArray(rr?.allowed)) {
++      out.push({
++        type: "region",
++        detail: rr.allowed.length === 0 ? "Diblokir di semua negara" : `Hanya tersedia di ${rr.allowed.length} negara`,
++      });
++    }
++  }
++
++  if (enabled.includes("age") && details?.contentRating?.ytRating === "ytAgeRestricted") {
++    out.push({ type: "age", detail: "Dibatasi usia (age-restricted)" });
++  }
++
++  return out;
++}
++
++function parseSignals(raw: string | null | undefined): ClaimSignal[] {
++  if (!raw) return [];
++  try {
++    const parsed = JSON.parse(raw);
++    return Array.isArray(parsed) ? (parsed as ClaimSignal[]) : [];
++  } catch {
++    return [];
++  }
++}
++
++// ─── DISCOVER: daftarkan klip yang sudah diupload ────────────────────────
++
++interface SourceIdentity {
++  key: string;
++  name: string | null;
++  tokens: string[];
++}
++
++const UNKNOWN_SOURCE: SourceIdentity = { key: "unknown", name: null, tokens: [] };
++
++function identityFrom(channelId: string | null | undefined, channelName: string | null | undefined): SourceIdentity | null {
++  const tokens = buildChannelTokens([channelId, channelName]);
++  if (!tokens.length) return null;
++  const key = (channelId && normalizeChannelToken(channelId)) || tokens[0];
++  return { key, name: channelName || channelId || null, tokens };
++}
++
++/** Daftarkan klip baru (yang sudah punya youtubeVideoId) ke tabel pantauan. Return jumlah baris baru. */
++export async function discoverClaimWatch(userId?: string): Promise<number> {
++  await ensureClaimTables();
++  const cutoff = new Date(Date.now() - getClaimTrackDays() * DAY);
++  const conditions = [gte(clipJobs.updatedAt, cutoff), isNotNull(clipJobs.clips)];
++  if (userId) conditions.push(eq(clipJobs.telegramUserId, userId));
++  const jobs = await db.select().from(clipJobs).where(and(...conditions));
++  if (!jobs.length) return 0;
++
++  const known = new Set((await db.select({ id: videoClaimWatch.youtubeVideoId }).from(videoClaimWatch)).map((r) => r.id));
++  const fresh = jobs.filter((j) => ((j.clips as ClipResult[] | null) || []).some((c) => c.youtubeVideoId && !known.has(c.youtubeVideoId)));
++  if (!fresh.length) return 0;
++
++  // Source channel dari log Source Guard (satu baris per job)
++  const guardByJob = new Map<string, SourceIdentity>();
++  try {
++    await ensureSourceGuardTables();
++    const logs = await db
++      .select()
++      .from(sourceGuardLog)
++      .where(inArray(sourceGuardLog.jobId, fresh.map((j) => j.jobId)));
++    for (const l of logs) {
++      const id = identityFrom(l.channelId, l.channelName);
++      if (id) guardByJob.set(l.jobId, id);
++    }
++  } catch (err) {
++    console.warn("[claim-monitor] gagal membaca log Source Guard:", err instanceof Error ? err.message : err);
++  }
++
++  // Cadangan: monitor channel yang membuat job ini
++  const monitorById = new Map<number, SourceIdentity>();
++  try {
++    const monitorIds = Array.from(new Set(fresh.map((j) => j.sourceMonitorId).filter((v): v is number => typeof v === "number")));
++    if (monitorIds.length) {
++      await ensureChannelMonitorTables();
++      const monitors = await db.select().from(monitoredChannels).where(inArray(monitoredChannels.id, monitorIds));
++      for (const m of monitors) {
++        if (m.sourceType !== "channel") continue;
++        const id = identityFrom(m.externalId, m.title);
++        if (id) monitorById.set(m.id, id);
++      }
++    }
++  } catch (err) {
++    console.warn("[claim-monitor] gagal membaca monitor channel:", err instanceof Error ? err.message : err);
++  }
++
++  let inserted = 0;
++  for (const job of fresh) {
++    const source =
++      guardByJob.get(job.jobId) || (job.sourceMonitorId != null ? monitorById.get(job.sourceMonitorId) : undefined) || UNKNOWN_SOURCE;
++    for (const clip of (job.clips as ClipResult[] | null) || []) {
++      if (!clip.youtubeVideoId || known.has(clip.youtubeVideoId)) continue;
++      const res = await db
++        .insert(videoClaimWatch)
++        .values({
++          youtubeVideoId: clip.youtubeVideoId,
++          jobId: job.jobId,
++          telegramUserId: job.telegramUserId,
++          title: (clip.title || "Tanpa judul").slice(0, 200),
++          sourceUrl: job.sourceUrl,
++          sourceTitle: job.videoTitle || null,
++          channelKey: source.key,
++          channelName: source.name,
++          channelTokens: JSON.stringify(source.tokens),
++          uploadedAt: job.updatedAt,
++        })
++        .onConflictDoNothing()
++        .returning({ id: videoClaimWatch.id });
++      known.add(clip.youtubeVideoId);
++      if (res.length) inserted++;
++    }
++  }
++  return inserted;
++}
++
++// ─── CHECK: videos.list ──────────────────────────────────────────────────
++
++function chunk<T>(arr: T[], size: number): T[][] {
++  const out: T[][] = [];
++  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
++  return out;
++}
++
++const VIDEO_PARTS = ["status", "contentDetails"];
++
++interface FetchOutcome {
++  videos: Map<string, youtube_v3.Schema$Video>;
++  /** id yang BERHASIL dicek lewat OAuth pemilik (video tidak ada di respons = benar-benar hilang). */
++  authoritative: Set<string>;
++  /** id yang berhasil dicek (OAuth atau API key). */
++  checked: Set<string>;
++  errors: string[];
++}
++
++async function fetchVideoStates(userId: string, ids: string[]): Promise<FetchOutcome> {
++  const out: FetchOutcome = { videos: new Map(), authoritative: new Set(), checked: new Set(), errors: [] };
++
++  // 1) OAuth pemilik channel — bisa baca status.rejectionReason & video private
++  try {
++    const client = await getYoutubeClient(userId);
++    if (!("youtube" in client)) {
++      out.errors.push(`OAuth: ${client.error}`);
++    } else {
++      for (const batch of chunk(ids, CLAIM_BATCH_SIZE)) {
++        try {
++          const res = await client.youtube.videos.list({ part: VIDEO_PARTS, id: batch, maxResults: CLAIM_BATCH_SIZE });
++          for (const item of res.data.items || []) if (item.id) out.videos.set(item.id, item);
++          for (const id of batch) {
++            out.authoritative.add(id);
++            out.checked.add(id);
++          }
++        } catch (err) {
++          out.errors.push(`OAuth: ${classifyError(err).message.slice(0, 160)}`);
++        }
++      }
++    }
++  } catch (err) {
++    out.errors.push(`OAuth: ${err instanceof Error ? err.message.slice(0, 160) : String(err)}`);
++  }
++
++  // 2) Cadangan: API key (hanya video public/unlisted; tanpa rejectionReason)
++  const missing = ids.filter((id) => !out.checked.has(id));
++  const apiKey = getYoutubeApiKey();
++  if (missing.length && apiKey) {
++    const yt = google.youtube({ version: "v3", auth: apiKey });
++    for (const batch of chunk(missing, CLAIM_BATCH_SIZE)) {
++      try {
++        const res = await yt.videos.list({ part: VIDEO_PARTS, id: batch, maxResults: CLAIM_BATCH_SIZE });
++        for (const item of res.data.items || []) {
++          if (!item.id) continue;
++          out.videos.set(item.id, item);
++          out.checked.add(item.id);
++        }
++      } catch (err) {
++        out.errors.push(`API key: ${classifyError(err).message.slice(0, 160)}`);
++      }
++    }
++  }
++  return out;
++}
++
++function isDue(row: VideoClaimWatchRow, now: number, force: boolean): boolean {
++  if (row.claimState === "missing" || row.actionStatus === "deleted") return false;
++  if (force || !row.lastCheckedAt) return true;
++  const age = now - row.uploadedAt.getTime();
++  if (age < getClaimFreshDays() * DAY) return true;
++  return now - row.lastCheckedAt.getTime() >= getClaimOldRecheckHours() * HOUR;
++}
++
++interface UserCheckResult {
++  checked: number;
++  newClaims: number;
++  cleared: number;
++  missing: number;
++  errors: string[];
++}
++
++async function checkUserVideos(userId: string, rows: VideoClaimWatchRow[]): Promise<UserCheckResult> {
++  const result: UserCheckResult = { checked: 0, newClaims: 0, cleared: 0, missing: 0, errors: [] };
++  const fetched = await fetchVideoStates(userId, rows.map((r) => r.youtubeVideoId));
++  const unique = Array.from(new Set(fetched.errors));
++  result.errors.push(...unique);
++  const now = new Date();
++
++  for (const row of rows) {
++    const video = fetched.videos.get(row.youtubeVideoId);
++
++    if (!video) {
++      if (fetched.authoritative.has(row.youtubeVideoId)) {
++        // Pemilik channel tidak lagi melihat video ini → sudah dihapus / dibuang YouTube.
++        await db
++          .update(videoClaimWatch)
++          .set({ claimState: "missing", lastCheckedAt: now, lastError: null, updatedAt: now })
++          .where(eq(videoClaimWatch.id, row.id));
++        result.missing++;
++      } else if (!fetched.checked.has(row.youtubeVideoId)) {
++        await db
++          .update(videoClaimWatch)
++          .set({ lastError: (unique[0] || "Video tidak terbaca (butuh /connect ulang atau YOUTUBE_API_KEY)").slice(0, 300), updatedAt: now })
++          .where(eq(videoClaimWatch.id, row.id));
++      }
++      continue;
++    }
++
++    result.checked++;
++    const signals = detectClaimSignals(video);
++    const patch: Partial<typeof videoClaimWatch.$inferInsert> = {
++      lastCheckedAt: now,
++      lastError: null,
++      privacyStatus: video.status?.privacyStatus || row.privacyStatus,
++      signals: signals.length ? JSON.stringify(signals) : null,
++      updatedAt: now,
++    };
++
++    if (signals.length) {
++      patch.claimState = "claimed";
++      if (!row.firstClaimAt) patch.firstClaimAt = now;
++      if (row.actionStatus === "none") {
++        patch.actionStatus = "pending";
++        result.newClaims++;
++      }
++    } else if (row.claimState === "claimed") {
++      // Klaim sudah dilepas / tidak lagi terdeteksi
++      patch.claimState = "ok";
++      if (row.actionStatus === "pending" || row.actionStatus === "ignored") patch.actionStatus = "none";
++      result.cleared++;
++    } else {
++      patch.claimState = "ok";
++    }
++
++    await db.update(videoClaimWatch).set(patch).where(eq(videoClaimWatch.id, row.id));
++  }
++  return result;
++}
++
++// ─── RASIO KLAIM PER SOURCE CHANNEL ──────────────────────────────────────
++
++/** Hitung rasio klaim per source channel (channel "unknown" tidak dihitung). */
++export async function getChannelClaimStats(userId: string | null): Promise<ChannelClaimStat[]> {
++  await ensureClaimTables();
++  const where = userId
++    ? and(eq(videoClaimWatch.telegramUserId, userId), isNotNull(videoClaimWatch.lastCheckedAt), ne(videoClaimWatch.channelKey, "unknown"))
++    : and(isNotNull(videoClaimWatch.lastCheckedAt), ne(videoClaimWatch.channelKey, "unknown"));
++  const rows = await db.select().from(videoClaimWatch).where(where);
++
++  const countIgnored = shouldCountIgnoredClaims();
++  const map = new Map<string, ChannelClaimStat & { owner: string }>();
++  for (const r of rows) {
++    const mapKey = `${r.telegramUserId}|${r.channelKey}`;
++    let s = map.get(mapKey);
++    if (!s) {
++      s = {
++        channelKey: r.channelKey,
++        channelName: r.channelName || r.channelKey,
++        tokens: parseTokens(r.channelTokens),
++        clips: 0,
++        claims: 0,
++        ratioPercent: 0,
++        blacklisted: false,
++        owner: r.telegramUserId,
++      };
++      map.set(mapKey, s);
++    }
++    s.clips++;
++    if (r.firstClaimAt && (countIgnored || r.actionStatus !== "ignored")) s.claims++;
++  }
++
++  const stats: ChannelClaimStat[] = [];
++  for (const s of map.values()) {
++    const blacklisted = !!(await findBlacklistMatch(s.owner, s.tokens.length ? s.tokens : [s.channelKey]).catch(() => null));
++    stats.push({
++      channelKey: s.channelKey,
++      channelName: s.channelName,
++      tokens: s.tokens,
++      clips: s.clips,
++      claims: s.claims,
++      ratioPercent: s.clips ? Math.round((s.claims / s.clips) * 100) : 0,
++      blacklisted,
++    });
++  }
++  stats.sort((a, b) => b.ratioPercent - a.ratioPercent || b.claims - a.claims || b.clips - a.clips);
++  return stats;
++}
++
++/** Channel yang dilindungi (whitelist / milik sendiri) TIDAK PERNAH di-auto-blacklist. */
++async function isProtectedChannel(userId: string, tokens: string[]): Promise<boolean> {
++  const set = new Set(tokens);
++  const envEntries = getEnvWhitelist().map(normalizeChannelToken).filter(Boolean);
++  if (envEntries.some((t) => set.has(t))) return true;
++  const mine = await listUserWhitelist(userId).catch(() => []);
++  if (mine.some((r) => set.has(r.entry))) return true;
++  if (isOwnChannelAllowed()) {
++    const own = await getOwnChannelTokens(userId).catch(() => [] as string[]);
++    if (own.some((t) => set.has(t))) return true;
++  }
++  return false;
++}
++
++/** Jeda Auto-Monitor milik user yang menunjuk channel ini. Return jumlah monitor yang dijeda. */
++export async function pauseMonitorsForChannel(userId: string, tokens: string[]): Promise<number> {
++  if (!shouldPauseBlacklistedMonitors() || !tokens.length) return 0;
++  try {
++    const monitors = await listMonitorsForUser(userId);
++    const set = new Set(tokens);
++    let paused = 0;
++    for (const m of monitors) {
++      if (m.sourceType !== "channel" || !m.enabled) continue;
++      const mt = buildChannelTokens([m.externalId, m.title]);
++      if (mt.some((t) => set.has(t))) {
++        if (await setMonitorEnabled(m.id, userId, false)) paused++;
++      }
++    }
++    return paused;
++  } catch (err) {
++    console.warn("[claim-monitor] gagal menjeda monitor:", err instanceof Error ? err.message : err);
++    return 0;
++  }
++}
++
++/** Tambah channel ke blacklist (manual) + jeda monitornya. */
++export async function blacklistChannelManually(
++  userId: string,
++  raw: string
++): Promise<{ added: boolean; label: string; pausedMonitors: number }> {
++  // Perluas token dari riwayat (mis. @handle → ID UCxxx) supaya cocok dengan metadata sumber.
++  const identities: string[] = [raw];
++  const token = normalizeChannelToken(raw);
++  let label = raw;
++  if (token) {
++    await ensureClaimTables();
++    const rows = await db
++      .select({ name: videoClaimWatch.channelName, tokens: videoClaimWatch.channelTokens })
++      .from(videoClaimWatch)
++      .where(eq(videoClaimWatch.telegramUserId, userId));
++    for (const r of rows) {
++      const tokens = parseTokens(r.tokens);
++      if (tokens.includes(token)) {
++        identities.push(...tokens);
++        if (r.name) label = r.name;
++        break;
++      }
++    }
++  }
++  const res = await addBlacklistEntry(userId, { identities, label, origin: "manual", reason: "Ditambahkan manual lewat /blacklist" });
++  const pausedMonitors = res.added ? await pauseMonitorsForChannel(userId, res.tokens) : 0;
++  return { added: res.added, label: res.row?.channelName || label, pausedMonitors };
++}
++
++/** Evaluasi rasio klaim user → auto-blacklist channel yang melewati ambang. */
++export async function evaluateAutoBlacklist(userId: string): Promise<Array<{ id: number; stat: ChannelClaimStat; pausedMonitors: number }>> {
++  if (!isAutoBlacklistEnabled()) return [];
++  const minClips = getBlacklistMinClips();
++  const minClaims = getBlacklistMinClaims();
++  const ratio = getBlacklistRatioPercent();
++
++  const stats = await getChannelClaimStats(userId);
++  const out: Array<{ id: number; stat: ChannelClaimStat; pausedMonitors: number }> = [];
++  for (const s of stats) {
++    if (s.blacklisted) continue;
++    if (s.clips < minClips || s.claims < minClaims || s.ratioPercent < ratio) continue;
++    const identities = s.tokens.length ? s.tokens : [s.channelKey];
++    if (await isProtectedChannel(userId, identities)) continue;
++    // Sudah dilepas user → hanya blacklist lagi kalau ada klaim BARU sejak dilepas
++    const released = await findReleasedEntry(userId, identities);
++    if (released && s.claims <= released.claims) continue;
++
++    const res = await addBlacklistEntry(userId, {
++      identities,
++      label: s.channelName,
++      origin: "auto",
++      reason: `Rasio klaim ${s.ratioPercent}% (${s.claims}/${s.clips} klip)`,
++      claims: s.claims,
++      clips: s.clips,
++      ratioPercent: s.ratioPercent,
++    });
++    if (!res.added || !res.row) continue;
++    const pausedMonitors = await pauseMonitorsForChannel(userId, res.tokens);
++    out.push({ id: res.row.id, stat: { ...s, blacklisted: true }, pausedMonitors });
++  }
++  return out;
++}
++
++// ─── TELEGRAM ────────────────────────────────────────────────────────────
++
++export function buildClaimKeyboard(id: number): InlineKeyboard {
++  const actions = getClaimActions();
++  const kb = new InlineKeyboard();
++  if (actions.includes("delete")) kb.text("🗑 Hapus", `claim:d:${id}`);
++  if (actions.includes("private")) kb.text(`🔒 ${getClaimHideTo() === "unlisted" ? "Unlisted" : "Private"}`, `claim:p:${id}`);
++  kb.text("🙈 Abaikan", `claim:i:${id}`);
++  return kb;
++}
++
++export function buildClaimMessage(row: VideoClaimWatchRow, stat?: ChannelClaimStat | null): string {
++  const signals = parseSignals(row.signals);
++  const source =
++    row.channelKey !== "unknown"
++      ? `\n📡 Sumber: <b>${escapeHtml((row.channelName || row.channelKey).slice(0, 80))}</b>` +
++        (stat ? ` — ${stat.claims}/${stat.clips} klip kena klaim (${stat.ratioPercent}%)${stat.blacklisted ? " ⛔ blacklist" : ""}` : "")
++      : "";
++  return (
++    `🎬 <a href="https://youtu.be/${row.youtubeVideoId}">${escapeHtml(row.title.slice(0, 100))}</a>` +
++    source +
++    (row.privacyStatus ? `\n👁 Privasi saat ini: <code>${escapeHtml(row.privacyStatus)}</code>` : "") +
++    (signals.length ? `\n${signals.map((s) => `⚠️ ${escapeHtml(s.detail)}`).join("\n")}` : "") +
++    (row.lastError ? `\n❗ <i>${escapeHtml(row.lastError.slice(0, 160))}</i>` : "")
++  );
++}
++
++async function resolveClaimChatId(userId: string): Promise<string> {
++  const jobs = await db
++    .select({ chatId: clipJobs.telegramChatId })
++    .from(clipJobs)
++    .where(eq(clipJobs.telegramUserId, userId))
++    .orderBy(desc(clipJobs.createdAt))
++    .limit(1);
++  return jobs[0]?.chatId || userId;
++}
++
++export async function sendClaimTelegram(userId: string, text: string, keyboard?: InlineKeyboard): Promise<void> {
++  const chatId = await resolveClaimChatId(userId);
++  const { bot } = await import("@/lib/telegram-bot");
++  await bot.api.sendMessage(chatId, text.slice(0, 4000), {
++    parse_mode: "HTML",
++    link_preview_options: { is_disabled: true },
++    ...(keyboard ? { reply_markup: keyboard } : {}),
++  });
++}
++
++/** Kirim alert (dengan tombol) untuk daftar baris. Return jumlah yang terkirim. */
++export async function sendClaimAlerts(userId: string, rows: VideoClaimWatchRow[], totalPending: number): Promise<number> {
++  if (!rows.length) return 0;
++  const stats = await getChannelClaimStats(userId).catch(() => [] as ChannelClaimStat[]);
++  const statByKey = new Map(stats.map((s) => [s.channelKey, s]));
++
++  await sendClaimTelegram(
++    userId,
++    `${CLAIM_TEXT.header}\n${CLAIM_TEXT.headerHint}\n\n` +
++      `🚩 <b>${totalPending}</b> klip menunggu keputusan` +
++      (rows.length < totalPending ? `\nMenampilkan ${rows.length} dulu; sisanya lihat <code>/claims list</code>.` : "")
++  );
++  let sent = 0;
++  for (const row of rows) {
++    try {
++      await sendClaimTelegram(userId, buildClaimMessage(row, statByKey.get(row.channelKey)), buildClaimKeyboard(row.id));
++      await db
++        .update(videoClaimWatch)
++        .set({ notifiedCount: sql`${videoClaimWatch.notifiedCount} + 1`, lastNotifiedAt: new Date(), updatedAt: new Date() })
++        .where(eq(videoClaimWatch.id, row.id));
++      sent++;
++    } catch (err) {
++      console.warn("[claim-monitor] alert Telegram gagal:", err instanceof Error ? err.message : err);
++      break;
++    }
++  }
++  return sent;
++}
++
++async function sendBlacklistNotice(userId: string, added: Array<{ id: number; stat: ChannelClaimStat; pausedMonitors: number }>): Promise<void> {
++  for (const a of added) {
++    const kb = new InlineKeyboard().text("↩️ Keluarkan dari blacklist", `bl:rm:${a.id}`);
++    await sendClaimTelegram(
++      userId,
++      `${CLAIM_TEXT.blacklisted}\n\n` +
++        `📡 <b>${escapeHtml(a.stat.channelName.slice(0, 80))}</b>\n` +
++        `📊 ${a.stat.claims} dari ${a.stat.clips} klip kena klaim (<b>${a.stat.ratioPercent}%</b>)\n` +
++        `<i>Aturan: ${escapeHtml(describeBlacklistRule())}</i>\n\n` +
++        `Video dari channel ini tidak akan diproses lagi.` +
++        (a.pausedMonitors ? `\n⏸ ${a.pausedMonitors} Auto-Monitor untuk channel ini dijeda.` : "") +
++        `\nKelola: <code>/blacklist</code>`,
++      kb
++    ).catch((err) => console.warn("[claim-monitor] notifikasi blacklist gagal:", err instanceof Error ? err.message : err));
++  }
++}
++
++// ─── DATA (untuk Telegram & dashboard) ───────────────────────────────────
++
++export async function getPendingClaims(userId: string | null, limit = 10): Promise<VideoClaimWatchRow[]> {
++  await ensureClaimTables();
++  const cond = and(eq(videoClaimWatch.actionStatus, "pending"), eq(videoClaimWatch.claimState, "claimed"));
++  const where = userId ? and(cond, eq(videoClaimWatch.telegramUserId, userId)) : cond;
++  return db.select().from(videoClaimWatch).where(where).orderBy(desc(videoClaimWatch.firstClaimAt)).limit(limit);
++}
++
++export async function getClaimHistory(userId: string | null, limit = 5): Promise<VideoClaimWatchRow[]> {
++  await ensureClaimTables();
++  const decided = and(isNotNull(videoClaimWatch.decidedAt), ne(videoClaimWatch.actionStatus, "pending"));
++  const where = userId ? and(decided, eq(videoClaimWatch.telegramUserId, userId)) : decided;
++  return db.select().from(videoClaimWatch).where(where).orderBy(desc(videoClaimWatch.decidedAt)).limit(limit);
++}
++
++export async function getClaimCounts(userId: string | null): Promise<{
++  tracked: number;
++  checked: number;
++  claimed: number;
++  pending: number;
++  ignored: number;
++  privated: number;
++  deleted: number;
++  lastCheckedAt: Date | null;
++}> {
++  await ensureClaimTables();
++  const rows = userId
++    ? await db.select().from(videoClaimWatch).where(eq(videoClaimWatch.telegramUserId, userId))
++    : await db.select().from(videoClaimWatch);
++  const everClaimed = rows.filter((r) => !!r.firstClaimAt);
++  const last = rows.reduce<Date | null>((acc, r) => (r.lastCheckedAt && (!acc || r.lastCheckedAt > acc) ? r.lastCheckedAt : acc), null);
++  return {
++    tracked: rows.length,
++    checked: rows.filter((r) => !!r.lastCheckedAt).length,
++    claimed: rows.filter((r) => r.claimState === "claimed").length,
++    pending: rows.filter((r) => r.actionStatus === "pending" && r.claimState === "claimed").length,
++    ignored: everClaimed.filter((r) => r.actionStatus === "ignored").length,
++    privated: everClaimed.filter((r) => r.actionStatus === "private" || r.actionStatus === "unlisted").length,
++    deleted: everClaimed.filter((r) => r.actionStatus === "deleted").length,
++    lastCheckedAt: last,
++  };
++}
++
++export async function getOwnedClaim(userId: string, id: number): Promise<VideoClaimWatchRow | null> {
++  await ensureClaimTables();
++  const rows = await db.select().from(videoClaimWatch).where(eq(videoClaimWatch.id, id));
++  const row = rows[0];
++  return row && row.telegramUserId === userId ? row : null;
++}
++
++// ─── KEPUTUSAN USER (dipanggil dari tombol Telegram) ─────────────────────
++
++async function setAction(id: number, action: string, error: string | null = null): Promise<VideoClaimWatchRow> {
++  const [row] = await db
++    .update(videoClaimWatch)
++    .set({
++      actionStatus: action,
++      lastError: error,
++      decidedAt: action === "pending" ? null : new Date(),
++      ...(action === "deleted" ? { claimState: "missing" } : {}),
++      updatedAt: new Date(),
++    })
++    .where(eq(videoClaimWatch.id, id))
++    .returning();
++  return row;
++}
++
++async function recordError(id: number, message: string): Promise<VideoClaimWatchRow> {
++  const [row] = await db
++    .update(videoClaimWatch)
++    .set({ lastError: message.slice(0, 300), updatedAt: new Date() })
++    .where(eq(videoClaimWatch.id, id))
++    .returning();
++  return row;
++}
++
++function friendlyError(message: string, kind: string): string {
++  if (kind === "permission") {
++    return `Izin YouTube belum cukup untuk mengubah video. Kirim /connect sekali lagi lalu coba tombolnya lagi. (${message.slice(0, 120)})`;
++  }
++  if (kind === "quota") return "Kuota YouTube API hari ini habis. Coba lagi besok.";
++  return message.slice(0, 200);
++}
++
++function hasClaimScope(scope: string | null | undefined): boolean | null {
++  if (!scope || !scope.trim()) return null; // tidak diketahui → coba saja
++  const granted = scope.split(/[\s,]+/);
++  return CLAIM_REQUIRED_SCOPES.some((s) => granted.includes(s));
++}
++
++/**
++ * Jalankan keputusan user atas satu alert.
++ *  - ignore  → tandai diabaikan (tidak dialert lagi sampai klaim lepas lalu muncul lagi)
++ *  - private → ubah privasi video (CLAIM_MONITOR_HIDE_TO, default private)
++ *  - delete  → hapus video dari YouTube (videos.delete)
++ * Kalau gagal (mis. izin kurang), alert tetap "pending" supaya bisa dicoba lagi.
++ */
++export async function applyClaimDecision(userId: string, id: number, decision: ClaimDecision): Promise<ClaimDecisionResult> {
++  const row = await getOwnedClaim(userId, id);
++  if (!row) return { ok: false, message: "Alert tidak ditemukan." };
++  if (row.actionStatus !== "pending") {
++    return { ok: false, status: row.actionStatus, row, message: `Alert ini sudah diputuskan (${row.actionStatus}).` };
++  }
++
++  if (decision === "ignore") {
++    const updated = await setAction(id, "ignored");
++    return { ok: true, status: "ignored", row: updated, message: CLAIM_TEXT.ignored };
++  }
++
++  if (!getClaimActions().includes(decision)) {
++    return { ok: false, row, message: `Aksi "${decision}" dimatikan lewat CLAIM_MONITOR_ACTIONS.` };
++  }
++
++  let client: Awaited<ReturnType<typeof getYoutubeClient>>;
++  try {
++    client = await getYoutubeClient(userId);
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    return { ok: false, row: await recordError(id, msg), message: friendlyError(msg, "youtube") };
++  }
++  if (!("youtube" in client)) {
++    const updated = await recordError(id, client.error);
++    return { ok: false, row: updated, message: friendlyError(client.error, client.kind) };
++  }
++  if (hasClaimScope(client.scope) === false) {
++    const msg = "Izin YouTube belum cukup untuk mengubah video (butuh youtube.force-ssl). Kirim /connect sekali lagi.";
++    const updated = await recordError(id, msg);
++    return { ok: false, row: updated, message: msg };
++  }
++  const { youtube } = client;
++
++  try {
++    if (decision === "delete") {
++      try {
++        await youtube.videos.delete({ id: row.youtubeVideoId });
++      } catch (err) {
++        const status = Number((err as { code?: number | string })?.code ?? (err as { response?: { status?: number } })?.response?.status);
++        if (status !== 404) throw err; // 404 = sudah tidak ada → anggap berhasil
++      }
++      const updated = await setAction(id, "deleted");
++      return { ok: true, status: "deleted", row: updated, message: CLAIM_TEXT.deleted };
++    }
++
++    // private/unlisted: videos.update part=status — field status lain dipertahankan supaya tidak ter-reset
++    const current = await youtube.videos.list({ part: ["status"], id: [row.youtubeVideoId] });
++    const status = current.data.items?.[0]?.status;
++    if (!status) {
++      const updated = await setAction(id, "deleted", "Video tidak ditemukan di YouTube (mungkin sudah dihapus)");
++      return { ok: true, status: "deleted", row: updated, message: "ℹ️ Video sudah tidak ada di YouTube." };
++    }
++    const hideTo = getClaimHideTo();
++    if (status.privacyStatus !== hideTo) {
++      const { uploadStatus, failureReason, rejectionReason, madeForKids, publishAt, ...editable } = status;
++      await youtube.videos.update({
++        part: ["status"],
++        requestBody: { id: row.youtubeVideoId, status: { ...editable, privacyStatus: hideTo } },
++      });
++    }
++    const updated = await setAction(id, hideTo);
++    await db.update(videoClaimWatch).set({ privacyStatus: hideTo }).where(eq(videoClaimWatch.id, id));
++    return { ok: true, status: hideTo, row: { ...updated, privacyStatus: hideTo }, message: hideTo === "private" ? CLAIM_TEXT.privated : CLAIM_TEXT.unlisted };
++  } catch (err) {
++    const c = classifyError(err);
++    const updated = await recordError(id, c.message);
++    return { ok: false, row: updated, message: friendlyError(c.message, c.kind) };
++  }
++}
++
++// ─── INTI: DISCOVER → CHECK → ALERT → BLACKLIST ──────────────────────────
++
++const globalForClaims = globalThis as typeof globalThis & { __claimMonitorRunning?: boolean };
++
++export interface RunClaimOptions {
++  /** Batasi ke satu user. */
++  userId?: string;
++  /** Abaikan jeda pengecekan (cek semua video sekarang). */
++  force?: boolean;
++  /** false = jangan kirim alert Telegram (default: ikut CLAIM_MONITOR_NOTIFY). */
++  notify?: boolean;
++  /** true = kirim ulang semua alert yang masih menunggu. */
++  resend?: boolean;
++}
++
++export async function runClaimMonitor(opts: RunClaimOptions = {}): Promise<ClaimRunSummary> {
++  const summary: ClaimRunSummary = {
++    enabled: isClaimMonitorEnabled(),
++    discovered: 0,
++    users: 0,
++    checked: 0,
++    newClaims: 0,
++    cleared: 0,
++    missing: 0,
++    alerted: 0,
++    blacklisted: 0,
++    errors: [],
++  };
++  if (!summary.enabled) return summary;
++  if (globalForClaims.__claimMonitorRunning) {
++    summary.errors.push("Siklus sebelumnya masih berjalan");
++    return summary;
++  }
++  globalForClaims.__claimMonitorRunning = true;
++
++  try {
++    await ensureClaimTables();
++    summary.discovered = await discoverClaimWatch(opts.userId);
++
++    const cutoff = new Date(Date.now() - getClaimTrackDays() * DAY);
++    const conditions = [gte(videoClaimWatch.uploadedAt, cutoff), ne(videoClaimWatch.claimState, "missing")];
++    if (opts.userId) conditions.push(eq(videoClaimWatch.telegramUserId, opts.userId));
++    const rows = await db.select().from(videoClaimWatch).where(and(...conditions));
++
++    const now = Date.now();
++    const byUser = new Map<string, VideoClaimWatchRow[]>();
++    for (const r of rows) {
++      if (!isDue(r, now, !!opts.force)) continue;
++      const list = byUser.get(r.telegramUserId) || [];
++      list.push(r);
++      byUser.set(r.telegramUserId, list);
++    }
++    // user yang punya alert menunggu juga diproses (untuk pengingat), walau tak ada video due
++    if (opts.resend || getClaimReminderHours() > 0) {
++      for (const r of await getPendingClaims(opts.userId ?? null, 500)) if (!byUser.has(r.telegramUserId)) byUser.set(r.telegramUserId, []);
++    }
++    summary.users = byUser.size;
++
++    for (const [userId, due] of byUser) {
++      try {
++        if (due.length) {
++          const r = await checkUserVideos(userId, due);
++          summary.checked += r.checked;
++          summary.newClaims += r.newClaims;
++          summary.cleared += r.cleared;
++          summary.missing += r.missing;
++          for (const e of r.errors) summary.errors.push(`user ${userId}: ${e}`);
++        }
++
++        // Rasio klaim → auto-blacklist
++        const added = await evaluateAutoBlacklist(userId);
++        summary.blacklisted += added.length;
++
++        // Alert klaim (baru, atau pengingat)
++        const notify = opts.notify ?? isClaimNotifyEnabled();
++        if (notify) {
++          const pending = await getPendingClaims(userId, 500);
++          const reminderMs = getClaimReminderHours() * HOUR;
++          const dueAlerts = pending.filter((p) => {
++            if (opts.resend) return true;
++            if (!p.lastNotifiedAt) return true;
++            return reminderMs > 0 && Date.now() - p.lastNotifiedAt.getTime() >= reminderMs;
++          });
++          const batch = dueAlerts.slice(0, getClaimMaxAlertsPerCycle());
++          if (batch.length) {
++            try {
++              summary.alerted += await sendClaimAlerts(userId, batch, dueAlerts.length);
++            } catch (err) {
++              summary.errors.push(`Telegram: ${err instanceof Error ? err.message : String(err)}`);
++            }
++          }
++        }
++        if (added.length && isBlacklistNotifyEnabled() && (opts.notify ?? isClaimNotifyEnabled())) {
++          await sendBlacklistNotice(userId, added);
++        }
++      } catch (err) {
++        summary.errors.push(`user ${userId}: ${err instanceof Error ? err.message : String(err)}`);
++      }
++    }
++  } catch (err) {
++    summary.errors.push(err instanceof Error ? err.message : String(err));
++  } finally {
++    globalForClaims.__claimMonitorRunning = false;
++  }
++  return summary;
++}
+diff --git a/src/lib/source-blacklist.ts b/src/lib/source-blacklist.ts
+new file mode 100644
+index 0000000..6240b12
+--- /dev/null
++++ b/src/lib/source-blacklist.ts
+@@ -0,0 +1,254 @@
++/**
++ * ⛔ SOURCE CHANNEL BLACKLIST (FITUR BARU! bagian dari Post-Upload Claim Monitor)
++ * =====================================================================
++ * Penyimpanan + pencocokan blacklist source channel. Dipakai oleh:
++ *   - Claim Monitor (src/lib/claim-monitor.ts)  → auto-blacklist dari rasio klaim
++ *   - Source Guard  (src/lib/source-guard.ts)   → tolak/peringatkan job dari channel blacklist
++ *   - Auto-Monitor  (src/lib/channel-monitor-worker.ts) → lewati monitor channel blacklist
++ *   - Perintah /blacklist (src/lib/claim-monitor-telegram.ts)
++ *
++ * Sumber blacklist:
++ *   1. Tabel `source_blacklist` (per user Telegram) — auto atau manual (/blacklist add)
++ *   2. Env CLAIM_BLACKLIST_CHANNELS (global, semua user)
++ *
++ * Pencocokan memakai "token" channel yang sama seperti whitelist Source Guard
++ * (ID UCxxx / @handle / nama / URL → huruf kecil, tanpa @) — lihat
++ * normalizeChannelToken di source-guard.ts. File ini sengaja TIDAK diimpor
++ * statis oleh source-guard.ts (dipakai lewat dynamic import) agar tidak circular.
++ */
++
++import { and, eq, ne, sql } from "drizzle-orm";
++import { db } from "@/db";
++import { sourceBlacklist, type SourceBlacklistRow } from "@/db/schema";
++import { getEnvBlacklist } from "@/lib/claim-monitor-config";
++import { normalizeChannelToken } from "@/lib/source-guard";
++
++// ─── TABEL (dibuat otomatis) ─────────────────────────────────────────────
++
++let tableReady: Promise<void> | null = null;
++
++export function ensureBlacklistTable(): Promise<void> {
++  if (!tableReady) {
++    tableReady = (async () => {
++      await db.execute(sql`
++        CREATE TABLE IF NOT EXISTS source_blacklist (
++          id serial PRIMARY KEY,
++          telegram_user_id text NOT NULL,
++          channel_key text NOT NULL,
++          channel_name text,
++          tokens text NOT NULL DEFAULT '[]',
++          origin text NOT NULL DEFAULT 'manual',
++          reason text,
++          claims integer NOT NULL DEFAULT 0,
++          clips integer NOT NULL DEFAULT 0,
++          ratio_percent integer NOT NULL DEFAULT 0,
++          created_at timestamp NOT NULL DEFAULT now()
++        )
++      `);
++      await db.execute(sql`
++        CREATE UNIQUE INDEX IF NOT EXISTS source_blacklist_user_key_idx ON source_blacklist (telegram_user_id, channel_key)
++      `);
++    })().catch((err) => {
++      tableReady = null;
++      throw err;
++    });
++  }
++  return tableReady;
++}
++
++// ─── TOKEN ───────────────────────────────────────────────────────────────
++
++/** Gabungkan beberapa identitas channel (id/nama/handle/URL) jadi daftar token unik. */
++export function buildChannelTokens(values: Array<string | null | undefined>): string[] {
++  const out = new Set<string>();
++  for (const v of values) {
++    if (!v) continue;
++    const t = normalizeChannelToken(v);
++    if (t) out.add(t);
++  }
++  return Array.from(out);
++}
++
++export function parseTokens(raw: string | null | undefined): string[] {
++  if (!raw) return [];
++  try {
++    const parsed = JSON.parse(raw);
++    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string" && !!t) : [];
++  } catch {
++    return [];
++  }
++}
++
++// ─── CRUD ────────────────────────────────────────────────────────────────
++
++/** Blacklist AKTIF milik user (entri "released" = auto-blacklist yang sudah dilepas user, tidak ikut). */
++export async function listBlacklist(userId: string): Promise<SourceBlacklistRow[]> {
++  await ensureBlacklistTable();
++  return db
++    .select()
++    .from(sourceBlacklist)
++    .where(and(eq(sourceBlacklist.telegramUserId, userId), ne(sourceBlacklist.origin, "released")))
++    .orderBy(sourceBlacklist.id);
++}
++
++/**
++ * Entri auto-blacklist yang sudah DILEPAS user (tombol "Keluarkan" / /blacklist remove).
++ * Disimpan sebagai penanda supaya channel tidak langsung di-blacklist lagi oleh rasio lama —
++ * baru dipertimbangkan lagi kalau ada klaim BARU setelah dilepas.
++ */
++export async function findReleasedEntry(userId: string, tokens: string[]): Promise<SourceBlacklistRow | null> {
++  await ensureBlacklistTable();
++  const rows = await db
++    .select()
++    .from(sourceBlacklist)
++    .where(and(eq(sourceBlacklist.telegramUserId, userId), eq(sourceBlacklist.origin, "released")));
++  return rows.find((r) => parseTokens(r.tokens).some((t) => tokens.includes(t)) || tokens.includes(r.channelKey)) ?? null;
++}
++
++/** Cepat: apakah ada isi blacklist sama sekali (env atau milik user)? Dipakai Source Guard agar hemat. */
++export async function hasAnyBlacklist(userId: string): Promise<boolean> {
++  if (getEnvBlacklist().length > 0) return true;
++  return (await listBlacklist(userId)).length > 0;
++}
++
++export async function getBlacklistEntry(userId: string, id: number): Promise<SourceBlacklistRow | null> {
++  await ensureBlacklistTable();
++  const rows = await db
++    .select()
++    .from(sourceBlacklist)
++    .where(and(eq(sourceBlacklist.id, id), eq(sourceBlacklist.telegramUserId, userId)));
++  return rows[0] ?? null;
++}
++
++export interface AddBlacklistInput {
++  /** Identitas channel (id/nama/handle/URL) — semua dijadikan token pembanding. */
++  identities: Array<string | null | undefined>;
++  /** Nama tampilan. */
++  label?: string | null;
++  origin: "auto" | "manual";
++  reason?: string | null;
++  claims?: number;
++  clips?: number;
++  ratioPercent?: number;
++}
++
++/** Tambah ke blacklist user. Idempotent: kalau channel (token mana pun) sudah ada → added=false. */
++export async function addBlacklistEntry(
++  userId: string,
++  input: AddBlacklistInput
++): Promise<{ added: boolean; row: SourceBlacklistRow | null; tokens: string[] }> {
++  await ensureBlacklistTable();
++  const tokens = buildChannelTokens(input.identities);
++  if (!tokens.length) return { added: false, row: null, tokens };
++
++  const existing = await listBlacklist(userId);
++  const dup = existing.find((r) => parseTokens(r.tokens).some((t) => tokens.includes(t)) || tokens.includes(r.channelKey));
++  if (dup) return { added: false, row: dup, tokens };
++
++  // Pernah dilepas user → pakai ulang barisnya (kunci unik user+channel)
++  const released = await findReleasedEntry(userId, tokens);
++  if (released) {
++    const [row] = await db
++      .update(sourceBlacklist)
++      .set({
++        origin: input.origin,
++        channelName: input.label?.trim() || released.channelName,
++        tokens: JSON.stringify(Array.from(new Set([...parseTokens(released.tokens), ...tokens]))),
++        reason: input.reason?.slice(0, 300) ?? null,
++        claims: input.claims ?? 0,
++        clips: input.clips ?? 0,
++        ratioPercent: input.ratioPercent ?? 0,
++        createdAt: new Date(),
++      })
++      .where(eq(sourceBlacklist.id, released.id))
++      .returning();
++    return { added: !!row, row: row ?? null, tokens };
++  }
++
++  const [row] = await db
++    .insert(sourceBlacklist)
++    .values({
++      telegramUserId: userId,
++      channelKey: tokens[0],
++      channelName: input.label?.trim() || null,
++      tokens: JSON.stringify(tokens),
++      origin: input.origin,
++      reason: input.reason?.slice(0, 300) ?? null,
++      claims: input.claims ?? 0,
++      clips: input.clips ?? 0,
++      ratioPercent: input.ratioPercent ?? 0,
++    })
++    .onConflictDoNothing()
++    .returning();
++  return { added: !!row, row: row ?? null, tokens };
++}
++
++/** Hapus dari blacklist user — target = nomor urut (dari /blacklist) atau channel (id/nama/handle/URL). */
++export async function removeBlacklistEntry(userId: string, target: string): Promise<SourceBlacklistRow | null> {
++  const rows = await listBlacklist(userId);
++  const trimmed = target.trim();
++  let hit: SourceBlacklistRow | undefined;
++  if (/^\d+$/.test(trimmed)) {
++    hit = rows[parseInt(trimmed, 10) - 1];
++  } else {
++    const token = normalizeChannelToken(trimmed);
++    hit = rows.find((r) => r.channelKey === token || parseTokens(r.tokens).includes(token));
++  }
++  if (!hit) return null;
++  await releaseOrDelete(hit);
++  return hit;
++}
++
++/** Entri auto → ditandai "released" (agar tidak langsung di-blacklist ulang); entri manual → dihapus. */
++async function releaseOrDelete(row: SourceBlacklistRow): Promise<void> {
++  if (row.origin === "auto") {
++    await db.update(sourceBlacklist).set({ origin: "released" }).where(eq(sourceBlacklist.id, row.id));
++  } else {
++    await db.delete(sourceBlacklist).where(eq(sourceBlacklist.id, row.id));
++  }
++}
++
++export async function removeBlacklistById(userId: string, id: number): Promise<SourceBlacklistRow | null> {
++  const row = await getBlacklistEntry(userId, id);
++  if (!row || row.origin === "released") return null;
++  await releaseOrDelete(row);
++  return row;
++}
++
++// ─── PENCOCOKAN ──────────────────────────────────────────────────────────
++
++export interface BlacklistMatch {
++  scope: "env" | "user";
++  label: string;
++  origin?: string;
++  claims?: number;
++  clips?: number;
++  ratioPercent?: number;
++}
++
++/** Cocokkan token channel dengan blacklist (env global + milik user). null = tidak di-blacklist. */
++export async function findBlacklistMatch(userId: string, tokens: string[]): Promise<BlacklistMatch | null> {
++  const wanted = new Set(tokens.filter(Boolean));
++  if (!wanted.size) return null;
++
++  for (const raw of getEnvBlacklist()) {
++    const t = normalizeChannelToken(raw);
++    if (t && wanted.has(t)) return { scope: "env", label: raw };
++  }
++
++  const rows = await listBlacklist(userId);
++  for (const r of rows) {
++    const own = new Set([r.channelKey, ...parseTokens(r.tokens)]);
++    if (Array.from(own).some((t) => wanted.has(t))) {
++      return {
++        scope: "user",
++        label: r.channelName || r.channelKey,
++        origin: r.origin,
++        claims: r.claims,
++        clips: r.clips,
++        ratioPercent: r.ratioPercent,
++      };
++    }
++  }
++  return null;
++}
+diff --git a/src/lib/source-guard.ts b/src/lib/source-guard.ts
+index 5ba7146..6bd37d3 100644
+--- a/src/lib/source-guard.ts
++++ b/src/lib/source-guard.ts
+@@ -29,6 +29,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
+ import { db } from "@/db";
+ import { clipJobs, sourceGuardLog, sourceWhitelist, youtubeTokens, type SourceGuardLogRow } from "@/db/schema";
+ import { normalizeSourceUrl } from "@/lib/duplicate-filter";
++import { getBlacklistEnforce } from "@/lib/claim-monitor-config"; // 🚨 Claim Monitor: blacklist channel (BARU!)
+ import {
+   getContentIdKeywords,
+   getCopyrightGuardMode,
+@@ -51,7 +52,7 @@ import {
+ const execFileAsync = promisify(execFile);
+ 
+ // ─── TIPE ────────────────────────────────────────────────────────────────
+-export type GuardViolationCode = "not_whitelisted" | "unverified" | "content_id" | "daily_limit";
++export type GuardViolationCode = "not_whitelisted" | "unverified" | "content_id" | "daily_limit" | "blacklisted";
+ 
+ export interface GuardViolation {
+   code: GuardViolationCode;
+@@ -395,8 +396,15 @@ export async function runSourceGuard(job: GuardJobInput): Promise<GuardOutcome>
+     quota: { limit, used: 0, remaining: null },
+   };
+ 
++  // 🚨 Claim Monitor (BARU!) — blacklist source channel berlaku di semua mode guard (kecuali
++  // CLAIM_BLACKLIST_ENFORCE=off) dan hanya dicek kalau memang ada isi blacklist-nya.
++  const blacklistEnforce = getBlacklistEnforce();
++  const blacklistWanted =
++    blacklistEnforce !== "off" &&
++    (await import("@/lib/source-blacklist").then((m) => m.hasAnyBlacklist(job.telegramUserId)).catch(() => false));
++
+   // Tidak ada yang perlu dicek maupun dikredit.
+-  if (!active && !isSourceCreditEnabled()) return empty;
++  if (!active && !isSourceCreditEnabled() && !blacklistWanted) return empty;
+ 
+   try {
+     await ensureSourceGuardTables();
+@@ -471,7 +479,29 @@ export async function runSourceGuard(job: GuardJobInput): Promise<GuardOutcome>
+     }
+   }
+ 
+-  const blocked = mode === "block" && active && violations.length > 0;
++  // 🚨 Claim Monitor (BARU!) — channel di blacklist (auto/manual/env): ditolak (enforce=block) atau diperingatkan (warn).
++  let blacklistBlocks = false;
++  if (blacklistWanted && meta) {
++    try {
++      const { findBlacklistMatch } = await import("@/lib/source-blacklist");
++      const hit = await findBlacklistMatch(job.telegramUserId, Array.from(metaTokens(meta)));
++      if (hit) {
++        violations.push({
++          code: "blacklisted",
++          message:
++            `Channel “${describeChannel(meta)}” ada di blacklist` +
++            (hit.origin === "auto" ? ` (auto: rasio klaim ${hit.ratioPercent}%)` : "") +
++            `. Keluarkan lewat /blacklist remove kalau ini salah.`,
++        });
++        blacklistBlocks = blacklistEnforce === "block";
++      }
++    } catch (err) {
++      console.warn("[source-guard] Cek blacklist gagal (dilewati):", err instanceof Error ? err.message : err);
++    }
++  }
++
++  const blocked =
++    (mode === "block" && active && violations.some((v) => v.code !== "blacklisted")) || blacklistBlocks;
+   const enforceQuota = mode === "block" && active && limit > 0;
+   const outcome: GuardOutcome = {
+     active,
+diff --git a/src/lib/telegram-bot.ts b/src/lib/telegram-bot.ts
+index f2f8767..5d18cc1 100644
+--- a/src/lib/telegram-bot.ts
++++ b/src/lib/telegram-bot.ts
+@@ -49,6 +49,7 @@ import { registerAnalyticsCommands } from "@/lib/analytics-telegram";
+ import { registerAutoPruneCommands } from "@/lib/auto-prune-telegram"; // ✂️ Auto-Prune Klip Gagal (BARU!)
+ // 🛡️ Source Credit & Copyright Guard (BARU!) — import terpisah, tidak mengubah import di atas.
+ import { registerSourceGuardCommands, SOURCE_GUARD_HELP } from "@/lib/source-guard-telegram";
++import { registerClaimMonitorCommands, CLAIM_MONITOR_HELP } from "@/lib/claim-monitor-telegram"; // 🚨 Post-Upload Claim Monitor (BARU!)
+ import { NICHE_PRESETS, getNichePromptLabel, getDefaultNichePrompt } from "@/lib/niche-prompt";
+ import {
+   getDuplicateFilterConfig,
+@@ -134,7 +135,7 @@ bot.command("start", async (ctx) => {
+ });
+ 
+ bot.command("help", async (ctx) => {
+-  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP + SOURCE_GUARD_HELP, { parse_mode: "Markdown" });
++  await ctx.reply(messages.help + DRIVE_HELP + MONITOR_HELP + AUTOCOMMENT_HELP + SOURCE_GUARD_HELP + CLAIM_MONITOR_HELP, { parse_mode: "Markdown" });
+ });
+ 
+ bot.command("connect", async (ctx) => {
+@@ -408,6 +409,7 @@ bot.callbackQuery("niche_menu", async (ctx) => {
+ registerAnalyticsCommands(bot);
+ registerAutoPruneCommands(bot); // ✂️ /prune + tombol Sembunyikan/Hapus/Pertahankan (BARU!)
+ registerSourceGuardCommands(bot); // 🛡️ /sourceguard & /whitelist (BARU!)
++registerClaimMonitorCommands(bot); // 🚨 /claims & /blacklist + tombol Hapus/Private/Abaikan (BARU!)
+ registerAdminCommands(bot); // 🛠️ /admin & /broadcast — khusus ADMIN_TELEGRAM_IDS (BARU!)
+ 
+ // 🧹 Duplicate/Repetitive Clip Filter (BARU!) — info read-only, konfigurasi
+diff --git a/src/lib/youtube-oauth.ts b/src/lib/youtube-oauth.ts
+index 42a1fa3..0a454c5 100644
+--- a/src/lib/youtube-oauth.ts
++++ b/src/lib/youtube-oauth.ts
+@@ -3,6 +3,7 @@ import { shouldRequestReadonlyScope } from "@/lib/analytics-config";
+ import { RETITLE_SCOPE, shouldRequestRetitleScope } from "@/lib/auto-title-doctor-config";
+ import { PRUNE_SCOPE, shouldRequestPruneScope } from "@/lib/auto-prune-config";
+ import { AUTO_COMMENT_SCOPE, shouldRequestCommentScope } from "@/lib/auto-comment-config";
++import { CLAIM_SCOPE, shouldRequestClaimScope } from "@/lib/claim-monitor-config"; // 🚨 Claim Monitor (BARU!)
+ 
+ function getOAuthClient() {
+   return new google.auth.OAuth2(
+@@ -31,6 +32,9 @@ export function getAuthUrl(userId: string): string {
+         // 💬 Auto-First Comment (BARU!) — izin posting komentar (commentThreads.insert,
+         // scope youtube.force-ssl). Hanya diminta kalau YOUTUBE_AUTO_COMMENT_ENABLED=true.
+         ...(shouldRequestCommentScope() ? [AUTO_COMMENT_SCOPE] : []),
++        // 🚨 Post-Upload Claim Monitor (BARU!) — izin baca status klaim (videos.list) + tombol Hapus/Private
++        // (videos.update/delete, scope youtube.force-ssl). Matikan: CLAIM_MONITOR_ENABLED=false / CLAIM_MONITOR_REQUEST_SCOPE=false
++        ...(shouldRequestClaimScope() ? [CLAIM_SCOPE] : []),
+       ])
+     ),
+     state: userId,

@@ -4,6 +4,13 @@ import { getMaxClipsConfig } from "@/lib/video-config";
 import { buildNicheInstruction } from "@/lib/niche-prompt";
 import { getHookConfig, sanitizeHookText, buildFallbackHook } from "@/lib/hook-config"; // 🪝 AI Hook Overlay (BARU!)
 import { checkAiBudget, recordAiUsage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+// 🎞️ Format Transformatif (BARU!) — komentar AI dibuat dalam prompt yang sama (tanpa panggilan AI tambahan).
+import {
+  getTransformConfig,
+  buildCommentaryPromptInstruction,
+  buildCommentaryJsonField,
+  resolveCommentary,
+} from "@/lib/transform-config";
 // 💬 Auto-First Comment (BARU!) — komentar pancingan dibuat AI dalam prompt yang sama.
 import {
   isAutoCommentEnabled,
@@ -75,6 +82,12 @@ export async function analyzeVideoForClips(
     : "";
   const commentJsonField = commentOn ? `,\n    "firstComment": "<komentar pancingan, max ${commentMax} karakter>"` : "";
 
+  // 🎞️ Format Transformatif (BARU!) — instruksi komentar AI. Kosong kalau TRANSFORM_ENABLED
+  // bukan true / mode commentary tidak dipilih, sehingga prompt persis seperti sebelumnya.
+  const transformCfg = getTransformConfig();
+  const transformInstruction = buildCommentaryPromptInstruction(transformCfg);
+  const transformJsonField = buildCommentaryJsonField(transformCfg);
+
   const prompt = `Kamu adalah ahli konten viral YouTube Shorts. Analisis transkrip video berikut dan temukan ${maxClips} momen terbaik yang berpotensi viral.
 
 INFORMASI VIDEO:
@@ -101,7 +114,7 @@ INSTRUKSI:
 - Buat judul YouTube Shorts yang menarik (max 70 karakter)
 - Buat deskripsi singkat (max 150 karakter)
 - Berikan tags relevan (5-10 tags)
-${hookInstruction}${commentInstruction}
+${hookInstruction}${commentInstruction}${transformInstruction}
 Output JSON array (tanpa markdown):
 [
   {
@@ -113,7 +126,7 @@ Output JSON array (tanpa markdown):
     "description": "<deskripsi singkat>",
     "tags": ["tag1", "tag2"],
     "viralScore": <1-10>,
-    "reason": "<alasan mengapa viral>"${hookJsonField}${commentJsonField}
+    "reason": "<alasan mengapa viral>"${hookJsonField}${commentJsonField}${transformJsonField}
   }
 ]`;
 
@@ -376,6 +389,8 @@ function validateAndFixClips(
         reason: clip.reason || "AI-selected moment",
         // 🪝 AI Hook Overlay (BARU!)
         hook: resolveHook(clip.hook, clip.title, i),
+        // 🎞️ Format Transformatif (BARU!) — komentar AI (undefined kalau fitur mati)
+        commentary: resolveCommentary((clip as { commentary?: unknown }).commentary, clip.reason),
         // 💬 Auto-First Comment (BARU!)
         firstComment: resolveFirstComment(clip.firstComment),
       };

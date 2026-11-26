@@ -92,7 +92,7 @@ function buildPiecewiseExpr(keyframes: Keyframe[], key: "x" | "y"): string {
     const b = keyframes[i + 1];
     const dt = Math.max(0.001, b.t - a.t);
     const interp = `(${a[key].toFixed(2)}+(${(b[key] - a[key]).toFixed(2)})*(t-${a.t.toFixed(3)})/${dt.toFixed(3)})`;
-    expr = `if(lt(t\\,${b.t.toFixed(3)})\\,${interp}\\,${expr})`;
+    expr = `if(lt(t,${b.t.toFixed(3)}),${interp},${expr})`;
   }
   return expr;
 }

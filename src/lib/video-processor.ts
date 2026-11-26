@@ -28,6 +28,8 @@ import type { ClipResult } from "@/db/schema";
 import { getAutoReframeConfig } from "@/lib/reframe-config";
 import { buildReframeFilter } from "@/lib/auto-reframe";
 import { applyHookOverlay } from "@/lib/hook-overlay"; // 🪝 AI Hook Overlay (BARU!)
+// 🎞️ Format Transformatif (BARU!) — split-screen / komentar AI / frame. Lihat src/lib/transform-config.ts
+import { applySplitScreen, applyTransformOverlays } from "@/lib/transform-format";
 import { checkAiBudget, recordAiUsage, getAudioSeconds } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
 import { getGroqWhisperModel } from "@/lib/ai-provider";
 
@@ -63,19 +65,19 @@ export async function downloadVideo(
   const cmd = [
       "yt-dlp",
       "--no-playlist",
-      "--no-warnings",
-      "--no-progress",
       "--merge-output-format", "mp4",
       "-f", '"bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"',
       "--cookies", "cookies.txt",
       "--extractor-args", '"youtube:player_client=web_safari,web_embedded,-tv_downgraded"',
+      "--progress",
+      "--newline",
       "-o", `"${outputTemplate}"`,
       `"${url}"`,
     ].join(" ");
 
   console.log(`[download] Starting: ${url}`);
 
-  await execAsync(cmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 });
+  await execAsync(cmd, { timeout: 600000 });
 
   if (onProgress) await onProgress(50);
 
@@ -88,7 +90,7 @@ export async function downloadVideo(
   let title = "Video";
   let duration = 0;
   try {
-    const { stdout } = await execAsync(infoCmd, { timeout: 30000, maxBuffer: 50 * 1024 * 1024 });
+    const { stdout } = await execAsync(infoCmd, { timeout: 30000 });
     const info = JSON.parse(stdout.trim().split("\n")[0]);
     title = info.title || "Video";
     duration = info.duration || 0;
@@ -314,7 +316,19 @@ async function processSingleClip(
   } else {
     console.log(`[clip] ⏭ Step 2/4 Zoom skipped: ${zoomResult.reason}`);
   }
-  const afterZoomRaw = zoomResult.applied ? zoomPath : cutPath;
+  const afterZoomBase = zoomResult.applied ? zoomPath : cutPath;
+
+  // Step 2a: 🎞️ Format Transformatif — Split-Screen (BARU!) — klip + visual loop. Sebelum
+  // subtitle/hook/watermark supaya semuanya ter-render di kanvas final. Mati/gagal → klip apa adanya.
+  const splitPath = path.join(TMP_DIR, `clip_split_${jobId}_${clipIndex}.mp4`);
+  const splitResult = await applySplitScreen(afterZoomBase, splitPath, clipIndex);
+  if (splitResult.applied) {
+    console.log(`[clip] ✅ Split-screen (${splitResult.parts?.join(", ")}): klip ${clipIndex}`);
+    try { fs.unlinkSync(afterZoomBase); } catch { /* ignore */ }
+  } else if (splitResult.reason !== "split-screen tidak aktif") {
+    console.log(`[clip] ⏭ Split-screen skipped (${splitResult.reason})`);
+  }
+  const afterZoomRaw = splitResult.applied ? splitPath : afterZoomBase;
 
   // Step 2b: 💬 Subtitle / Caption Burn-In (BARU!) — setelah zoom (caption tidak ikut
   // ter-zoom) & sebelum watermark/intro-outro. Gagal/dimatikan → klip lanjut apa adanya.
@@ -343,7 +357,19 @@ async function processSingleClip(
   } else {
     console.log(`[clip] ⏭ Hook overlay skipped (${hookResult.reason})`);
   }
-  const afterZoom = hookResult.applied ? hookPath : afterSub;
+  const afterHook = hookResult.applied ? hookPath : afterSub;
+
+  // Step 2d: 🎞️ Format Transformatif — Frame/Label + Kartu Komentar AI (BARU!) — setelah
+  // hook, sebelum watermark & intro/outro. Mati/gagal → klip lanjut apa adanya.
+  const tfPath = path.join(TMP_DIR, `clip_tf_${jobId}_${clipIndex}.mp4`);
+  const tfResult = await applyTransformOverlays(afterHook, tfPath, clip.commentary);
+  if (tfResult.applied) {
+    console.log(`[clip] ✅ Format transformatif (${tfResult.parts?.join(", ")}): klip ${clipIndex}`);
+    try { fs.unlinkSync(afterHook); } catch { /* ignore */ }
+  } else if (tfResult.reason !== "frame/commentary tidak aktif") {
+    console.log(`[clip] ⏭ Format transformatif skipped (${tfResult.reason})`);
+  }
+  const afterZoom = tfResult.applied ? tfPath : afterHook;
 
   // Step 3: Watermark
   const wmPath = path.join(TMP_DIR, `clip_wm_${jobId}_${clipIndex}.mp4`);
@@ -466,6 +492,6 @@ async function cutAndConvertClip(
     ].join(" ");
   }
 
-  await execAsync(cmd, { timeout: 300000, maxBuffer: 50 * 1024 * 1024 });
+  await execAsync(cmd, { timeout: 300000 });
   if (!fs.existsSync(outputPath)) throw new Error("Cut clip file tidak terbuat");
 }

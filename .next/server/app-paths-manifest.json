@@ -1,0 +1,16 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/analytics/run/route": "app/api/analytics/run/route.js",
+  "/api/claims/run/route": "app/api/claims/run/route.js",
+  "/api/cost/summary/route": "app/api/cost/summary/route.js",
+  "/api/drive/callback/route": "app/api/drive/callback/route.js",
+  "/api/health/route": "app/api/health/route.js",
+  "/api/monitor/run/route": "app/api/monitor/run/route.js",
+  "/api/scheduler/run/route": "app/api/scheduler/run/route.js",
+  "/api/settings/route": "app/api/settings/route.js",
+  "/api/telegram/webhook/route": "app/api/telegram/webhook/route.js",
+  "/api/webhook/setup/route": "app/api/webhook/setup/route.js",
+  "/api/youtube/callback/route": "app/api/youtube/callback/route.js",
+  "/page": "app/page.js"
+}

@@ -1,0 +1,182 @@
+// Bot message templates in Indonesian
+import { getMaxClipsConfig } from "@/lib/video-config";
+
+export const messages = {
+  welcome: `🤖 *AutoClip Bot* — Video Clipper Otomatis
+
+Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pendek viral untuk YouTube Shorts secara otomatis!
+
+*Cara Penggunaan:*
+1. Kirim link video (YouTube, Facebook, TikTok, Instagram)
+2. Bot akan menganalisis dan memilih momen terbaik
+3. Video akan dipotong sesuai durasi pilihanmu (15/20/30/40/60 detik, default 30s)
+4. Upload langsung ke YouTube sebagai Draft
+5. Langsung set auto-monitor biar gak kirim link manual
+
+*Perintah:*
+/start - Menu utama
+/help - Panduan lengkap
+/connect - Hubungkan YouTube
+/settings - Pengaturan bot
+/status - Cek status
+/history - Riwayat klip
+/clips - Info & cara ubah jumlah klip
+/duration - Info & cara ubah durasi klip (15/20/30/40/60s)
+/watermark - Info watermark config
+/zoom - Info zoom effect config
+/subtitle - Info & preview style subtitle (caption burn-in)
+/hook - Info AI Hook Overlay (teks pembuka)
+/introoutro - Info intro/outro config
+/thumbnail - Info thumbnail config
+/mode - Info aspect ratio
+/niche - Atur Custom Niche Prompt untuk AI Analysis 
+/analytics - Laporan performa klip + AI Smart Learning ✨ Baru!
+/prune - Usulan sembunyikan/hapus klip sepi (Auto-Prune) ✨ Baru!
+/dupfilter - Info Duplicate/Repetitive Clip Filter ✨ Baru!
+/jadwal - Lihat & batalkan antrean jadwal upload ✨ Baru!
+/monitor <link> - Pantau channel/playlist ✨ Baru!
+/monitors - Kelola daftar pantauan ✨ Baru!
+/claims - Info Post-Upload Claim Monitor ✨ Baru!
+
+Kirim link video untuk mulai! 🎬`,
+
+  help: `📚 *Panduan AutoClip Bot*
+
+*Platform yang Didukung:*
+• 📺 YouTube (termasuk video panjang)
+• 📘 Facebook
+• 🎵 TikTok
+• 📸 Instagram Reels/Video
+
+*Proses Otomatis:*
+1. *Download* - Video diunduh dari platform
+2. *Transkripsi* - Audio ditranskripsi ke teks
+3. *Analisis AI* - Momen viral diidentifikasi
+4. *Pemotongan* - Video dipotong sesuai durasi pilihan (15/20/30/40/60 detik)
+5. *Zoom Effect* - Auto zoom pada highlight moment ✨
+6. *Watermark* - Watermark custom ditambahkan ✨
+7. *Intro/Outro* - Ditambahkan jika aktif ✨
+8. *Thumbnail* - Thumbnail auto-generate ✨
+9. *Upload* - Langsung upload ke YouTube Studio
+
+*Format Output 9:16:*
+• 🌀 Mode aktif bisa diubah via \`ASPECT_RATIO_MODE\`
+
+*Perintah Info Konfigurasi:*
+/clips - Info & cara ubah jumlah klip (default: 5)
+/duration - Info & cara ubah durasi klip (15/20/30/40/60s, default: 30s)
+/mode - Info aspect ratio mode
+/thumbnail - Info thumbnail config
+/watermark - Info watermark config
+/zoom - Info zoom effect config
+/subtitle - Info & preview style subtitle (caption burn-in)
+/hook - Info AI Hook Overlay (teks pembuka)
+/introoutro - Info intro/outro config
+/niche - Atur Custom Niche Prompt (fokus AI Analysis) ✨ Baru!
+/analytics - Laporan performa klip + AI Smart Learning ✨ Baru!
+/prune - Usulan sembunyikan/hapus klip sepi (Auto-Prune) ✨ Baru!
+/dupfilter - Info Duplicate/Repetitive Clip Filter (anti klip mirip/berulang) ✨ Baru!
+/jadwal - Lihat antrean jadwal upload otomatis ✨ Baru!
+
+*Ketentuan:*
+• Durasi klip: pilih salah satu dari 15 / 20 / 30 / 40 / 60 detik (lihat /duration)
+• Format output: Vertikal 9:16 (1080x1920)
+• Maksimal klip: lihat /settings (default 5, ubah via \`MAX_CLIPS\`)
+
+Tips: Video dengan dialog, tips, atau momen emosional menghasilkan klip terbaik!`,
+
+  connecting: `🔗 *Menghubungkan YouTube Studio...*
+
+Klik tombol di bawah untuk login ke akun Google/YouTube Anda.
+
+Izin yang diperlukan:
+• Upload video (sebagai Draft)
+• Kelola video YouTube
+
+Setelah login, klip akan otomatis tersimpan sebagai Draft di YouTube Studio.`,
+
+  error: (msg: string) =>
+    `❌ *Terjadi Kesalahan*
+
+${msg}
+
+Coba lagi atau hubungi /help untuk bantuan.`,
+
+  invalidUrl: `❌ *URL Tidak Valid*
+
+Kirim link video yang valid dari:
+• YouTube (youtube.com/watch?v=... atau youtu.be/...)
+• Facebook (facebook.com/watch/...)
+• TikTok (tiktok.com/@.../video/...)
+• Instagram (instagram.com/reel/...)`,
+
+  settings: (s: {
+    maxClips: number;
+    clipDuration: number;
+    minDuration: number;
+    maxDuration: number;
+    defaultPrivacy: string;
+    youtubeConnected: boolean;
+  }) =>
+    `⚙️ *Pengaturan Bot*\n` +
+    `• Maksimal Klip: ${s.maxClips} (ubah dengan tombol di bawah, atau set \`MAX_CLIPS\` di Railway)\n` +
+    `• Durasi Klip: ${s.clipDuration} detik — pilihan: 15/20/30/40/60 (ubah dengan tombol di bawah, atau /duration)\n` +
+    `• Rentang toleransi AI: ${s.minDuration}-${s.maxDuration} detik\n` +
+    `• Privacy Default: ${s.defaultPrivacy}\n` +
+    `• YouTube: ${s.youtubeConnected ? "✅ Terhubung" : "❌ Belum terhubung"}`,
+
+  resultSummary: (
+    clips: {
+      title: string;
+      duration: number;
+      youtubeUrl?: string;
+      viralScore: number;
+      hasThumbnail?: boolean;
+      hasZoom?: boolean;
+      hasWatermark?: boolean;
+    }[]
+  ) => {
+    let msg = `🎉 *Proses Selesai!*\n\n`;
+    msg += `Berhasil membuat ${clips.length} klip YouTube Shorts:\n\n`;
+    clips.forEach((clip, i) => {
+      msg += `*Klip ${i + 1}:* ${clip.title.slice(0, 50)}\n`;
+      msg += `⏱ Durasi: ${clip.duration}s | 🔥 Viral Score: ${clip.viralScore}/10`;
+      if (clip.hasThumbnail) msg += ` | 🖼✅`;
+      if (clip.hasZoom) msg += ` | 🔍✅`;
+      if (clip.hasWatermark) msg += ` | 💧✅`;
+      msg += `\n`;
+      if (clip.youtubeUrl) msg += `🔗 ${clip.youtubeUrl}\n`;
+      msg += "\n";
+    });
+    msg += `📺 Cek YouTube Studio untuk melihat Draft!`;
+    return msg;
+  },
+};
+
+export function getPlatformEmoji(platform: string): string {
+  const emojis: Record<string, string> = {
+    youtube: "📺",
+    facebook: "📘",
+    tiktok: "🎵",
+    instagram: "📸",
+    twitter: "🐦",
+    unknown: "🌐",
+  };
+  return emojis[platform.toLowerCase()] || "🌐";
+}
+
+export function createProgressBar(percent: number, length: number = 10): string {
+  const filled = Math.round((percent / 100) * length);
+  const empty = length - filled;
+  return `[${"█".repeat(filled)}${"░".repeat(empty)}]`;
+}
+
+export function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  if (m === 0) return `${s}s`;
+  return `${m}m ${s}s`;
+}
+
+// Export for use in other modules
+export { getMaxClipsConfig };

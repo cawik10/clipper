@@ -40,6 +40,7 @@ Dashboard web menampilkan statistik job, konfigurasi fitur (jumlah klip, durasi 
 | 🔍 **Zoom Effect** | Efek zoom otomatis pada momen dengan viral score tinggi |
 | 💬 **Subtitle / Caption Burn-In** | Caption burned-in dari transkripsi Whisper (timestamp per kata): `karaoke`, `word-highlight`, `simple`, `alex-hormozi` |
 | 🪝 **AI Hook Overlay** | AI membuat teks hook di 1-2 detik pertama klip (`HOOK_*`), dirender via FFmpeg `drawtext`; style `bold-center` / `top-bar` / `split` |
+| 🎞️ **Format Transformatif** | Split-screen (klip atas + visual loop bawah), kartu komentar/konteks AI, dan frame "Reaksi"/"Rangkuman" — mengurangi risiko *reused content* saat monetisasi (TRANSFORM\_ENABLED, TRANSFORM\_MODE) |
 | 💬 **Auto-First Comment** | AI membuat 1 kalimat komentar pancingan per klip; setelah upload, bot memposting otomatis via `commentThreads.insert` (`YOUTUBE_AUTO_COMMENT_*`) |
 | 🛡️ **Source Credit & Copyright Guard** | Kredit sumber otomatis di deskripsi, whitelist channel, batas klip per video sumber per hari, skip video bertanda Content ID (SOURCE\_CREDIT\_ENABLED, COPYRIGHT\_GUARD\_MODE = warn \| block) |
 | 🎬 **Intro/Outro** | Tambahan intro & outro otomatis di setiap klip |
@@ -207,6 +208,61 @@ Style: **karaoke** (highlight menyapu mengikuti kata), **word-highlight** (hanya
 Telegram: `/subtitle` menampilkan config + tombol preview; `/subtitle karaoke`, `/subtitle alex-hormozi fade` mengirim video preview.
 
 Mengubah tampilan/menambah style: edit `STYLE_PRESETS` di `src/lib/subtitle-config.ts`. File terkait: `src/lib/subtitle-burner.ts` (render ASS + FFmpeg).
+
+---
+
+## 🎞️ Format Transformatif (Split-Screen / Commentary / Frame)
+
+Klip yang **hanya dipotong** dari channel lain berisiko kena *reused content* saat monetisasi. Fitur ini menambahkan lapisan orisinal ke setiap klip. **Default MATI** (`TRANSFORM_ENABLED=false`) — hasil klip yang sekarang tidak berubah sampai kamu menyalakannya. Dashboard & fitur lain tidak berubah; hanya ada section baru.
+
+| Komponen | Hasil |
+| --- | --- |
+| `split-screen` | Klip di atas, visual loop (gameplay / satisfying / gradient animasi) di bawah, dengan garis pemisah |
+| `commentary` | Kartu konteks/komentar singkat buatan AI (style: `context` · `reaction` · `summary` · `insight`) yang muncul setelah hook; teksnya juga ditambahkan ke deskripsi video |
+| `frame` | Bingkai + label judul "REAKSI" / "RANGKUMAN" / "SOROTAN" / "WAWASAN" (atau teks bebas) |
+
+Komentar AI dibuat dalam **prompt analisis yang sama** (tanpa panggilan AI tambahan, tanpa biaya ekstra), persis seperti AI Hook Overlay. Gagal-aman: kalau AI tidak memberi komentar / FFmpeg gagal / sumber visual tidak bisa diunduh, klip tetap diproses normal.
+
+**Contoh cepat (Railway → Variables):**
+
+```
+TRANSFORM_ENABLED=true
+TRANSFORM_MODE=split-screen,commentary,frame
+TRANSFORM_COMMENTARY_STYLE=reaction
+TRANSFORM_SPLIT_VISUAL=https://cdn.contoh.com/minecraft-parkour.mp4
+```
+
+| Variable | Default | Deskripsi |
+| --- | --- | --- |
+| TRANSFORM\_ENABLED | false | Saklar utama |
+| TRANSFORM\_MODE | commentary,frame | `split-screen`, `commentary`, `frame` (pisah koma) atau `all` |
+| TRANSFORM\_SPLIT\_VISUAL | gradient | `gradient` (bawaan FFmpeg, tanpa file) · `blur` · URL/path .mp4 (boleh banyak, pisah koma, dirotasi per klip). URL diunduh sekali lalu di-cache; link YouTube/TikTok via yt-dlp |
+| TRANSFORM\_SPLIT\_RATIO | 0.55 | Porsi tinggi layar untuk klip (0.4–0.7) |
+| TRANSFORM\_SPLIT\_CLIP\_POSITION | top | `top` \| `bottom` |
+| TRANSFORM\_SPLIT\_FOCUS\_Y | 0.4 | Bagian vertikal klip yang dipertahankan saat di-crop (0 atas – 1 bawah) |
+| TRANSFORM\_SPLIT\_DIVIDER | 6 | Tebal garis pemisah px (0 = tanpa) |
+| TRANSFORM\_COMMENTARY\_STYLE | context | `context` \| `reaction` \| `summary` \| `insight` |
+| TRANSFORM\_COMMENTARY\_MAX\_CHARS | 130 | 60–220 |
+| TRANSFORM\_COMMENTARY\_POSITION | auto | `auto` \| `top` \| `middle` \| `lower` (auto: di bawah garis split, atau lower tanpa split) |
+| TRANSFORM\_COMMENTARY\_START / \_DURATION | auto / 5 | Detik mulai (auto = setelah hook) / lama tampil (2–15) |
+| TRANSFORM\_COMMENTARY\_HEADER | ikut style | Judul kartu, mis. `KONTEKS` |
+| TRANSFORM\_COMMENTARY\_PROMPT | – | Arahan tambahan untuk AI |
+| TRANSFORM\_COMMENTARY\_FALLBACK | true | Pakai "alasan viral" AI kalau komentar kosong |
+| TRANSFORM\_DESCRIPTION | true | Tambahkan komentar ke deskripsi video |
+| TRANSFORM\_FRAME\_LABEL | auto | `auto` (ikut style) · `reaksi` · `rangkuman` · teks bebas |
+| TRANSFORM\_FRAME\_STYLE / \_POSITION | badge / top | `badge` \| `bar` / `top` \| `bottom` \| `seam` (di garis split) |
+| TRANSFORM\_FRAME\_BORDER | 10 | Tebal bingkai px (0 = tanpa) |
+| TRANSFORM\_ACCENT\_COLOR / \_TEXT\_COLOR | #FFC107 / white | Warna aksen & teks |
+| TRANSFORM\_CARD\_BG / \_CARD\_OPACITY | #000000 / 0.8 | Latar kartu komentar |
+| TRANSFORM\_FONT\_SIZE / \_FONT / \_FONT\_FILE | 40 / Montserrat / – | Font (fallback otomatis ke DejaVu Sans) |
+
+Telegram: `/transform` menampilkan konfigurasi aktif.
+
+> ⚠️ Ini **mengurangi risiko**, bukan jaminan monetisasi — keputusan akhir ada di YouTube. Pastikan komentar benar-benar menambah nilai (bukan sekadar mengulang klip) dan pakai visual loop yang kamu punya hak pakainya.
+> 💡 Di Railway tidak ada disk permanen dan Dockerfile hanya menyalin `.next/standalone`, jadi untuk visual loop sendiri pakai **URL** (CDN / bucket / Dropbox direct link) — bukan file di repo.
+> 💡 Saat split-screen aktif, subtitle default (`bottom-center`) jatuh di area visual bawah; ubah `SUBTITLE_POSITION=center` kalau ingin caption di garis pemisah.
+
+Mengubah tampilan: edit `COMMENTARY_STYLE_PRESETS` (teks arahan AI, judul kartu, label bingkai, contoh) di `src/lib/transform-config.ts`. Layout/render: `src/lib/transform-format.ts` · Telegram: `src/lib/transform-telegram.ts` · dashboard: `src/components/TransformSection.tsx`.
 
 ---
 

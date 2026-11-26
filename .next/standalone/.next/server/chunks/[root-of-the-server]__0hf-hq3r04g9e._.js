@@ -1,0 +1,16 @@
+module.exports=[[83705,e=>e.a(async(a,t)=>{try{var r=await e.y("openai-f0ed28f090f94724");e.n(r),t()}catch(e){t(e)}},!0),23862,e=>e.a(async(a,t)=>{try{var r=await e.y("pg-587764f78a6c7a9c");e.n(r),t()}catch(e){t(e)}},!0),95032,e=>e.a(async(a,t)=>{try{var r=e.i(89171),i=e.i(19014),n=e.i(4665),o=a([i,n]);function s(e,a,t,i=200){return new r.NextResponse(`<html>
+      <head><title>${e}</title><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+      <body style="font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:white">
+        <div style="max-width:420px;margin:0 auto;background:#1e293b;border-radius:16px;padding:40px">
+          <div style="font-size:64px">${t?"✅":"❌"}</div>
+          <h2 style="color:${t?"#22c55e":"#ef4444"}">${e}</h2>
+          <p style="color:#94a3b8">${a}</p>
+        </div>
+      </body>
+    </html>`,{headers:{"Content-Type":"text/html"},status:i})}async function l(e,a,t){if(t)return s("Login Dibatalkan","Kamu membatalkan proses login Google Drive. Kembali ke Telegram dan coba lagi.",!1);if(!e||!a)return r.NextResponse.json({error:"Missing code or state"},{status:400});try{let{email:t}=await (0,i.P)(e,a);try{await n.f.api.sendMessage(a,`✅ *Google Drive terhubung!*${t?`
+📧 Akun: \`${t}\``:""}
+
+Setiap klip yang selesai dibuat akan otomatis di-upload ke Drive.
+Atur folder tujuan & pengaturan lain lewat /drive`,{parse_mode:"Markdown"})}catch(e){console.warn("[drive] gagal kirim notifikasi Telegram:",e)}return s("Google Drive Terhubung!",`Akun${t?` <b>${t}</b>`:""} berhasil terhubung dengan AutoClip Bot.<br><br>Kembali ke Telegram — klip akan otomatis masuk ke Drive.`,!0)}catch(e){return console.error("Drive callback error:",e),s("Error",(e instanceof Error?e.message:"Terjadi kesalahan").replace(/</g,"&lt;"),!1,500)}}[i,n]=o.then?(await o)():o,e.s(["f",0,l]),t()}catch(e){t(e)}},!1),90863,e=>e.a(async(a,t)=>{try{var r=e.i(79371),i=e.i(18916),n=e.i(75225),o=e.i(77788),s=e.i(1517),l=a([r]);async function c(e,a){let t=await r.f.select().from(i.Y).where((0,n.u)(i.Y.telegramUserId,e));if(t.length>0)return t[0];let l=(0,o.o)(),{min:c,max:u}=(0,o.D)(l);return(await r.f.insert(i.Y).values({telegramUserId:e,maxClips:(0,o.c)(),clipDuration:l,minDuration:c,maxDuration:u,defaultPrivacy:"private",language:"id",nichePrompt:(0,s.J)((0,s.E)())}).returning())[0]}async function u(e,a){await c(e);let t=(0,s.J)(a);return await p(e,{nichePrompt:t}),t}async function d(e){await p(e,{nichePrompt:null})}async function p(e,a){await r.f.update(i.Y).set({...a,updatedAt:new Date}).where((0,n.u)(i.Y.telegramUserId,e))}async function g(){return r.f.select().from(i.Y).orderBy(i.Y.createdAt)}[r]=l.then?(await l)():l,e.s(["O",0,d,"T",0,g,"w",0,p,"P",0,u]),t()}catch(e){t(e)}},!1)],10430,(e,a,t)=>{a.exports=e.x("async_hooks",()=>require("async_hooks"))},33405,(e,a,t)=>{a.exports=e.x("child_process",()=>require("child_process"))},22734,(e,a,t)=>{a.exports=e.x("fs",()=>require("fs"))},80182,(e,a,t)=>{a.exports=e.x("googleapis-9565988a00144fd3",()=>require("googleapis-9565988a00144fd3"))},77136,(e,a,t)=>{a.exports=e.x("grammy-545871974543d545",()=>require("grammy-545871974543d545"))},24361,(e,a,t)=>{a.exports=e.x("util",()=>require("util"))}];
+
+//# sourceMappingURL=%5Broot-of-the-server%5D__0hf-hq3r04g9e._.js.map

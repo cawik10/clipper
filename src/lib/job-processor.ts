@@ -15,6 +15,7 @@ import {
 } from "@/lib/youtube-uploader";
 import { uploadClipsToDrive } from "@/lib/drive-uploader";
 import { postAutoCommentsForClips } from "@/lib/auto-comment"; // 💬 Auto-First Comment (BARU!)
+import { appendCommentaryToDescription } from "@/lib/transform-config"; // 🎞️ Format Transformatif (BARU!)
 import { reportError } from "@/lib/admin-notify"; // 🛠️ Notifikasi error ke admin (BARU!)
 import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
 import type { TranscriptSegmentWithWords } from "@/lib/subtitle-config"; // 💬 Subtitle (BARU!)
@@ -415,6 +416,13 @@ export async function publishJobClips(
     // === STEP 4b: 🛡️ SOURCE CREDIT (BARU!) ===
     // Tambah "Source: <judul> — <channel> <link>" ke deskripsi tiap klip sebelum
     // upload. Mati: SOURCE_CREDIT_ENABLED=false. Tidak pernah melempar error.
+    // 🎞️ Format Transformatif (BARU!) — komentar AI ikut masuk deskripsi (teks orisinal).
+    // Mati: TRANSFORM_DESCRIPTION=false / fitur tidak aktif. Dilakukan sebelum kredit sumber.
+    try {
+      appendCommentaryToDescription(successfulClips);
+    } catch (err) {
+      console.error("[transform] Gagal menambah komentar ke deskripsi (diabaikan):", err);
+    }
     const creditResult = await applySourceCreditToClips(jobId, successfulClips);
     if (creditResult.applied && creditResult.credit) {
       await update("uploading", "🛡️ Kredit sumber ditambahkan ke deskripsi klip", {

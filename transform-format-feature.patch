@@ -1,0 +1,1703 @@
+diff --git a/README.md b/README.md
+index e9cf33b..ecd7883 100644
+--- a/README.md
++++ b/README.md
+@@ -40,6 +40,7 @@ Dashboard web menampilkan statistik job, konfigurasi fitur (jumlah klip, durasi
+ | 🔍 **Zoom Effect** | Efek zoom otomatis pada momen dengan viral score tinggi |
+ | 💬 **Subtitle / Caption Burn-In** | Caption burned-in dari transkripsi Whisper (timestamp per kata): `karaoke`, `word-highlight`, `simple`, `alex-hormozi` |
+ | 🪝 **AI Hook Overlay** | AI membuat teks hook di 1-2 detik pertama klip (`HOOK_*`), dirender via FFmpeg `drawtext`; style `bold-center` / `top-bar` / `split` |
++| 🎞️ **Format Transformatif** | Split-screen (klip atas + visual loop bawah), kartu komentar/konteks AI, dan frame "Reaksi"/"Rangkuman" — mengurangi risiko *reused content* saat monetisasi (TRANSFORM\_ENABLED, TRANSFORM\_MODE) |
+ | 💬 **Auto-First Comment** | AI membuat 1 kalimat komentar pancingan per klip; setelah upload, bot memposting otomatis via `commentThreads.insert` (`YOUTUBE_AUTO_COMMENT_*`) |
+ | 🛡️ **Source Credit & Copyright Guard** | Kredit sumber otomatis di deskripsi, whitelist channel, batas klip per video sumber per hari, skip video bertanda Content ID (SOURCE\_CREDIT\_ENABLED, COPYRIGHT\_GUARD\_MODE = warn \| block) |
+ | 🎬 **Intro/Outro** | Tambahan intro & outro otomatis di setiap klip |
+@@ -210,6 +211,61 @@ Mengubah tampilan/menambah style: edit `STYLE_PRESETS` di `src/lib/subtitle-conf
+ 
+ ---
+ 
++## 🎞️ Format Transformatif (Split-Screen / Commentary / Frame)
++
++Klip yang **hanya dipotong** dari channel lain berisiko kena *reused content* saat monetisasi. Fitur ini menambahkan lapisan orisinal ke setiap klip. **Default MATI** (`TRANSFORM_ENABLED=false`) — hasil klip yang sekarang tidak berubah sampai kamu menyalakannya. Dashboard & fitur lain tidak berubah; hanya ada section baru.
++
++| Komponen | Hasil |
++| --- | --- |
++| `split-screen` | Klip di atas, visual loop (gameplay / satisfying / gradient animasi) di bawah, dengan garis pemisah |
++| `commentary` | Kartu konteks/komentar singkat buatan AI (style: `context` · `reaction` · `summary` · `insight`) yang muncul setelah hook; teksnya juga ditambahkan ke deskripsi video |
++| `frame` | Bingkai + label judul "REAKSI" / "RANGKUMAN" / "SOROTAN" / "WAWASAN" (atau teks bebas) |
++
++Komentar AI dibuat dalam **prompt analisis yang sama** (tanpa panggilan AI tambahan, tanpa biaya ekstra), persis seperti AI Hook Overlay. Gagal-aman: kalau AI tidak memberi komentar / FFmpeg gagal / sumber visual tidak bisa diunduh, klip tetap diproses normal.
++
++**Contoh cepat (Railway → Variables):**
++
++```
++TRANSFORM_ENABLED=true
++TRANSFORM_MODE=split-screen,commentary,frame
++TRANSFORM_COMMENTARY_STYLE=reaction
++TRANSFORM_SPLIT_VISUAL=https://cdn.contoh.com/minecraft-parkour.mp4
++```
++
++| Variable | Default | Deskripsi |
++| --- | --- | --- |
++| TRANSFORM\_ENABLED | false | Saklar utama |
++| TRANSFORM\_MODE | commentary,frame | `split-screen`, `commentary`, `frame` (pisah koma) atau `all` |
++| TRANSFORM\_SPLIT\_VISUAL | gradient | `gradient` (bawaan FFmpeg, tanpa file) · `blur` · URL/path .mp4 (boleh banyak, pisah koma, dirotasi per klip). URL diunduh sekali lalu di-cache; link YouTube/TikTok via yt-dlp |
++| TRANSFORM\_SPLIT\_RATIO | 0.55 | Porsi tinggi layar untuk klip (0.4–0.7) |
++| TRANSFORM\_SPLIT\_CLIP\_POSITION | top | `top` \| `bottom` |
++| TRANSFORM\_SPLIT\_FOCUS\_Y | 0.4 | Bagian vertikal klip yang dipertahankan saat di-crop (0 atas – 1 bawah) |
++| TRANSFORM\_SPLIT\_DIVIDER | 6 | Tebal garis pemisah px (0 = tanpa) |
++| TRANSFORM\_COMMENTARY\_STYLE | context | `context` \| `reaction` \| `summary` \| `insight` |
++| TRANSFORM\_COMMENTARY\_MAX\_CHARS | 130 | 60–220 |
++| TRANSFORM\_COMMENTARY\_POSITION | auto | `auto` \| `top` \| `middle` \| `lower` (auto: di bawah garis split, atau lower tanpa split) |
++| TRANSFORM\_COMMENTARY\_START / \_DURATION | auto / 5 | Detik mulai (auto = setelah hook) / lama tampil (2–15) |
++| TRANSFORM\_COMMENTARY\_HEADER | ikut style | Judul kartu, mis. `KONTEKS` |
++| TRANSFORM\_COMMENTARY\_PROMPT | – | Arahan tambahan untuk AI |
++| TRANSFORM\_COMMENTARY\_FALLBACK | true | Pakai "alasan viral" AI kalau komentar kosong |
++| TRANSFORM\_DESCRIPTION | true | Tambahkan komentar ke deskripsi video |
++| TRANSFORM\_FRAME\_LABEL | auto | `auto` (ikut style) · `reaksi` · `rangkuman` · teks bebas |
++| TRANSFORM\_FRAME\_STYLE / \_POSITION | badge / top | `badge` \| `bar` / `top` \| `bottom` \| `seam` (di garis split) |
++| TRANSFORM\_FRAME\_BORDER | 10 | Tebal bingkai px (0 = tanpa) |
++| TRANSFORM\_ACCENT\_COLOR / \_TEXT\_COLOR | #FFC107 / white | Warna aksen & teks |
++| TRANSFORM\_CARD\_BG / \_CARD\_OPACITY | #000000 / 0.8 | Latar kartu komentar |
++| TRANSFORM\_FONT\_SIZE / \_FONT / \_FONT\_FILE | 40 / Montserrat / – | Font (fallback otomatis ke DejaVu Sans) |
++
++Telegram: `/transform` menampilkan konfigurasi aktif.
++
++> ⚠️ Ini **mengurangi risiko**, bukan jaminan monetisasi — keputusan akhir ada di YouTube. Pastikan komentar benar-benar menambah nilai (bukan sekadar mengulang klip) dan pakai visual loop yang kamu punya hak pakainya.
++> 💡 Di Railway tidak ada disk permanen dan Dockerfile hanya menyalin `.next/standalone`, jadi untuk visual loop sendiri pakai **URL** (CDN / bucket / Dropbox direct link) — bukan file di repo.
++> 💡 Saat split-screen aktif, subtitle default (`bottom-center`) jatuh di area visual bawah; ubah `SUBTITLE_POSITION=center` kalau ingin caption di garis pemisah.
++
++Mengubah tampilan: edit `COMMENTARY_STYLE_PRESETS` (teks arahan AI, judul kartu, label bingkai, contoh) di `src/lib/transform-config.ts`. Layout/render: `src/lib/transform-format.ts` · Telegram: `src/lib/transform-telegram.ts` · dashboard: `src/components/TransformSection.tsx`.
++
++---
++
+ ## 📱 Cara Penggunaan
+ 
+ 1. Buka bot Telegram milik Anda
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index 6c16257..750b6bc 100644
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -47,6 +47,8 @@ import {
+ } from "@/lib/subtitle-config";
+ // 🪝 AI Hook Overlay (BARU!) — komponen section terpisah.
+ import HookOverlaySection from "@/components/HookOverlaySection";
++// 🎞️ Format Transformatif (BARU!) — komponen section terpisah.
++import TransformSection from "@/components/TransformSection";
+ // 📈 AI Analytics & Feedback Loop (BARU!) — komponen section terpisah.
+ import AnalyticsSection from "@/components/AnalyticsSection";
+ import AutoTitleDoctorSection from "@/components/AutoTitleDoctorSection";
+@@ -1254,6 +1256,9 @@ export default async function HomePage() {
+         {/* 🪝 AI HOOK OVERLAY — TEKS PEMBUKA (FITUR BARU!) — lihat src/components/HookOverlaySection.tsx */}
+         <HookOverlaySection />
+ 
++        {/* 🎞️ FORMAT TRANSFORMATIF — SPLIT-SCREEN / COMMENTARY / FRAME (FITUR BARU!) — lihat src/components/TransformSection.tsx */}
++        <TransformSection />
++
+         {/* 📈 AI ANALYTICS & FEEDBACK LOOP (FITUR BARU!) — lihat src/components/AnalyticsSection.tsx */}
+         <AnalyticsSection />
+ 
+@@ -1357,6 +1362,7 @@ export default async function HomePage() {
+               { cmd: "/autoreframe", desc: "Info & ubah Auto-Reframe Speaker Tracking ← BARU!", isNew: true },
+               { cmd: "/subtitle", desc: "Info & preview style subtitle / caption burn-in ← BARU!", isNew: true },
+               { cmd: "/hook", desc: "Info AI Hook Overlay (teks pembuka) ← BARU!", isNew: true },
++              { cmd: "/transform", desc: "Info Format Transformatif (split-screen / komentar AI / frame) ← BARU!", isNew: true },
+               { cmd: "/introoutro", desc: "Info & ubah intro/outro config",        isNew: false },
+               { cmd: "/niche",      desc: "Atur Custom Niche Prompt untuk AI Analysis ← BARU!", isNew: true },
+               { cmd: "/dupfilter",  desc: "Info Duplicate/Repetitive Clip Filter ← BARU!", isNew: true },
+@@ -1464,6 +1470,23 @@ export default async function HomePage() {
+               { key: "HOOK_COLOR", desc: "warna teks: white | #FFFFFF (default: white) ← BARU!", isNew: true },
+               { key: "HOOK_BG_COLOR", desc: "warna latar/bar: #FF0000 (default: #FF0000) ← BARU!", isNew: true },
+               { key: "HOOK_FONT", desc: "nama font (default: Montserrat) ← BARU!", isNew: true },
++              { section: "# === 🎞️ FORMAT TRANSFORMATIF — SPLIT-SCREEN / COMMENTARY / FRAME (BARU!) ===" },
++              { key: "TRANSFORM_ENABLED", desc: "true | false — saklar utama (default: false) ← BARU!", isNew: true },
++              { key: "TRANSFORM_MODE", desc: "split-screen,commentary,frame | all (default: commentary,frame) ← BARU!", isNew: true },
++              { key: "TRANSFORM_COMMENTARY_STYLE", desc: "context | reaction | summary | insight (default: context) ← BARU!", isNew: true },
++              { key: "TRANSFORM_COMMENTARY_MAX_CHARS", desc: "60-220 karakter (default: 130) ← BARU!", isNew: true },
++              { key: "TRANSFORM_COMMENTARY_POSITION", desc: "auto | top | middle | lower (default: auto) ← BARU!", isNew: true },
++              { key: "TRANSFORM_COMMENTARY_START", desc: "auto | detik mulai tampil (default: auto, setelah hook) ← BARU!", isNew: true },
++              { key: "TRANSFORM_COMMENTARY_DURATION", desc: "lama kartu tampil, 2-15 detik (default: 5) ← BARU!", isNew: true },
++              { key: "TRANSFORM_DESCRIPTION", desc: "true | false — komentar ikut ke deskripsi (default: true) ← BARU!", isNew: true },
++              { key: "TRANSFORM_FRAME_LABEL", desc: "auto | reaksi | rangkuman | teks bebas (default: auto) ← BARU!", isNew: true },
++              { key: "TRANSFORM_FRAME_STYLE", desc: "badge | bar (default: badge) ← BARU!", isNew: true },
++              { key: "TRANSFORM_FRAME_POSITION", desc: "top | bottom | seam (default: top) ← BARU!", isNew: true },
++              { key: "TRANSFORM_FRAME_BORDER", desc: "tebal bingkai px, 0 = tanpa (default: 10) ← BARU!", isNew: true },
++              { key: "TRANSFORM_SPLIT_VISUAL", desc: "gradient | blur | URL/path .mp4 (pisah koma) (default: gradient) ← BARU!", isNew: true },
++              { key: "TRANSFORM_SPLIT_RATIO", desc: "porsi tinggi klip 0.4-0.7 (default: 0.55) ← BARU!", isNew: true },
++              { key: "TRANSFORM_SPLIT_CLIP_POSITION", desc: "top | bottom (default: top) ← BARU!", isNew: true },
++              { key: "TRANSFORM_ACCENT_COLOR", desc: "warna aksen: #FFC107 (default) ← BARU!", isNew: true },
+               { section: "# === THUMBNAIL ===" },
+               { key: "THUMBNAIL_ENABLED", desc: "true | false (default: true)" },
+               { key: "THUMBNAIL_MODE",    desc: "middle | best | start | custom (default: middle)" },
+diff --git a/src/components/TransformSection.tsx b/src/components/TransformSection.tsx
+new file mode 100644
+index 0000000..853dddf
+--- /dev/null
++++ b/src/components/TransformSection.tsx
+@@ -0,0 +1,232 @@
++/**
++ * 🎞️ FORMAT TRANSFORMATIF — section dashboard (FITUR BARU!)
++ * Server component terpisah supaya src/app/page.tsx tidak berubah banyak.
++ * Konfigurasi & style: src/lib/transform-config.ts
++ */
++import {
++  getTransformConfig,
++  getFrameLabel,
++  getCommentaryHeader,
++  describeSplitVisual,
++  resolveCommentaryStart,
++  transformColorToHex,
++  TRANSFORM_MODES,
++  TRANSFORM_MODE_INFO,
++  COMMENTARY_STYLES,
++  COMMENTARY_STYLE_PRESETS,
++} from "@/lib/transform-config";
++
++export default function TransformSection() {
++  const cfg = getTransformConfig();
++  const accent = transformColorToHex(cfg.accentColor, "#FFC107");
++  const textHex = transformColorToHex(cfg.textColor, "#FFFFFF");
++  const cardBg = transformColorToHex(cfg.cardBg, "#000000");
++  const preset = COMMENTARY_STYLE_PRESETS[cfg.commentary.style];
++  const label = getFrameLabel(cfg);
++  const header = getCommentaryHeader(cfg);
++  const start = resolveCommentaryStart(cfg);
++  const splitPct = Math.round(cfg.split.ratio * 100);
++
++  const activeMap: Record<(typeof TRANSFORM_MODES)[number], boolean> = {
++    "split-screen": cfg.splitActive,
++    commentary: cfg.commentaryActive,
++    frame: cfg.frameActive,
++  };
++
++  // Mockup ponsel 9:16 (120x213) — mengikuti warna/label dari config.
++  const Phone = ({ children, highlight }: { children: React.ReactNode; highlight?: boolean }) => (
++    <div
++      className="relative mx-auto bg-gradient-to-b from-slate-700 to-slate-900 rounded-lg overflow-hidden"
++      style={{ width: 120, height: 213, outline: highlight ? `2px solid ${accent}` : undefined }}
++    >
++      {children}
++    </div>
++  );
++  const FakeClip = () => (
++    <div className="absolute inset-0 flex items-center justify-center text-[9px] text-slate-400">klip sumber</div>
++  );
++  const Card = ({ top }: { top: string }) => (
++    <div
++      className="absolute left-[6%] right-[6%] rounded-sm overflow-hidden flex"
++      style={{ top, background: cardBg + "CC" }}
++    >
++      <span className="w-[3px] shrink-0" style={{ background: accent }} />
++      <div className="px-1.5 py-1">
++        <div className="text-[6px] font-extrabold tracking-wide" style={{ color: accent }}>
++          {header}
++        </div>
++        <div className="text-[7px] leading-tight font-bold" style={{ color: textHex }}>
++          {preset.example}
++        </div>
++      </div>
++    </div>
++  );
++  const Badge = ({ top }: { top: string }) => (
++    <div className="absolute inset-x-0 flex justify-center" style={{ top }}>
++      <span className="text-[7px] font-extrabold px-1.5 py-0.5 rounded-sm" style={{ background: accent, color: "#111" }}>
++        {label}
++      </span>
++    </div>
++  );
++
++  return (
++    <section className="bg-gradient-to-br from-cyan-500/10 to-teal-600/10 border-2 border-cyan-500/40 rounded-2xl p-6 space-y-5">
++      <div className="flex items-start justify-between flex-wrap gap-3">
++        <div>
++          <h2 className="text-xl font-bold text-cyan-400 flex items-center gap-2">
++            🎞️ Format Transformatif (Split-Screen / Commentary)
++            <span className="text-xs bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 px-2 py-0.5 rounded-full">
++              Fitur Baru!
++            </span>
++          </h2>
++          <p className="text-slate-400 text-sm mt-1 max-w-3xl">
++            Klip yang hanya dipotong dari channel lain berisiko kena <em>reused content</em> saat monetisasi. Fitur ini
++            menambah lapisan orisinal: layout <b className="text-slate-300">split-screen</b>, kartu{" "}
++            <b className="text-slate-300">komentar/konteks AI</b>, dan <b className="text-slate-300">frame “Reaksi” / “Rangkuman”</b>.
++            Komentar dibuat AI dalam prompt analisis yang sama (tanpa panggilan AI tambahan) dan ikut masuk deskripsi video.
++          </p>
++        </div>
++        <span
++          className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${cfg.enabled ? "bg-green-500/20 border-green-500/40 text-green-400" : "bg-slate-500/20 border-slate-500/40 text-slate-300"}`}
++        >
++          {cfg.enabled ? "✅ Aktif" : "⏸ Nonaktif — set TRANSFORM_ENABLED=true"}
++        </span>
++      </div>
++
++      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Mode</div>
++          <div className="text-cyan-300 font-semibold mt-1 text-sm">{cfg.modes.join(" + ")}</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Split (klip / visual)</div>
++          <div className="text-cyan-300 font-semibold mt-1 text-sm">
++            {splitPct}% / {100 - splitPct}%
++          </div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Style komentar</div>
++          <div className="text-cyan-300 font-semibold mt-1 text-sm">{preset.label}</div>
++        </div>
++        <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
++          <div className="text-xs text-slate-500">Label / aksen</div>
++          <div className="flex items-center justify-center gap-2 mt-1.5">
++            <span className="text-cyan-300 font-semibold text-sm">{label}</span>
++            <span className="inline-block w-5 h-5 rounded border border-slate-600" style={{ background: accent }} />
++          </div>
++        </div>
++      </div>
++
++      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
++        {TRANSFORM_MODES.map((m) => {
++          const active = activeMap[m];
++          return (
++            <div
++              key={m}
++              className={`rounded-xl p-3 border ${active ? "border-cyan-400/70 bg-cyan-950/40" : "border-slate-700/50 bg-slate-900/50"}`}
++            >
++              <div className="text-xs text-slate-300 font-semibold">
++                {TRANSFORM_MODE_INFO[m].label}{" "}
++                {active && <span className="text-cyan-400 text-[9px] ml-1">● AKTIF</span>}
++              </div>
++              <div className="text-[10px] text-slate-500 mb-2">{TRANSFORM_MODE_INFO[m].description}</div>
++
++              {m === "split-screen" && (
++                <Phone highlight={active}>
++                  <div
++                    className="absolute inset-x-0 bg-slate-600/60 flex items-center justify-center text-[9px] text-slate-300"
++                    style={{ [cfg.split.clipPosition === "top" ? "top" : "bottom"]: 0, height: `${splitPct}%` }}
++                  >
++                    klip sumber
++                  </div>
++                  <div
++                    className="absolute inset-x-0 flex items-center justify-center text-[9px] text-slate-200"
++                    style={{
++                      [cfg.split.clipPosition === "top" ? "bottom" : "top"]: 0,
++                      height: `${100 - splitPct}%`,
++                      background: `linear-gradient(135deg, #0B0B1A, ${accent}55, #1B1035)`,
++                    }}
++                  >
++                    visual loop
++                  </div>
++                  {cfg.split.divider > 0 && (
++                    <div
++                      className="absolute inset-x-0"
++                      style={{
++                        top: `${cfg.split.clipPosition === "top" ? splitPct : 100 - splitPct}%`,
++                        height: 2,
++                        background: accent,
++                      }}
++                    />
++                  )}
++                </Phone>
++              )}
++              {m === "commentary" && (
++                <Phone highlight={active}>
++                  <FakeClip />
++                  <Card top="62%" />
++                </Phone>
++              )}
++              {m === "frame" && (
++                <Phone highlight={active}>
++                  <FakeClip />
++                  <div className="absolute inset-0" style={{ boxShadow: `inset 0 0 0 ${Math.max(1, Math.round(cfg.frame.border / 5))}px ${accent}` }} />
++                  <Badge top="7%" />
++                </Phone>
++              )}
++            </div>
++          );
++        })}
++      </div>
++
++      <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50">
++        <div className="text-sm font-semibold text-slate-300 mb-2">
++          ✨ Style komentar AI <span className="text-slate-500 font-normal">(TRANSFORM_COMMENTARY_STYLE)</span>
++        </div>
++        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
++          {COMMENTARY_STYLES.map((s) => {
++            const p = COMMENTARY_STYLE_PRESETS[s];
++            const active = s === cfg.commentary.style;
++            return (
++              <div
++                key={s}
++                className={`rounded-lg p-2.5 border text-sm ${active ? "border-cyan-400/60 bg-cyan-950/30" : "border-slate-700/50"}`}
++              >
++                <div className="text-slate-200 font-semibold">
++                  <code className="text-yellow-300">{s}</code> — {p.label}
++                  {active && <span className="text-cyan-400 text-[9px] ml-2">● AKTIF</span>}
++                </div>
++                <div className="text-xs text-slate-500">
++                  {p.description} • label bingkai “{p.frameLabel}”
++                </div>
++                <div className="text-xs text-slate-400 mt-1 italic">“{p.example}”</div>
++              </div>
++            );
++          })}
++        </div>
++      </div>
++
++      <div className="bg-cyan-950/30 border border-cyan-500/20 rounded-xl p-4 space-y-3">
++        <div className="text-sm font-semibold text-cyan-300">🔧 Cara Atur di Railway Variables:</div>
++        <div className="font-mono text-sm bg-slate-900/80 rounded-lg p-3 space-y-1">
++          <div><span className="text-yellow-300">TRANSFORM_ENABLED</span> = <span className="text-emerald-400">{String(cfg.enabled)}</span> <span className="text-slate-600">← saklar utama (default: false)</span></div>
++          <div><span className="text-yellow-300">TRANSFORM_MODE</span> = <span className="text-emerald-400">{cfg.modes.join(",")}</span> <span className="text-slate-600">← split-screen | commentary | frame | all</span></div>
++          <div><span className="text-yellow-300">TRANSFORM_COMMENTARY_STYLE</span> = <span className="text-emerald-400">{cfg.commentary.style}</span> <span className="text-slate-600">← context | reaction | summary | insight</span></div>
++          <div><span className="text-yellow-300">TRANSFORM_FRAME_LABEL</span> = <span className="text-emerald-400">{cfg.frame.label}</span> <span className="text-slate-600">← auto | reaksi | rangkuman | teks bebas</span></div>
++          <div><span className="text-yellow-300">TRANSFORM_SPLIT_VISUAL</span> = <span className="text-emerald-400">{cfg.split.visual.kind === "sources" ? "(URL/path loop)" : cfg.split.visual.kind}</span> <span className="text-slate-600">← gradient | blur | URL .mp4 (pisah koma)</span></div>
++          <div><span className="text-yellow-300">TRANSFORM_SPLIT_RATIO</span> = <span className="text-emerald-400">{cfg.split.ratio}</span> <span className="text-slate-600">← porsi klip 0.4 - 0.7</span></div>
++          <div><span className="text-yellow-300">TRANSFORM_COMMENTARY_DURATION</span> = <span className="text-emerald-400">{cfg.commentary.duration}</span> <span className="text-slate-600">← detik (mulai di detik {start})</span></div>
++          <div><span className="text-yellow-300">TRANSFORM_ACCENT_COLOR</span> = <span className="text-emerald-400">{cfg.accentColor}</span></div>
++        </div>
++        <div className="text-xs text-slate-400 space-y-1">
++          <div>🎮 Visual bawah saat ini: <b className="text-slate-300">{describeSplitVisual(cfg.split.visual)}</b>. Untuk gameplay/satisfying loop sendiri, isi <code className="text-slate-300">TRANSFORM_SPLIT_VISUAL</code> dengan link langsung .mp4 (diunduh sekali lalu di-cache) atau link YouTube (via yt-dlp). Pakai video yang kamu punya hak pakainya.</div>
++          <div>🧠 Komentar dibuat AI dalam prompt analisis yang sama — tanpa panggilan AI tambahan, dan ikut ditambahkan ke deskripsi (<code className="text-slate-300">TRANSFORM_DESCRIPTION</code>).</div>
++          <div>🛡️ Kalau AI tidak memberi komentar / FFmpeg gagal / sumber visual tidak bisa diunduh, klip tetap diproses normal — tidak pernah gagal karena fitur ini.</div>
++          <div>🎨 Ganti teks arahan AI, judul kartu, atau label di <code className="text-slate-300">COMMENTARY_STYLE_PRESETS</code> (<code className="text-slate-300">src/lib/transform-config.ts</code>); layout di <code className="text-slate-300">src/lib/transform-format.ts</code>.</div>
++          <div>⚠️ Membantu mengurangi risiko <em>reused content</em>, bukan jaminan monetisasi — pastikan komentar benar-benar menambah nilai.</div>
++          <div>🤖 Telegram: <code className="text-yellow-300">/transform</code> untuk lihat konfigurasi</div>
++        </div>
++      </div>
++    </section>
++  );
++}
+diff --git a/src/db/schema.ts b/src/db/schema.ts
+index 8b5830f..82fdcba 100644
+--- a/src/db/schema.ts
++++ b/src/db/schema.ts
+@@ -493,6 +493,9 @@ export interface ClipResult {
+   // bersamaan dengan analisis momen. Opsional & disimpan di jsonb `clips`
+   // (tidak perlu migrasi). Lihat src/lib/hook-config.ts.
+   hook?: string;
++  // 🎞️ Format Transformatif (BARU!) — kartu komentar/konteks hasil AI yang ditampilkan di
++  // tengah klip. Opsional & disimpan di jsonb `clips` (tanpa migrasi). Lihat src/lib/transform-config.ts.
++  commentary?: string;
+   // 💬 Auto-First Comment (BARU!) — komentar pancingan hasil AI + hasil posting
+   // via commentThreads.insert. Opsional & disimpan di jsonb `clips` (tanpa migrasi).
+   // Lihat src/lib/auto-comment-config.ts & src/lib/auto-comment.ts.
+diff --git a/src/lib/ai-analyzer.ts b/src/lib/ai-analyzer.ts
+index c6f24dd..0c1ed15 100644
+--- a/src/lib/ai-analyzer.ts
++++ b/src/lib/ai-analyzer.ts
+@@ -4,6 +4,13 @@ import { getMaxClipsConfig } from "@/lib/video-config";
+ import { buildNicheInstruction } from "@/lib/niche-prompt";
+ import { getHookConfig, sanitizeHookText, buildFallbackHook } from "@/lib/hook-config"; // 🪝 AI Hook Overlay (BARU!)
+ import { checkAiBudget, recordAiUsage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
++// 🎞️ Format Transformatif (BARU!) — komentar AI dibuat dalam prompt yang sama (tanpa panggilan AI tambahan).
++import {
++  getTransformConfig,
++  buildCommentaryPromptInstruction,
++  buildCommentaryJsonField,
++  resolveCommentary,
++} from "@/lib/transform-config";
+ // 💬 Auto-First Comment (BARU!) — komentar pancingan dibuat AI dalam prompt yang sama.
+ import {
+   isAutoCommentEnabled,
+@@ -75,6 +82,12 @@ export async function analyzeVideoForClips(
+     : "";
+   const commentJsonField = commentOn ? `,\n    "firstComment": "<komentar pancingan, max ${commentMax} karakter>"` : "";
+ 
++  // 🎞️ Format Transformatif (BARU!) — instruksi komentar AI. Kosong kalau TRANSFORM_ENABLED
++  // bukan true / mode commentary tidak dipilih, sehingga prompt persis seperti sebelumnya.
++  const transformCfg = getTransformConfig();
++  const transformInstruction = buildCommentaryPromptInstruction(transformCfg);
++  const transformJsonField = buildCommentaryJsonField(transformCfg);
++
+   const prompt = `Kamu adalah ahli konten viral YouTube Shorts. Analisis transkrip video berikut dan temukan ${maxClips} momen terbaik yang berpotensi viral.
+ 
+ INFORMASI VIDEO:
+@@ -101,7 +114,7 @@ INSTRUKSI:
+ - Buat judul YouTube Shorts yang menarik (max 70 karakter)
+ - Buat deskripsi singkat (max 150 karakter)
+ - Berikan tags relevan (5-10 tags)
+-${hookInstruction}${commentInstruction}
++${hookInstruction}${commentInstruction}${transformInstruction}
+ Output JSON array (tanpa markdown):
+ [
+   {
+@@ -113,7 +126,7 @@ Output JSON array (tanpa markdown):
+     "description": "<deskripsi singkat>",
+     "tags": ["tag1", "tag2"],
+     "viralScore": <1-10>,
+-    "reason": "<alasan mengapa viral>"${hookJsonField}${commentJsonField}
++    "reason": "<alasan mengapa viral>"${hookJsonField}${commentJsonField}${transformJsonField}
+   }
+ ]`;
+ 
+@@ -376,6 +389,8 @@ function validateAndFixClips(
+         reason: clip.reason || "AI-selected moment",
+         // 🪝 AI Hook Overlay (BARU!)
+         hook: resolveHook(clip.hook, clip.title, i),
++        // 🎞️ Format Transformatif (BARU!) — komentar AI (undefined kalau fitur mati)
++        commentary: resolveCommentary((clip as { commentary?: unknown }).commentary, clip.reason),
+         // 💬 Auto-First Comment (BARU!)
+         firstComment: resolveFirstComment(clip.firstComment),
+       };
+diff --git a/src/lib/bot-messages.ts b/src/lib/bot-messages.ts
+index 3057ec1..256edbb 100644
+--- a/src/lib/bot-messages.ts
++++ b/src/lib/bot-messages.ts
+@@ -26,6 +26,7 @@ Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pend
+ /zoom - Info zoom effect config
+ /subtitle - Info & preview style subtitle (caption burn-in)
+ /hook - Info AI Hook Overlay (teks pembuka)
++/transform - Info Format Transformatif (split-screen / komentar AI / frame) ✨ Baru!
+ /introoutro - Info intro/outro config
+ /thumbnail - Info thumbnail config
+ /mode - Info aspect ratio
+@@ -71,6 +72,7 @@ Kirim link video untuk mulai! 🎬`,
+ /zoom - Info zoom effect config
+ /subtitle - Info & preview style subtitle (caption burn-in)
+ /hook - Info AI Hook Overlay (teks pembuka)
++/transform - Info Format Transformatif (split-screen / komentar AI / frame) ✨ Baru!
+ /introoutro - Info intro/outro config
+ /niche - Atur Custom Niche Prompt (fokus AI Analysis) ✨ Baru!
+ /analytics - Laporan performa klip + AI Smart Learning ✨ Baru!
+diff --git a/src/lib/job-processor.ts b/src/lib/job-processor.ts
+index f405d24..54466a2 100644
+--- a/src/lib/job-processor.ts
++++ b/src/lib/job-processor.ts
+@@ -15,6 +15,7 @@ import {
+ } from "@/lib/youtube-uploader";
+ import { uploadClipsToDrive } from "@/lib/drive-uploader";
+ import { postAutoCommentsForClips } from "@/lib/auto-comment"; // 💬 Auto-First Comment (BARU!)
++import { appendCommentaryToDescription } from "@/lib/transform-config"; // 🎞️ Format Transformatif (BARU!)
+ import { reportError } from "@/lib/admin-notify"; // 🛠️ Notifikasi error ke admin (BARU!)
+ import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
+ import type { TranscriptSegmentWithWords } from "@/lib/subtitle-config"; // 💬 Subtitle (BARU!)
+@@ -415,6 +416,13 @@ export async function publishJobClips(
+     // === STEP 4b: 🛡️ SOURCE CREDIT (BARU!) ===
+     // Tambah "Source: <judul> — <channel> <link>" ke deskripsi tiap klip sebelum
+     // upload. Mati: SOURCE_CREDIT_ENABLED=false. Tidak pernah melempar error.
++    // 🎞️ Format Transformatif (BARU!) — komentar AI ikut masuk deskripsi (teks orisinal).
++    // Mati: TRANSFORM_DESCRIPTION=false / fitur tidak aktif. Dilakukan sebelum kredit sumber.
++    try {
++      appendCommentaryToDescription(successfulClips);
++    } catch (err) {
++      console.error("[transform] Gagal menambah komentar ke deskripsi (diabaikan):", err);
++    }
+     const creditResult = await applySourceCreditToClips(jobId, successfulClips);
+     if (creditResult.applied && creditResult.credit) {
+       await update("uploading", "🛡️ Kredit sumber ditambahkan ke deskripsi klip", {
+diff --git a/src/lib/telegram-bot.ts b/src/lib/telegram-bot.ts
+index 35ca3eb..f1faaf1 100644
+--- a/src/lib/telegram-bot.ts
++++ b/src/lib/telegram-bot.ts
+@@ -77,6 +77,8 @@ import {
+ import { renderSubtitlePreview } from "@/lib/subtitle-burner";
+ // 🪝 AI Hook Overlay (BARU!) — import terpisah, tidak mengubah import di atas.
+ import { getHookConfig, HOOK_STYLES, HOOK_STYLE_PRESETS, getHookStyleLabel } from "@/lib/hook-config";
++// 🎞️ Format Transformatif (BARU!) — import terpisah, tidak mengubah import di atas.
++import { buildTransformInfoMessage } from "@/lib/transform-telegram";
+ // 💬 Auto-First Comment (BARU!) — import terpisah, tidak mengubah import di atas.
+ import {
+   isAutoCommentEnabled,
+@@ -699,6 +701,12 @@ bot.command("hook", async (ctx) => {
+   );
+ });
+ 
++// 🎞️ Format Transformatif (BARU!) — command info terpisah. Konfigurasi lengkap:
++// src/lib/transform-config.ts (env var TRANSFORM_*), renderer: src/lib/transform-format.ts
++bot.command("transform", async (ctx) => {
++  await ctx.reply(buildTransformInfoMessage(), { parse_mode: "Markdown" });
++});
++
+ // 💬 Auto-First Comment (BARU!) — command info terpisah. Konfigurasi lengkap:
+ // src/lib/auto-comment-config.ts (env var YOUTUBE_AUTO_COMMENT_*), logika posting:
+ // src/lib/auto-comment.ts
+diff --git a/src/lib/transform-config.ts b/src/lib/transform-config.ts
+new file mode 100644
+index 0000000..05bd69c
+--- /dev/null
++++ b/src/lib/transform-config.ts
+@@ -0,0 +1,498 @@
++/**
++ * 🎞️ FORMAT TRANSFORMATIF — SPLIT-SCREEN / COMMENTARY / FRAME (FITUR BARU!)
++ * =====================================================================
++ * Klip yang HANYA dipotong dari video channel lain berisiko kena "reused
++ * content" saat monetisasi. Fitur ini menambahkan lapisan transformatif
++ * (nilai tambah orisinal) ke setiap klip. Ada 3 komponen, bisa dipakai
++ * sendiri-sendiri atau digabung:
++ *
++ *   1. split-screen → klip di bagian atas, visual loop (gameplay / satisfying /
++ *                     gradient animasi) di bagian bawah.
++ *   2. commentary   → kartu konteks/komentar singkat buatan AI yang muncul di
++ *                     tengah klip. AI menulisnya dalam prompt analisis yang
++ *                     SAMA (tanpa panggilan AI tambahan), seperti Hook Overlay.
++ *   3. frame        → bingkai + label judul "REAKSI" / "RANGKUMAN" / dll.
++ *
++ * Teks komentar juga (opsional) ditambahkan ke deskripsi video — teks orisinal
++ * di deskripsi ikut memperkuat sinyal "bukan sekadar re-upload".
++ *
++ * Semua gagal-aman: kalau AI tidak memberi komentar / FFmpeg gagal / sumber
++ * visual tidak bisa diunduh, klip tetap diproses normal — proses TIDAK PERNAH
++ * gagal gara-gara fitur ini. Default MATI (TRANSFORM_ENABLED=false) sehingga
++ * hasil klip yang sekarang tidak berubah sampai kamu menyalakannya.
++ *
++ * ⚠️ Catatan jujur: ini membantu, tapi bukan jaminan monetisasi. Keputusan
++ * akhir ada di YouTube; pastikan tambahan kamu benar-benar bernilai (komentar
++ * yang informatif, bukan sekadar mengulang isi klip).
++ *
++ * =====================================================================
++ * CARA MENGATUR (Railway → Variables) — cukup ubah nilai lalu redeploy
++ * =====================================================================
++ * TRANSFORM_ENABLED=true        ← saklar utama (default: false)
++ * TRANSFORM_MODE=split-screen,commentary,frame
++ *                               ← pilih komponen, pisah koma
++ *                                 (default: commentary,frame; "all" = semuanya)
++ *
++ * ── Split-screen ──
++ * TRANSFORM_SPLIT_VISUAL=gradient
++ *      gradient  → animasi gradient bawaan FFmpeg (tanpa file, selalu jalan) [default]
++ *      blur      → salinan klip yang di-blur & di-zoom
++ *      <URL/path>→ video loop milik kamu (mp4). Boleh banyak, pisah koma, dirotasi
++ *                  per klip. URL langsung (.mp4) diunduh sekali lalu di-cache;
++ *                  link YouTube diunduh via yt-dlp. Contoh:
++ *                  https://cdn.contoh.com/minecraft-parkour.mp4
++ * TRANSFORM_SPLIT_RATIO=0.55    ← porsi tinggi layar untuk klip (0.4 - 0.7)
++ * TRANSFORM_SPLIT_CLIP_POSITION=top   ← top | bottom (posisi klip sumber)
++ * TRANSFORM_SPLIT_FOCUS_Y=0.4   ← bagian vertikal klip yang dipertahankan saat
++ *                                 di-crop (0 = atas, 0.5 = tengah, 1 = bawah)
++ * TRANSFORM_SPLIT_DIVIDER=6     ← tebal garis pemisah px (0 = tanpa garis)
++ *
++ * ── Commentary (kartu komentar AI) ──
++ * TRANSFORM_COMMENTARY_STYLE=context  ← context | reaction | summary | insight
++ * TRANSFORM_COMMENTARY_MAX_CHARS=130  ← batas panjang teks (60 - 220)
++ * TRANSFORM_COMMENTARY_POSITION=auto  ← auto | top | middle | lower
++ * TRANSFORM_COMMENTARY_START=auto     ← detik mulai tampil (auto = setelah hook)
++ * TRANSFORM_COMMENTARY_DURATION=5     ← lama tampil, detik (2 - 15)
++ * TRANSFORM_COMMENTARY_HEADER=        ← judul kartu (kosong = ikut style)
++ * TRANSFORM_COMMENTARY_PROMPT=        ← arahan tambahan untuk AI (opsional)
++ * TRANSFORM_COMMENTARY_FALLBACK=true  ← true = pakai "alasan viral" AI kalau
++ *                                       komentar kosong
++ * TRANSFORM_DESCRIPTION=true          ← true = tambahkan komentar ke deskripsi
++ *
++ * ── Frame / label ──
++ * TRANSFORM_FRAME_LABEL=auto    ← auto (ikut style) | reaksi | rangkuman |
++ *                                 teks bebas, mis. "REACTION" / "BREAKING"
++ * TRANSFORM_FRAME_STYLE=badge   ← badge | bar
++ * TRANSFORM_FRAME_POSITION=top  ← top | bottom | seam (seam = di garis
++ *                                 pemisah split-screen; tanpa split → top)
++ * TRANSFORM_FRAME_BORDER=10     ← tebal bingkai px (0 = tanpa bingkai)
++ *
++ * ── Tampilan umum ──
++ * TRANSFORM_ACCENT_COLOR=#FFC107   ← warna aksen (bingkai/label/garis)
++ * TRANSFORM_TEXT_COLOR=white
++ * TRANSFORM_CARD_BG=#000000        ← latar kartu komentar
++ * TRANSFORM_CARD_OPACITY=0.8       ← 0 - 1
++ * TRANSFORM_FONT_SIZE=40           ← ukuran font teks kartu (basis lebar 1080)
++ * TRANSFORM_FONT=Montserrat        ← fallback otomatis ke DejaVu Sans
++ * TRANSFORM_FONT_FILE=             ← path .ttf/.otf (menggantikan TRANSFORM_FONT)
++ *
++ * 👉 Mau mengubah teks/arahan AI, label, atau menambah style? Edit
++ *    `COMMENTARY_STYLE_PRESETS` di bawah — dashboard, prompt AI, Telegram, dan
++ *    renderer otomatis mengikuti. Renderer: src/lib/transform-format.ts
++ */
++import {
++  hookColorToRgb,
++  hookColorToHex,
++  hookColorToFfmpeg,
++  sanitizeHookText,
++  getHookConfig,
++} from "@/lib/hook-config";
++
++// ─── Komponen / mode ──────────────────────────────────────────────────────
++export const TRANSFORM_MODES = ["split-screen", "commentary", "frame"] as const;
++export type TransformMode = (typeof TRANSFORM_MODES)[number];
++
++export const TRANSFORM_MODE_INFO: Record<TransformMode, { label: string; description: string }> = {
++  "split-screen": {
++    label: "Split-Screen",
++    description: "Klip di atas, visual loop (gameplay / satisfying / gradient) di bawah",
++  },
++  commentary: {
++    label: "AI Commentary",
++    description: "Kartu konteks / komentar singkat AI yang menambah nilai",
++  },
++  frame: {
++    label: "Frame / Label",
++    description: "Bingkai + judul \"Reaksi\" / \"Rangkuman\" di klip",
++  },
++};
++
++// ─── Style komentar AI (✏️ edit di sini) ──────────────────────────────────
++export const COMMENTARY_STYLES = ["context", "reaction", "summary", "insight"] as const;
++export type CommentaryStyle = (typeof COMMENTARY_STYLES)[number];
++
++export interface CommentaryStylePreset {
++  label: string;
++  description: string;
++  /** Judul kecil di kartu komentar (bisa ditimpa TRANSFORM_COMMENTARY_HEADER). */
++  header: string;
++  /** Label bingkai saat TRANSFORM_FRAME_LABEL=auto. */
++  frameLabel: string;
++  /** Arahan untuk AI — apa yang harus ditulis. */
++  prompt: string;
++  /** Contoh (dipakai di dashboard & Telegram). */
++  example: string;
++}
++
++export const COMMENTARY_STYLE_PRESETS: Record<CommentaryStyle, CommentaryStylePreset> = {
++  context: {
++    label: "Konteks",
++    description: "Latar belakang yang membantu penonton memahami klip",
++    header: "KONTEKS",
++    frameLabel: "SOROTAN",
++    prompt:
++      "Tulis KONTEKS singkat: latar belakang, siapa/apa yang terlibat, atau kenapa momen ini penting — hal yang membantu penonton memahami klip tetapi tidak dijelaskan jelas di dalam klip.",
++    example: "Ini terjadi sehari sebelum final, dan inilah alasan pernyataan ini bikin heboh.",
++  },
++  reaction: {
++    label: "Reaksi",
++    description: "Opini / reaksi singkat dari sudut pandang channel kita",
++    header: "KOMENTAR KAMI",
++    frameLabel: "REAKSI",
++    prompt:
++      "Tulis REAKSI/OPINI singkat orang pertama seolah channel kita sedang bereaksi terhadap klip — punya sudut pandang sendiri (setuju/ragu/kaget + alasannya), BUKAN sekadar mengulang isi klip.",
++    example: "Jujur, poin terakhirnya yang paling bikin mikir — kebanyakan orang gak sadar ini.",
++  },
++  summary: {
++    label: "Rangkuman",
++    description: "Poin utama / takeaway dalam 1-2 kalimat",
++    header: "POIN UTAMA",
++    frameLabel: "RANGKUMAN",
++    prompt:
++      "Tulis RANGKUMAN 1-2 kalimat berisi poin utama atau takeaway yang bisa langsung dipakai penonton, dengan kata-kata sendiri (jangan menyalin kalimat di transkrip).",
++    example: "Intinya: konsisten kecil tiap hari mengalahkan usaha besar sekali-sekali.",
++  },
++  insight: {
++    label: "Wawasan",
++    description: "Fakta / insight tambahan yang relevan",
++    header: "TAHUKAH KAMU?",
++    frameLabel: "WAWASAN",
++    prompt:
++      "Tulis WAWASAN tambahan: satu fakta, data, atau sudut pandang relevan yang memperkaya klip. HANYA tulis fakta yang kamu yakin benar; kalau ragu, ubah jadi pertanyaan atau opini ringan.",
++    example: "Teknik ini sebenarnya dipakai sejak puluhan tahun lalu — bukan hal baru.",
++  },
++};
++
++/** Preset label bingkai untuk nilai singkat di TRANSFORM_FRAME_LABEL (✏️ boleh ditambah). */
++export const FRAME_LABEL_PRESETS: Record<string, string> = {
++  reaksi: "REAKSI",
++  reaction: "REAKSI",
++  rangkuman: "RANGKUMAN",
++  summary: "RANGKUMAN",
++  konteks: "KONTEKS",
++  sorotan: "SOROTAN",
++  wawasan: "WAWASAN",
++};
++
++export const FRAME_STYLES = ["badge", "bar"] as const;
++export type FrameStyle = (typeof FRAME_STYLES)[number];
++export const FRAME_POSITIONS = ["top", "bottom", "seam"] as const;
++export type FramePosition = (typeof FRAME_POSITIONS)[number];
++export const COMMENTARY_POSITIONS = ["auto", "top", "middle", "lower"] as const;
++export type CommentaryPosition = (typeof COMMENTARY_POSITIONS)[number];
++
++/** Sumber visual bawah split-screen: bawaan atau daftar file/URL. */
++export type SplitVisual =
++  | { kind: "gradient" }
++  | { kind: "blur" }
++  | { kind: "sources"; sources: string[] };
++
++export interface TransformConfig {
++  enabled: boolean;
++  modes: TransformMode[];
++  /** Turunan dari `enabled` + `modes` — pakai ini di pipeline. */
++  splitActive: boolean;
++  commentaryActive: boolean;
++  frameActive: boolean;
++
++  split: {
++    visual: SplitVisual;
++    ratio: number;
++    clipPosition: "top" | "bottom";
++    focusY: number;
++    divider: number;
++  };
++
++  commentary: {
++    style: CommentaryStyle;
++    maxChars: number;
++    position: CommentaryPosition;
++    /** null = otomatis (setelah hook selesai). */
++    start: number | null;
++    duration: number;
++    header: string;
++    extraPrompt: string;
++    fallbackFromReason: boolean;
++    appendToDescription: boolean;
++  };
++
++  frame: {
++    label: string;
++    style: FrameStyle;
++    position: FramePosition;
++    border: number;
++  };
++
++  accentColor: string;
++  textColor: string;
++  cardBg: string;
++  cardOpacity: number;
++  fontSize: number;
++  font: string;
++  fontFile: string;
++}
++
++// ─── Parser helper ────────────────────────────────────────────────────────
++function parseBool(raw: string | undefined, fallback: boolean): boolean {
++  if (raw === undefined || raw.trim() === "") return fallback;
++  return raw.toLowerCase().trim() === "true";
++}
++
++function parseNumber(raw: string | undefined, fallback: number, min: number, max: number): number {
++  if (!raw || raw.trim() === "") return fallback;
++  const parsed = parseFloat(raw.trim().replace(",", "."));
++  if (isNaN(parsed)) return fallback;
++  return Math.min(max, Math.max(min, parsed));
++}
++
++function parseEnum<T extends string>(
++  name: string,
++  raw: string | undefined,
++  allowed: readonly T[],
++  fallback: T,
++  aliases: Record<string, T> = {}
++): T {
++  if (!raw || raw.trim() === "") return fallback;
++  const v = raw.toLowerCase().trim().replace(/[_\s]/g, "-");
++  if ((allowed as readonly string[]).includes(v)) return v as T;
++  if (aliases[v]) return aliases[v];
++  console.warn(`[transform-config] ${name}="${raw}" tidak valid (pilihan: ${allowed.join(", ")}). Menggunakan "${fallback}".`);
++  return fallback;
++}
++
++function parseColorEnv(name: string, raw: string | undefined, fallback: string): string {
++  if (!raw || raw.trim() === "") return fallback;
++  if (hookColorToRgb(raw)) return raw.trim();
++  console.warn(`[transform-config] ${name}="${raw}" bukan warna valid. Menggunakan "${fallback}".`);
++  return fallback;
++}
++
++const MODE_ALIASES: Record<string, TransformMode> = {
++  split: "split-screen",
++  splitscreen: "split-screen",
++  "split-layout": "split-screen",
++  komentar: "commentary",
++  comment: "commentary",
++  caption: "commentary",
++  card: "commentary",
++  label: "frame",
++  reaksi: "frame",
++  reaction: "frame",
++  rangkuman: "frame",
++  bingkai: "frame",
++};
++
++function parseModes(raw: string | undefined): TransformMode[] {
++  const fallback: TransformMode[] = ["commentary", "frame"];
++  if (!raw || raw.trim() === "") return fallback;
++  const out = new Set<TransformMode>();
++  for (const part of raw.split(/[,\s|+]+/)) {
++    const v = part.toLowerCase().trim().replace(/_/g, "-");
++    if (!v) continue;
++    if (v === "all" || v === "semua") {
++      TRANSFORM_MODES.forEach((m) => out.add(m));
++    } else if ((TRANSFORM_MODES as readonly string[]).includes(v)) {
++      out.add(v as TransformMode);
++    } else if (MODE_ALIASES[v]) {
++      out.add(MODE_ALIASES[v]);
++    } else if (v !== "none" && v !== "off") {
++      console.warn(`[transform-config] TRANSFORM_MODE: "${part}" tidak dikenal (pilihan: ${TRANSFORM_MODES.join(", ")}, all). Diabaikan.`);
++    }
++  }
++  return out.size ? TRANSFORM_MODES.filter((m) => out.has(m)) : fallback;
++}
++
++function parseSplitVisual(raw: string | undefined): SplitVisual {
++  const v = (raw || "").trim();
++  if (!v || /^(gradient|generated|auto|default)$/i.test(v)) return { kind: "gradient" };
++  if (/^blur(red)?$/i.test(v)) return { kind: "blur" };
++  const sources = v
++    .split(",")
++    .map((s) => s.trim())
++    .filter(Boolean);
++  return sources.length ? { kind: "sources", sources } : { kind: "gradient" };
++}
++
++// ─── Config utama ─────────────────────────────────────────────────────────
++/** Satu-satunya tempat membaca env var TRANSFORM_* — mudah diganti/diaudit. */
++export function getTransformConfig(): TransformConfig {
++  const enabled = parseBool(process.env.TRANSFORM_ENABLED, false);
++  const modes = parseModes(process.env.TRANSFORM_MODE);
++  const style = parseEnum("TRANSFORM_COMMENTARY_STYLE", process.env.TRANSFORM_COMMENTARY_STYLE, COMMENTARY_STYLES, "context", {
++    konteks: "context",
++    reaksi: "reaction",
++    rangkuman: "summary",
++    wawasan: "insight",
++    opinion: "reaction",
++  });
++  const startRaw = (process.env.TRANSFORM_COMMENTARY_START || "").trim().toLowerCase();
++
++  return {
++    enabled,
++    modes,
++    splitActive: enabled && modes.includes("split-screen"),
++    commentaryActive: enabled && modes.includes("commentary"),
++    frameActive: enabled && modes.includes("frame"),
++
++    split: {
++      visual: parseSplitVisual(process.env.TRANSFORM_SPLIT_VISUAL),
++      ratio: Math.round(parseNumber(process.env.TRANSFORM_SPLIT_RATIO, 0.55, 0.4, 0.7) * 100) / 100,
++      clipPosition: parseEnum("TRANSFORM_SPLIT_CLIP_POSITION", process.env.TRANSFORM_SPLIT_CLIP_POSITION, ["top", "bottom"] as const, "top", {
++        atas: "top",
++        bawah: "bottom",
++      }),
++      focusY: parseNumber(process.env.TRANSFORM_SPLIT_FOCUS_Y, 0.4, 0, 1),
++      divider: Math.round(parseNumber(process.env.TRANSFORM_SPLIT_DIVIDER, 6, 0, 30)),
++    },
++
++    commentary: {
++      style,
++      maxChars: Math.round(parseNumber(process.env.TRANSFORM_COMMENTARY_MAX_CHARS, 130, 60, 220)),
++      position: parseEnum("TRANSFORM_COMMENTARY_POSITION", process.env.TRANSFORM_COMMENTARY_POSITION, COMMENTARY_POSITIONS, "auto", {
++        bottom: "lower",
++        bawah: "lower",
++        atas: "top",
++        tengah: "middle",
++        center: "middle",
++      }),
++      start: startRaw === "" || startRaw === "auto" ? null : parseNumber(startRaw, 2.5, 0, 30),
++      duration: Math.round(parseNumber(process.env.TRANSFORM_COMMENTARY_DURATION, 5, 2, 15) * 10) / 10,
++      header: (process.env.TRANSFORM_COMMENTARY_HEADER || "").trim().slice(0, 30),
++      extraPrompt: (process.env.TRANSFORM_COMMENTARY_PROMPT || "").trim().slice(0, 400),
++      fallbackFromReason: parseBool(process.env.TRANSFORM_COMMENTARY_FALLBACK, true),
++      appendToDescription: parseBool(process.env.TRANSFORM_DESCRIPTION, true),
++    },
++
++    frame: {
++      label: (process.env.TRANSFORM_FRAME_LABEL || "auto").trim().slice(0, 24) || "auto",
++      style: parseEnum("TRANSFORM_FRAME_STYLE", process.env.TRANSFORM_FRAME_STYLE, FRAME_STYLES, "badge"),
++      position: parseEnum("TRANSFORM_FRAME_POSITION", process.env.TRANSFORM_FRAME_POSITION, FRAME_POSITIONS, "top", {
++        atas: "top",
++        bawah: "bottom",
++        garis: "seam",
++        divider: "seam",
++      }),
++      border: Math.round(parseNumber(process.env.TRANSFORM_FRAME_BORDER, 10, 0, 40)),
++    },
++
++    accentColor: parseColorEnv("TRANSFORM_ACCENT_COLOR", process.env.TRANSFORM_ACCENT_COLOR, "#FFC107"),
++    textColor: parseColorEnv("TRANSFORM_TEXT_COLOR", process.env.TRANSFORM_TEXT_COLOR, "white"),
++    cardBg: parseColorEnv("TRANSFORM_CARD_BG", process.env.TRANSFORM_CARD_BG, "#000000"),
++    cardOpacity: parseNumber(process.env.TRANSFORM_CARD_OPACITY, 0.8, 0, 1),
++    fontSize: Math.round(parseNumber(process.env.TRANSFORM_FONT_SIZE, 40, 20, 90)),
++    font: (process.env.TRANSFORM_FONT || process.env.HOOK_FONT || "Montserrat").trim(),
++    fontFile: (process.env.TRANSFORM_FONT_FILE || process.env.HOOK_FONT_FILE || "").trim(),
++  };
++}
++
++// ─── Helper tampilan ──────────────────────────────────────────────────────
++export function transformColorToHex(input: string, fallback = "#FFFFFF"): string {
++  return hookColorToHex(input, fallback);
++}
++
++export function transformColorToFfmpeg(input: string, fallbackRgb: string, opacity?: number): string {
++  return hookColorToFfmpeg(input, fallbackRgb, opacity);
++}
++
++export function transformColorToRgb(input: string): string | null {
++  return hookColorToRgb(input);
++}
++
++/** Judul kartu komentar (env menimpa preset). */
++export function getCommentaryHeader(cfg: TransformConfig = getTransformConfig()): string {
++  return cfg.commentary.header || COMMENTARY_STYLE_PRESETS[cfg.commentary.style].header;
++}
++
++/** Label bingkai: auto → ikut style; preset singkat → teks preset; selain itu teks bebas. */
++export function getFrameLabel(cfg: TransformConfig = getTransformConfig()): string {
++  const raw = cfg.frame.label.trim();
++  if (!raw || raw.toLowerCase() === "auto") return COMMENTARY_STYLE_PRESETS[cfg.commentary.style].frameLabel;
++  return FRAME_LABEL_PRESETS[raw.toLowerCase()] || raw.toUpperCase();
++}
++
++/** Ringkasan sumber visual untuk dashboard/Telegram. */
++export function describeSplitVisual(v: SplitVisual): string {
++  if (v.kind === "gradient") return "Gradient animasi bawaan";
++  if (v.kind === "blur") return "Salinan klip di-blur";
++  return `${v.sources.length} sumber loop (file/URL)`;
++}
++
++/** Geometri split-screen (dipakai renderer split & overlay agar posisinya konsisten). */
++export function getSplitGeometry(height: number, cfg: TransformConfig = getTransformConfig()) {
++  const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
++  const clipH = even(height * cfg.split.ratio);
++  const visualH = even(height - clipH);
++  const clipTop = cfg.split.clipPosition === "top";
++  /** y garis pemisah (batas antara dua area). */
++  const seamY = clipTop ? clipH : visualH;
++  return { clipH, visualH, clipTop, seamY };
++}
++
++/** Detik mulai kartu komentar: manual, atau otomatis setelah hook selesai. */
++export function resolveCommentaryStart(cfg: TransformConfig = getTransformConfig()): number {
++  if (cfg.commentary.start !== null) return cfg.commentary.start;
++  const hook = getHookConfig();
++  return hook.enabled ? Math.round((hook.duration + 0.5) * 10) / 10 : 1;
++}
++
++// ─── Prompt AI & pembersihan komentar ─────────────────────────────────────
++/** Instruksi tambahan untuk prompt analisis (kosong kalau commentary tidak aktif). */
++export function buildCommentaryPromptInstruction(cfg: TransformConfig = getTransformConfig()): string {
++  if (!cfg.commentaryActive) return "";
++  const preset = COMMENTARY_STYLE_PRESETS[cfg.commentary.style];
++  return `
++KOMENTAR AI (kartu teks orisinal yang ditampilkan di tengah klip sebagai nilai tambah):
++- Untuk SETIAP klip, buat satu teks "commentary" maksimal ${cfg.commentary.maxChars} karakter (1-2 kalimat)
++- ${preset.prompt}
++- Tulis dengan kata-kata SENDIRI, jangan menyalin kalimat dari transkrip, harus menambah nilai (bukan mengulang isi klip)
++- JANGAN mengarang fakta, angka, atau nama; kalau tidak yakin, tulis sebagai opini atau pertanyaan
++- Bahasa sama dengan bahasa video, gaya santai (Indonesia: pakai "kamu/gak", bukan bahasa baku)
++- Tanpa emoji, tanpa hashtag, tanpa tanda kutip
++- Contoh gaya: "${preset.example}"${cfg.commentary.extraPrompt ? `\n- Arahan tambahan: ${cfg.commentary.extraPrompt}` : ""}
++`;
++}
++
++/** Potongan field JSON untuk contoh output di prompt (kosong kalau tidak aktif). */
++export function buildCommentaryJsonField(cfg: TransformConfig = getTransformConfig()): string {
++  return cfg.commentaryActive
++    ? `,\n    "commentary": "<komentar AI orisinal, max ${cfg.commentary.maxChars} karakter>"`
++    : "";
++}
++
++/**
++ * Komentar dari AI (dibersihkan). Kosong & TRANSFORM_COMMENTARY_FALLBACK=true →
++ * pakai "alasan viral" dari AI (bila ada). Return undefined kalau fitur mati.
++ */
++export function resolveCommentary(raw: unknown, reason?: unknown, cfg: TransformConfig = getTransformConfig()): string | undefined {
++  if (!cfg.commentaryActive) return undefined;
++  const cleaned = sanitizeHookText(raw, cfg.commentary.maxChars);
++  if (cleaned) return cleaned;
++  if (cfg.commentary.fallbackFromReason && typeof reason === "string") {
++    const r = sanitizeHookText(reason, cfg.commentary.maxChars);
++    // Alasan bawaan sistem (bukan buatan AI) tidak layak ditampilkan ke penonton.
++    if (r && !/^(AI-selected moment|Dipilih berdasarkan)/i.test(r)) return r;
++  }
++  return undefined;
++}
++
++/** Tambahkan komentar ke deskripsi klip (idempoten). Dipanggil sebelum upload. */
++export function appendCommentaryToDescription(
++  clips: Array<{ description: string; commentary?: string }>,
++  cfg: TransformConfig = getTransformConfig()
++): number {
++  if (!cfg.commentaryActive || !cfg.commentary.appendToDescription) return 0;
++  const header = getCommentaryHeader(cfg);
++  const title = header.charAt(0) + header.slice(1).toLowerCase();
++  let n = 0;
++  for (const clip of clips) {
++    const text = clip.commentary?.trim();
++    if (!text || (clip.description || "").includes(text)) continue;
++    clip.description = `${(clip.description || "").trim()}\n\n💬 ${title}: ${text}`.trim();
++    n++;
++  }
++  return n;
++}
++
++export function isValidCommentaryStyle(value: string): value is CommentaryStyle {
++  return (COMMENTARY_STYLES as readonly string[]).includes(value);
++}
+diff --git a/src/lib/transform-format.ts b/src/lib/transform-format.ts
+new file mode 100644
+index 0000000..7f62eb2
+--- /dev/null
++++ b/src/lib/transform-format.ts
+@@ -0,0 +1,562 @@
++/**
++ * 🎞️ FORMAT TRANSFORMATIF — RENDERER (FITUR BARU!)
++ * =====================================================================
++ * Dua langkah FFmpeg yang dipanggil dari `processSingleClip`
++ * (src/lib/video-processor.ts):
++ *
++ *   1. applySplitScreen()       → klip + visual loop (atas/bawah). Dipanggil
++ *                                 SEBELUM subtitle/hook/watermark supaya
++ *                                 semuanya ter-render di kanvas final.
++ *   2. applyTransformOverlays() → bingkai + label ("REAKSI"/"RANGKUMAN") +
++ *                                 kartu komentar AI. Dipanggil SETELAH hook,
++ *                                 sebelum watermark & intro/outro.
++ *
++ * Konfigurasi (env var TRANSFORM_*) & penjelasan: src/lib/transform-config.ts
++ *
++ * Tidak pernah melempar error — kalau gagal, klip sebelumnya dipakai apa
++ * adanya (proses klip tidak boleh gagal gara-gara fitur ini).
++ */
++import { execFile } from "child_process";
++import { promisify } from "util";
++import crypto from "crypto";
++import fs from "fs";
++import path from "path";
++import {
++  getTransformConfig,
++  getSplitGeometry,
++  getFrameLabel,
++  getCommentaryHeader,
++  resolveCommentaryStart,
++  transformColorToFfmpeg,
++  transformColorToRgb,
++  type TransformConfig,
++} from "@/lib/transform-config";
++import { sanitizeHookText } from "@/lib/hook-config";
++
++const execFileAsync = promisify(execFile);
++const TMP_DIR = process.env.TMP_DIR || "/tmp/autoclip";
++const VISUAL_CACHE_DIR = path.join(TMP_DIR, "transform_visuals");
++const MAX_VISUAL_BYTES = 500 * 1024 * 1024;
++
++export interface TransformStepResult {
++  applied: boolean;
++  outputPath: string;
++  reason?: string;
++  /** Komponen yang benar-benar dirender (untuk log). */
++  parts?: string[];
++}
++
++const DEJAVU_BOLD_CANDIDATES = [
++  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
++  "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
++  "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
++];
++
++// ─── Helper umum ──────────────────────────────────────────────────────────
++const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
++
++/** FFmpeg drawtext tidak bisa merender emoji (jadi kotak kosong) — buang. */
++function stripUnrenderable(text: string): string {
++  return text
++    .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "")
++    .replace(/\s+/g, " ")
++    .trim();
++}
++
++function wrapText(text: string, maxCharsPerLine: number): string[] {
++  const words = text.split(" ").filter(Boolean);
++  const lines: string[] = [];
++  let cur = "";
++  for (const w of words) {
++    if (!cur) cur = w;
++    else if ((cur + " " + w).length <= maxCharsPerLine) cur += " " + w;
++    else {
++      lines.push(cur);
++      cur = w;
++    }
++  }
++  if (cur) lines.push(cur);
++  return lines;
++}
++
++/** Escape nilai di dalam tanda kutip tunggal untuk filtergraph FFmpeg. */
++function escFilterValue(v: string): string {
++  return v.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/:/g, "\\:");
++}
++
++function errMsg(err: unknown): string {
++  return err instanceof Error ? err.message.split("\n").slice(-4).join(" ") : String(err);
++}
++
++interface MediaInfo {
++  width: number;
++  height: number;
++  /** Detik; 0 kalau tidak diketahui. */
++  duration: number;
++}
++
++async function probeMedia(inputPath: string): Promise<MediaInfo> {
++  const info: MediaInfo = { width: 1080, height: 1920, duration: 0 };
++  try {
++    const { stdout } = await execFileAsync(
++      "ffprobe",
++      [
++        "-v", "error",
++        "-select_streams", "v:0",
++        "-show_entries", "stream=width,height:format=duration",
++        "-of", "json",
++        inputPath,
++      ],
++      { timeout: 30000 }
++    );
++    const data = JSON.parse(stdout);
++    const s = data?.streams?.[0];
++    if (s?.width > 0 && s?.height > 0) {
++      info.width = Number(s.width);
++      info.height = Number(s.height);
++    }
++    const d = parseFloat(data?.format?.duration);
++    if (d > 0) info.duration = d;
++  } catch {
++    /* pakai default 9:16 */
++  }
++  return info;
++}
++
++async function runFfmpeg(args: string[]): Promise<void> {
++  await execFileAsync("ffmpeg", args, { timeout: 600000, maxBuffer: 20 * 1024 * 1024 });
++}
++
++const ENCODE_ARGS = [
++  "-c:v", "libx264",
++  "-crf", "23",
++  "-preset", "fast",
++  "-pix_fmt", "yuv420p",
++  "-threads", "2",
++  "-movflags", "+faststart",
++];
++
++function outputOk(p: string): boolean {
++  return fs.existsSync(p) && fs.statSync(p).size > 0;
++}
++
++// =====================================================================
++// 1) SPLIT-SCREEN
++// =====================================================================
++/** Warna gelap dari warna aksen (untuk gradient bawaan). */
++function dimRgb(rgb: string, factor: number): string {
++  const n = parseInt(rgb, 16);
++  const r = Math.round(((n >> 16) & 255) * factor);
++  const g = Math.round(((n >> 8) & 255) * factor);
++  const b = Math.round((n & 255) * factor);
++  return [r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("").toUpperCase();
++}
++
++const inFlightDownloads = new Map<string, Promise<string | null>>();
++
++/** Sumber loop → file lokal. Path lokal dipakai langsung; URL diunduh sekali & di-cache. */
++async function resolveVisualFile(source: string): Promise<string | null> {
++  try {
++    if (!/^https?:\/\//i.test(source)) {
++      const p = path.resolve(source);
++      if (fs.existsSync(p) && fs.statSync(p).isFile()) return p;
++      console.warn(`[transform] Sumber visual tidak ditemukan: ${source}`);
++      return null;
++    }
++    const key = crypto.createHash("sha1").update(source).digest("hex").slice(0, 16);
++    const out = path.join(VISUAL_CACHE_DIR, `${key}.mp4`);
++    if (outputOk(out)) return out;
++    let pending = inFlightDownloads.get(key);
++    if (!pending) {
++      pending = downloadVisual(source, out).finally(() => inFlightDownloads.delete(key));
++      inFlightDownloads.set(key, pending);
++    }
++    return await pending;
++  } catch (err) {
++    console.warn(`[transform] Gagal menyiapkan sumber visual ${source}: ${errMsg(err).slice(0, 200)}`);
++    return null;
++  }
++}
++
++async function downloadVisual(url: string, out: string): Promise<string | null> {
++  fs.mkdirSync(VISUAL_CACHE_DIR, { recursive: true });
++  const tmpOut = `${out}.part`;
++  try {
++    if (/youtube\.com|youtu\.be|tiktok\.com|instagram\.com|facebook\.com|fb\.watch/i.test(url)) {
++      // Platform video → yt-dlp (720p cukup untuk setengah layar).
++      console.log(`[transform] Mengunduh visual loop via yt-dlp: ${url}`);
++      const args = [
++        "--no-playlist",
++        "--merge-output-format", "mp4",
++        "-f", "bestvideo[ext=mp4][height<=720]/best[ext=mp4][height<=720]/best[height<=720]/best",
++        "--extractor-args", "youtube:player_client=web_safari,web_embedded,-tv_downgraded",
++        "-o", tmpOut + ".%(ext)s",
++      ];
++      if (fs.existsSync("cookies.txt")) args.push("--cookies", "cookies.txt");
++      args.push(url);
++      await execFileAsync("yt-dlp", args, { timeout: 600000 });
++      const produced = fs.readdirSync(VISUAL_CACHE_DIR).find((f) => f.startsWith(path.basename(tmpOut) + "."));
++      if (!produced) return null;
++      fs.renameSync(path.join(VISUAL_CACHE_DIR, produced), out);
++    } else {
++      console.log(`[transform] Mengunduh visual loop: ${url}`);
++      const axios = (await import("axios")).default;
++      const res = await axios.get(url, {
++        responseType: "stream",
++        timeout: 180000,
++        maxContentLength: MAX_VISUAL_BYTES,
++        maxBodyLength: MAX_VISUAL_BYTES,
++      });
++      await new Promise<void>((resolve, reject) => {
++        const ws = fs.createWriteStream(tmpOut);
++        res.data.pipe(ws);
++        res.data.on("error", reject);
++        ws.on("finish", () => resolve());
++        ws.on("error", reject);
++      });
++      fs.renameSync(tmpOut, out);
++    }
++    return outputOk(out) ? out : null;
++  } catch (err) {
++    console.warn(`[transform] Gagal mengunduh visual loop: ${errMsg(err).slice(0, 200)}`);
++    return null;
++  } finally {
++    try { if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut); } catch { /* ignore */ }
++  }
++}
++
++interface VisualAttempt {
++  label: string;
++  /** Argumen input untuk visual (kosong = mode blur, tanpa input kedua). */
++  inputArgs: string[];
++  blur: boolean;
++}
++
++async function buildVisualAttempts(
++  cfg: TransformConfig,
++  width: number,
++  visualH: number,
++  duration: number,
++  clipIndex: number
++): Promise<VisualAttempt[]> {
++  const attempts: VisualAttempt[] = [];
++  const v = cfg.split.visual;
++  const dur = (duration > 0 ? duration : 90) + 1;
++
++  if (v.kind === "sources") {
++    // Rotasi per klip; kalau satu sumber gagal, coba sumber berikutnya.
++    for (let k = 0; k < v.sources.length; k++) {
++      const src = v.sources[(clipIndex + k) % v.sources.length];
++      const file = await resolveVisualFile(src);
++      if (file) {
++        attempts.push({ label: `loop ${path.basename(file)}`, inputArgs: ["-stream_loop", "-1", "-i", file], blur: false });
++        break;
++      }
++    }
++  } else if (v.kind === "blur") {
++    attempts.push({ label: "blur", inputArgs: [], blur: true });
++  }
++
++  const accent = transformColorToRgb(cfg.accentColor) || "FFC107";
++  const c1 = dimRgb(accent, 0.5);
++  const c2 = dimRgb(accent, 0.22);
++  attempts.push({
++    label: "gradient",
++    inputArgs: [
++      "-f", "lavfi",
++      "-i", `gradients=size=${width}x${visualH}:rate=30:duration=${dur}:speed=0.03:nb_colors=3:c0=0x0B0B1A:c1=0x${c1}:c2=0x${c2}`,
++    ],
++    blur: false,
++  });
++  attempts.push({
++    label: "warna polos",
++    inputArgs: ["-f", "lavfi", "-i", `color=c=0x${dimRgb(accent, 0.15)}:size=${width}x${visualH}:rate=30:duration=${dur}`],
++    blur: false,
++  });
++  return attempts;
++}
++
++export async function applySplitScreen(
++  inputPath: string,
++  outputPath: string,
++  clipIndex: number,
++  config?: TransformConfig
++): Promise<TransformStepResult> {
++  const cfg = config || getTransformConfig();
++  const skip = (reason: string): TransformStepResult => ({ applied: false, outputPath: inputPath, reason });
++  if (!cfg.splitActive) return skip("split-screen tidak aktif");
++  if (!fs.existsSync(inputPath)) return skip("input tidak ditemukan");
++
++  try {
++    fs.mkdirSync(TMP_DIR, { recursive: true });
++    const info = await probeMedia(inputPath);
++    const W = even(info.width);
++    const { clipH, visualH, clipTop, seamY } = getSplitGeometry(info.height, cfg);
++    const total = clipH + visualH;
++    const attempts = await buildVisualAttempts(cfg, W, visualH, info.duration, clipIndex);
++    const accent = transformColorToFfmpeg(cfg.accentColor, "FFC107");
++    const d = Math.round(cfg.split.divider * (W / 1080));
++
++    const clipChain =
++      `scale=${W}:${clipH}:force_original_aspect_ratio=increase,` +
++      `crop=${W}:${clipH}:0:(ih-${clipH})*${cfg.split.focusY},setsar=1,fps=30`;
++    const visChain =
++      `scale=${W}:${visualH}:force_original_aspect_ratio=increase,crop=${W}:${visualH},setsar=1,fps=30`;
++    const tail =
++      (d > 0 ? `,drawbox=x=0:y=${Math.round(seamY - d / 2)}:w=iw:h=${d}:color=${accent}:t=fill` : "") +
++      `,format=yuv420p`;
++
++    let lastError = "";
++    for (const attempt of attempts) {
++      let graph: string;
++      if (attempt.blur) {
++        const stack = clipTop ? "[clip][vis]" : "[vis][clip]";
++        graph =
++          `[0:v]split=2[a][b];[a]${clipChain}[clip];` +
++          `[b]scale=${W}:${visualH}:force_original_aspect_ratio=increase,crop=${W}:${visualH},` +
++          `boxblur=28:4,eq=brightness=-0.18:saturation=1.2,setsar=1,fps=30[vis];` +
++          `${stack}vstack=inputs=2:shortest=1${tail}[v]`;
++      } else {
++        const stack = clipTop ? "[clip][vis]" : "[vis][clip]";
++        graph =
++          `[0:v]${clipChain}[clip];[1:v]${visChain}[vis];` +
++          `${stack}vstack=inputs=2:shortest=1${tail}[v]`;
++      }
++
++      const args = ["-y", "-i", inputPath, ...attempt.inputArgs, "-filter_complex", graph, "-map", "[v]", "-map", "0:a?"];
++      if (info.duration > 0) args.push("-t", info.duration.toFixed(2));
++      args.push(...ENCODE_ARGS, "-c:a", "copy", outputPath);
++
++      try {
++        console.log(`[transform] Split-screen ${W}x${total} (${Math.round(cfg.split.ratio * 100)}% klip ${cfg.split.clipPosition}, visual: ${attempt.label})`);
++        await runFfmpeg(args);
++        if (outputOk(outputPath)) {
++          return { applied: true, outputPath, parts: [`split-screen:${attempt.label}`] };
++        }
++        lastError = "output kosong";
++      } catch (err) {
++        lastError = errMsg(err);
++        console.warn(`[transform] ⚠️ Split-screen gagal (visual ${attempt.label}): ${lastError.slice(0, 300)}`);
++        try { fs.unlinkSync(outputPath); } catch { /* ignore */ }
++      }
++    }
++    console.error("[transform] ❌ Split-screen gagal, klip dipakai tanpa split:", lastError.slice(0, 300));
++    return skip(`FFmpeg gagal: ${lastError.slice(0, 120)}`);
++  } catch (err) {
++    return skip(`error: ${errMsg(err).slice(0, 120)}`);
++  }
++}
++
++// =====================================================================
++// 2) FRAME / LABEL + KARTU KOMENTAR
++// =====================================================================
++interface FontAttempt {
++  label: string;
++  option: string;
++}
++
++function buildFontAttempts(cfg: TransformConfig): FontAttempt[] {
++  const attempts: FontAttempt[] = [];
++  if (cfg.fontFile && fs.existsSync(cfg.fontFile)) {
++    attempts.push({ label: `file ${cfg.fontFile}`, option: `fontfile='${escFilterValue(cfg.fontFile)}'` });
++  } else {
++    const pattern = cfg.font.includes(":") ? cfg.font : `${cfg.font}:bold`;
++    attempts.push({ label: cfg.font, option: `font='${escFilterValue(pattern)}'` });
++  }
++  attempts.push({ label: "DejaVu Sans", option: `font='DejaVu Sans\\:bold'` });
++  const dejavu = DEJAVU_BOLD_CANDIDATES.find((p) => fs.existsSync(p));
++  if (dejavu) attempts.push({ label: `file ${dejavu}`, option: `fontfile='${escFilterValue(dejavu)}'` });
++  return attempts;
++}
++
++/** Warna teks yang kontras di atas warna latar (hitam / putih). */
++function contrastText(bgRgb: string | null): string {
++  const n = parseInt(bgRgb || "FFC107", 16);
++  const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
++  return lum > 0.6 ? "0x111111" : "0xFFFFFF";
++}
++
++interface OverlayPlan {
++  filters: string[];
++  parts: string[];
++}
++
++function buildOverlayFilters(
++  cfg: TransformConfig,
++  info: MediaInfo,
++  commentary: string | undefined,
++  fontOption: string,
++  textFiles: string[],
++  runId: string
++): OverlayPlan {
++  const { width: w, height: h } = info;
++  const scale = w / 1080;
++  const filters: string[] = [];
++  const parts: string[] = [];
++  let fileCounter = 0;
++
++  const accentRgb = transformColorToRgb(cfg.accentColor);
++  const accent = transformColorToFfmpeg(cfg.accentColor, "FFC107");
++  const textColor = transformColorToFfmpeg(cfg.textColor, "FFFFFF");
++  const cardColor = transformColorToFfmpeg(cfg.cardBg, "000000", cfg.cardOpacity);
++  const geo = getSplitGeometry(h, cfg);
++
++  const drawText = (
++    text: string,
++    x: string | number,
++    y: string | number,
++    size: number,
++    color: string,
++    extra = ""
++  ) => {
++    const file = path.join(TMP_DIR, `transform_${runId}_${fileCounter++}.txt`);
++    fs.writeFileSync(file, text, "utf8");
++    textFiles.push(file);
++    filters.push(
++      `drawtext=textfile='${escFilterValue(file)}':expansion=none:${fontOption}` +
++        `:fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}${extra}`
++    );
++  };
++
++  // ── Frame: bingkai ──
++  if (cfg.frameActive && cfg.frame.border > 0) {
++    const b = Math.max(2, Math.round(cfg.frame.border * scale));
++    filters.push(`drawbox=x=0:y=0:w=iw:h=ih:color=${accent}:t=${b}`);
++    parts.push("bingkai");
++  }
++
++  // ── Frame: label ──
++  const label = cfg.frameActive ? stripUnrenderable(getFrameLabel(cfg)) : "";
++  if (label) {
++    const fs_ = Math.max(18, Math.round(cfg.fontSize * 0.85 * scale));
++    const pad = Math.round(fs_ * 0.4);
++    const labelColor = contrastText(accentRgb);
++    const useSeam = cfg.frame.position === "seam" && cfg.splitActive;
++    const pos = cfg.frame.position === "seam" && !cfg.splitActive ? "top" : cfg.frame.position;
++    const border = cfg.frameActive ? Math.round(cfg.frame.border * scale) : 0;
++
++    if (cfg.frame.style === "bar") {
++      const barH = Math.round(fs_ * 1.2) + 2 * pad;
++      const barY = useSeam
++        ? Math.round(geo.seamY - barH / 2)
++        : pos === "bottom"
++          ? Math.round(h * 0.86)
++          : Math.round(h * 0.055);
++      filters.push(`drawbox=x=0:y=${barY}:w=iw:h=${barH}:color=${accent}:t=fill`);
++      drawText(label, "(w-text_w)/2", barY + pad, fs_, labelColor);
++    } else {
++      const y = useSeam
++        ? `${geo.seamY}-text_h/2`
++        : pos === "bottom"
++          ? `${Math.round(h * 0.86)}`
++          : `${Math.round(h * 0.06 + border)}`;
++      drawText(label, "(w-text_w)/2", y, fs_, labelColor, `:box=1:boxcolor=${accent}:boxborderw=${pad}`);
++    }
++    parts.push(`label "${label}"`);
++  }
++
++  // ── Kartu komentar ──
++  const text = commentary ? stripUnrenderable(commentary) : "";
++  if (cfg.commentaryActive && text) {
++    const fs_ = Math.max(18, Math.round(cfg.fontSize * scale));
++    const headFs = Math.max(14, Math.round(fs_ * 0.62));
++    const pitch = Math.round(fs_ * 1.32);
++    const pad = Math.round(fs_ * 0.55);
++    const stripe = Math.max(4, Math.round(fs_ * 0.18));
++    const marginX = Math.round(w * 0.06);
++    const cardW = w - 2 * marginX;
++    const textX = marginX + stripe + pad;
++    const charW = fs_ * 0.64; // perkiraan lebar rata-rata font bold
++    const maxPerLine = Math.max(8, Math.floor((cardW - stripe - 2 * pad) / charW));
++
++    let lines = wrapText(text, maxPerLine);
++    if (lines.length > 4) {
++      lines = lines.slice(0, 4);
++      lines[3] = lines[3].replace(/[.,;:!?…\s]+$/, "") + "...";
++    }
++    const header = stripUnrenderable(getCommentaryHeader(cfg)).toUpperCase();
++    const headH = header ? Math.round(headFs * 1.5) : 0;
++    const cardH = pad + headH + lines.length * pitch + pad - Math.round((pitch - fs_ * 1.17) / 2);
++
++    // Posisi vertikal.
++    let y: number;
++    const p = cfg.commentary.position;
++    if (p === "top") y = Math.round(h * 0.17);
++    else if (p === "middle") y = Math.round((h - cardH) / 2);
++    else if (p === "lower") y = Math.round(h * 0.64);
++    else y = cfg.splitActive ? Math.round(geo.seamY + h * 0.035) : Math.round(h * 0.64);
++    y = Math.max(Math.round(h * 0.08), Math.min(y, Math.round(h * 0.84) - cardH));
++
++    // Waktu tampil.
++    let start = resolveCommentaryStart(cfg);
++    let end = start + cfg.commentary.duration;
++    if (info.duration > 0) {
++      end = Math.min(end, info.duration - 0.3);
++      if (end - start < 2 && info.duration > 4) start = Math.max(0.5, end - 2);
++    }
++    if (end - start >= 1.5) {
++      const enable = `:enable='between(t,${start.toFixed(2)},${end.toFixed(2)})'`;
++      filters.push(`drawbox=x=${marginX}:y=${y}:w=${cardW}:h=${cardH}:color=${cardColor}:t=fill${enable}`);
++      filters.push(`drawbox=x=${marginX}:y=${y}:w=${stripe}:h=${cardH}:color=${accent}:t=fill${enable}`);
++      let ty = y + pad;
++      if (header) {
++        drawText(header, textX, ty, headFs, accent, enable);
++        ty += headH;
++      }
++      lines.forEach((line, i) => drawText(line, textX, ty + i * pitch, fs_, textColor, enable));
++      parts.push(`kartu komentar (${start.toFixed(1)}s-${end.toFixed(1)}s)`);
++    }
++  }
++
++  return { filters, parts };
++}
++
++export async function applyTransformOverlays(
++  inputPath: string,
++  outputPath: string,
++  commentary: string | undefined | null,
++  config?: TransformConfig
++): Promise<TransformStepResult> {
++  const cfg = config || getTransformConfig();
++  const skip = (reason: string): TransformStepResult => ({ applied: false, outputPath: inputPath, reason });
++  if (!cfg.frameActive && !cfg.commentaryActive) return skip("frame/commentary tidak aktif");
++  if (!fs.existsSync(inputPath)) return skip("input tidak ditemukan");
++
++  const text = sanitizeHookText(typeof commentary === "string" ? commentary : "", cfg.commentary.maxChars);
++
++  const info = await probeMedia(inputPath);
++  fs.mkdirSync(TMP_DIR, { recursive: true });
++  const runId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
++  const textFiles: string[] = [];
++  let lastError = "";
++
++  try {
++    for (const attempt of buildFontAttempts(cfg)) {
++      try {
++        const plan = buildOverlayFilters(cfg, info, text || undefined, attempt.option, textFiles, runId);
++        if (!plan.filters.length) return skip("tidak ada elemen untuk dirender (klip tanpa komentar & frame mati)");
++        console.log(`[transform] Overlay (font ${attempt.label}): ${plan.parts.join(", ")}`);
++        await runFfmpeg([
++          "-y",
++          "-i", inputPath,
++          "-vf", plan.filters.join(","),
++          ...ENCODE_ARGS,
++          "-c:a", "copy",
++          outputPath,
++        ]);
++        if (outputOk(outputPath)) return { applied: true, outputPath, parts: plan.parts };
++        lastError = "output kosong";
++      } catch (err) {
++        lastError = errMsg(err);
++        console.warn(`[transform] ⚠️ Overlay gagal dengan font "${attempt.label}": ${lastError.slice(0, 300)}`);
++        try { fs.unlinkSync(outputPath); } catch { /* ignore */ }
++      }
++    }
++    console.error("[transform] ❌ Overlay gagal, klip dipakai tanpa overlay:", lastError.slice(0, 300));
++    return skip(`FFmpeg gagal: ${lastError.slice(0, 120)}`);
++  } finally {
++    for (const f of textFiles) {
++      try { fs.unlinkSync(f); } catch { /* ignore */ }
++    }
++  }
++}
+diff --git a/src/lib/transform-telegram.ts b/src/lib/transform-telegram.ts
+new file mode 100644
+index 0000000..244e057
+--- /dev/null
++++ b/src/lib/transform-telegram.ts
+@@ -0,0 +1,59 @@
++/**
++ * 🎞️ FORMAT TRANSFORMATIF — teks info untuk Telegram (`/transform`)
++ * Hanya membaca konfigurasi (env var TRANSFORM_*, lihat src/lib/transform-config.ts).
++ * Mengubah nilai dilakukan di Railway → Variables, sama seperti fitur lain.
++ */
++import {
++  getTransformConfig,
++  getFrameLabel,
++  getCommentaryHeader,
++  describeSplitVisual,
++  resolveCommentaryStart,
++  TRANSFORM_MODES,
++  TRANSFORM_MODE_INFO,
++  COMMENTARY_STYLES,
++  COMMENTARY_STYLE_PRESETS,
++} from "@/lib/transform-config";
++
++const code = (v: string | number | boolean) => `\`${v}\``;
++
++export function buildTransformInfoMessage(): string {
++  const cfg = getTransformConfig();
++  const on = (b: boolean) => (b ? "✅ Aktif" : "⚪ Tidak dipilih");
++  const preset = COMMENTARY_STYLE_PRESETS[cfg.commentary.style];
++
++  let msg =
++    `🎞️ *Format Transformatif (anti reused content):*\n\n` +
++    `Status: ${cfg.enabled ? "✅ Aktif" : "❌ Nonaktif (TRANSFORM\\_ENABLED=false)"}\n` +
++    `Mode: ${cfg.modes.map((m) => code(m)).join(", ")}\n\n` +
++    `*Komponen:*\n` +
++    TRANSFORM_MODES.map((m) => {
++      const active = m === "split-screen" ? cfg.splitActive : m === "commentary" ? cfg.commentaryActive : cfg.frameActive;
++      return `• *${TRANSFORM_MODE_INFO[m].label}* — ${on(active)}\n   ${TRANSFORM_MODE_INFO[m].description}`;
++    }).join("\n") +
++    `\n\n`;
++
++  msg +=
++    `*Split-Screen:* klip ${cfg.split.clipPosition === "top" ? "atas" : "bawah"} ${Math.round(cfg.split.ratio * 100)}%, ` +
++    `visual: ${describeSplitVisual(cfg.split.visual)}\n` +
++    `*Komentar AI:* style ${code(cfg.commentary.style)} (${preset.label}), kartu "${getCommentaryHeader(cfg)}" ` +
++    `tampil detik ${resolveCommentaryStart(cfg)}–${(resolveCommentaryStart(cfg) + cfg.commentary.duration).toFixed(1)}\n` +
++    `*Frame:* label "${getFrameLabel(cfg)}" (${cfg.frame.style}, ${cfg.frame.position}), bingkai ${cfg.frame.border}px\n\n`;
++
++  msg +=
++    `*Style komentar tersedia:*\n` +
++    COMMENTARY_STYLES.map((s) => `• ${code(s)} → ${COMMENTARY_STYLE_PRESETS[s].description}`).join("\n") +
++    `\n\n*Cara Ubah (Railway Variables):*\n` +
++    `• ${code("TRANSFORM_ENABLED")} = ${code("true")} / ${code("false")}\n` +
++    `• ${code("TRANSFORM_MODE")} = ${code("split-screen,commentary,frame")} (atau ${code("all")})\n` +
++    `• ${code("TRANSFORM_COMMENTARY_STYLE")} = ${COMMENTARY_STYLES.map((s) => code(s)).join(" | ")}\n` +
++    `• ${code("TRANSFORM_FRAME_LABEL")} = ${code("auto")} / ${code("reaksi")} / ${code("rangkuman")} / teks bebas\n` +
++    `• ${code("TRANSFORM_SPLIT_VISUAL")} = ${code("gradient")} / ${code("blur")} / URL .mp4 (boleh banyak, pisah koma)\n` +
++    `• ${code("TRANSFORM_SPLIT_RATIO")} = ${code("0.55")} (0.4–0.7)\n` +
++    `• ${code("TRANSFORM_ACCENT_COLOR")} = ${code("#FFC107")}\n\n` +
++    `ℹ️ Komentar dibuat AI bersamaan dengan analisis momen (tanpa biaya panggilan tambahan), dirender via FFmpeg, ` +
++    `dan ikut ditambahkan ke deskripsi video. Kalau gagal, klip tetap diproses normal.\n` +
++    `⚠️ Ini membantu mengurangi risiko reused content, bukan jaminan monetisasi.`;
++
++  return msg;
++}
+diff --git a/src/lib/video-processor.ts b/src/lib/video-processor.ts
+index 75e4b61..dadccdb 100644
+--- a/src/lib/video-processor.ts
++++ b/src/lib/video-processor.ts
+@@ -28,6 +28,8 @@ import type { ClipResult } from "@/db/schema";
+ import { getAutoReframeConfig } from "@/lib/reframe-config";
+ import { buildReframeFilter } from "@/lib/auto-reframe";
+ import { applyHookOverlay } from "@/lib/hook-overlay"; // 🪝 AI Hook Overlay (BARU!)
++// 🎞️ Format Transformatif (BARU!) — split-screen / komentar AI / frame. Lihat src/lib/transform-config.ts
++import { applySplitScreen, applyTransformOverlays } from "@/lib/transform-format";
+ import { checkAiBudget, recordAiUsage, getAudioSeconds } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+ import { getGroqWhisperModel } from "@/lib/ai-provider";
+ 
+@@ -314,7 +316,19 @@ async function processSingleClip(
+   } else {
+     console.log(`[clip] ⏭ Step 2/4 Zoom skipped: ${zoomResult.reason}`);
+   }
+-  const afterZoomRaw = zoomResult.applied ? zoomPath : cutPath;
++  const afterZoomBase = zoomResult.applied ? zoomPath : cutPath;
++
++  // Step 2a: 🎞️ Format Transformatif — Split-Screen (BARU!) — klip + visual loop. Sebelum
++  // subtitle/hook/watermark supaya semuanya ter-render di kanvas final. Mati/gagal → klip apa adanya.
++  const splitPath = path.join(TMP_DIR, `clip_split_${jobId}_${clipIndex}.mp4`);
++  const splitResult = await applySplitScreen(afterZoomBase, splitPath, clipIndex);
++  if (splitResult.applied) {
++    console.log(`[clip] ✅ Split-screen (${splitResult.parts?.join(", ")}): klip ${clipIndex}`);
++    try { fs.unlinkSync(afterZoomBase); } catch { /* ignore */ }
++  } else if (splitResult.reason !== "split-screen tidak aktif") {
++    console.log(`[clip] ⏭ Split-screen skipped (${splitResult.reason})`);
++  }
++  const afterZoomRaw = splitResult.applied ? splitPath : afterZoomBase;
+ 
+   // Step 2b: 💬 Subtitle / Caption Burn-In (BARU!) — setelah zoom (caption tidak ikut
+   // ter-zoom) & sebelum watermark/intro-outro. Gagal/dimatikan → klip lanjut apa adanya.
+@@ -343,7 +357,19 @@ async function processSingleClip(
+   } else {
+     console.log(`[clip] ⏭ Hook overlay skipped (${hookResult.reason})`);
+   }
+-  const afterZoom = hookResult.applied ? hookPath : afterSub;
++  const afterHook = hookResult.applied ? hookPath : afterSub;
++
++  // Step 2d: 🎞️ Format Transformatif — Frame/Label + Kartu Komentar AI (BARU!) — setelah
++  // hook, sebelum watermark & intro/outro. Mati/gagal → klip lanjut apa adanya.
++  const tfPath = path.join(TMP_DIR, `clip_tf_${jobId}_${clipIndex}.mp4`);
++  const tfResult = await applyTransformOverlays(afterHook, tfPath, clip.commentary);
++  if (tfResult.applied) {
++    console.log(`[clip] ✅ Format transformatif (${tfResult.parts?.join(", ")}): klip ${clipIndex}`);
++    try { fs.unlinkSync(afterHook); } catch { /* ignore */ }
++  } else if (tfResult.reason !== "frame/commentary tidak aktif") {
++    console.log(`[clip] ⏭ Format transformatif skipped (${tfResult.reason})`);
++  }
++  const afterZoom = tfResult.applied ? tfPath : afterHook;
+ 
+   // Step 3: Watermark
+   const wmPath = path.join(TMP_DIR, `clip_wm_${jobId}_${clipIndex}.mp4`);

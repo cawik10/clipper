@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "functions": {
+    "/api/claims/run": {
+      "maxDuration": 300
+    },
+    "/api/monitor/run": {
+      "maxDuration": 300
+    },
+    "/api/telegram/webhook": {
+      "maxDuration": 300
+    }
+  }
+}

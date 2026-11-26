@@ -1,0 +1,16 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/analytics/run/route": "/api/analytics/run",
+  "/api/claims/run/route": "/api/claims/run",
+  "/api/cost/summary/route": "/api/cost/summary",
+  "/api/drive/callback/route": "/api/drive/callback",
+  "/api/health/route": "/api/health",
+  "/api/monitor/run/route": "/api/monitor/run",
+  "/api/scheduler/run/route": "/api/scheduler/run",
+  "/api/settings/route": "/api/settings",
+  "/api/telegram/webhook/route": "/api/telegram/webhook",
+  "/api/webhook/setup/route": "/api/webhook/setup",
+  "/api/youtube/callback/route": "/api/youtube/callback",
+  "/page": "/"
+}

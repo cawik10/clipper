@@ -47,6 +47,8 @@ import {
 } from "@/lib/subtitle-config";
 // 🪝 AI Hook Overlay (BARU!) — komponen section terpisah.
 import HookOverlaySection from "@/components/HookOverlaySection";
+// 🎞️ Format Transformatif (BARU!) — komponen section terpisah.
+import TransformSection from "@/components/TransformSection";
 // 📈 AI Analytics & Feedback Loop (BARU!) — komponen section terpisah.
 import AnalyticsSection from "@/components/AnalyticsSection";
 import AutoTitleDoctorSection from "@/components/AutoTitleDoctorSection";
@@ -1254,6 +1256,9 @@ export default async function HomePage() {
         {/* 🪝 AI HOOK OVERLAY — TEKS PEMBUKA (FITUR BARU!) — lihat src/components/HookOverlaySection.tsx */}
         <HookOverlaySection />
 
+        {/* 🎞️ FORMAT TRANSFORMATIF — SPLIT-SCREEN / COMMENTARY / FRAME (FITUR BARU!) — lihat src/components/TransformSection.tsx */}
+        <TransformSection />
+
         {/* 📈 AI ANALYTICS & FEEDBACK LOOP (FITUR BARU!) — lihat src/components/AnalyticsSection.tsx */}
         <AnalyticsSection />
 
@@ -1357,6 +1362,7 @@ export default async function HomePage() {
               { cmd: "/autoreframe", desc: "Info & ubah Auto-Reframe Speaker Tracking ← BARU!", isNew: true },
               { cmd: "/subtitle", desc: "Info & preview style subtitle / caption burn-in ← BARU!", isNew: true },
               { cmd: "/hook", desc: "Info AI Hook Overlay (teks pembuka) ← BARU!", isNew: true },
+              { cmd: "/transform", desc: "Info Format Transformatif (split-screen / komentar AI / frame) ← BARU!", isNew: true },
               { cmd: "/introoutro", desc: "Info & ubah intro/outro config",        isNew: false },
               { cmd: "/niche",      desc: "Atur Custom Niche Prompt untuk AI Analysis ← BARU!", isNew: true },
               { cmd: "/dupfilter",  desc: "Info Duplicate/Repetitive Clip Filter ← BARU!", isNew: true },
@@ -1464,6 +1470,23 @@ export default async function HomePage() {
               { key: "HOOK_COLOR", desc: "warna teks: white | #FFFFFF (default: white) ← BARU!", isNew: true },
               { key: "HOOK_BG_COLOR", desc: "warna latar/bar: #FF0000 (default: #FF0000) ← BARU!", isNew: true },
               { key: "HOOK_FONT", desc: "nama font (default: Montserrat) ← BARU!", isNew: true },
+              { section: "# === 🎞️ FORMAT TRANSFORMATIF — SPLIT-SCREEN / COMMENTARY / FRAME (BARU!) ===" },
+              { key: "TRANSFORM_ENABLED", desc: "true | false — saklar utama (default: false) ← BARU!", isNew: true },
+              { key: "TRANSFORM_MODE", desc: "split-screen,commentary,frame | all (default: commentary,frame) ← BARU!", isNew: true },
+              { key: "TRANSFORM_COMMENTARY_STYLE", desc: "context | reaction | summary | insight (default: context) ← BARU!", isNew: true },
+              { key: "TRANSFORM_COMMENTARY_MAX_CHARS", desc: "60-220 karakter (default: 130) ← BARU!", isNew: true },
+              { key: "TRANSFORM_COMMENTARY_POSITION", desc: "auto | top | middle | lower (default: auto) ← BARU!", isNew: true },
+              { key: "TRANSFORM_COMMENTARY_START", desc: "auto | detik mulai tampil (default: auto, setelah hook) ← BARU!", isNew: true },
+              { key: "TRANSFORM_COMMENTARY_DURATION", desc: "lama kartu tampil, 2-15 detik (default: 5) ← BARU!", isNew: true },
+              { key: "TRANSFORM_DESCRIPTION", desc: "true | false — komentar ikut ke deskripsi (default: true) ← BARU!", isNew: true },
+              { key: "TRANSFORM_FRAME_LABEL", desc: "auto | reaksi | rangkuman | teks bebas (default: auto) ← BARU!", isNew: true },
+              { key: "TRANSFORM_FRAME_STYLE", desc: "badge | bar (default: badge) ← BARU!", isNew: true },
+              { key: "TRANSFORM_FRAME_POSITION", desc: "top | bottom | seam (default: top) ← BARU!", isNew: true },
+              { key: "TRANSFORM_FRAME_BORDER", desc: "tebal bingkai px, 0 = tanpa (default: 10) ← BARU!", isNew: true },
+              { key: "TRANSFORM_SPLIT_VISUAL", desc: "gradient | blur | URL/path .mp4 (pisah koma) (default: gradient) ← BARU!", isNew: true },
+              { key: "TRANSFORM_SPLIT_RATIO", desc: "porsi tinggi klip 0.4-0.7 (default: 0.55) ← BARU!", isNew: true },
+              { key: "TRANSFORM_SPLIT_CLIP_POSITION", desc: "top | bottom (default: top) ← BARU!", isNew: true },
+              { key: "TRANSFORM_ACCENT_COLOR", desc: "warna aksen: #FFC107 (default) ← BARU!", isNew: true },
               { section: "# === THUMBNAIL ===" },
               { key: "THUMBNAIL_ENABLED", desc: "true | false (default: true)" },
               { key: "THUMBNAIL_MODE",    desc: "middle | best | start | custom (default: middle)" },

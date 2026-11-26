@@ -1,0 +1,3 @@
+{
+  "/api/youtube/callback/route": "app/api/youtube/callback/route.js"
+}

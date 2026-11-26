@@ -26,6 +26,7 @@ Halo! Saya bot *@cawikdurung* yang bisa memotong video panjang menjadi klip pend
 /zoom - Info zoom effect config
 /subtitle - Info & preview style subtitle (caption burn-in)
 /hook - Info AI Hook Overlay (teks pembuka)
+/transform - Info Format Transformatif (split-screen / komentar AI / frame) ✨ Baru!
 /introoutro - Info intro/outro config
 /thumbnail - Info thumbnail config
 /mode - Info aspect ratio
@@ -71,6 +72,7 @@ Kirim link video untuk mulai! 🎬`,
 /zoom - Info zoom effect config
 /subtitle - Info & preview style subtitle (caption burn-in)
 /hook - Info AI Hook Overlay (teks pembuka)
+/transform - Info Format Transformatif (split-screen / komentar AI / frame) ✨ Baru!
 /introoutro - Info intro/outro config
 /niche - Atur Custom Niche Prompt (fokus AI Analysis) ✨ Baru!
 /analytics - Laporan performa klip + AI Smart Learning ✨ Baru!

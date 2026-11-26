@@ -1,0 +1,584 @@
+import { db } from "@/db";
+import { clipJobs, youtubeTokens, userSettings, ClipResult } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { downloadVideo, transcribeAudio, processClips } from "@/lib/video-processor";
+import { analyzeVideoForClips } from "@/lib/ai-analyzer";
+import { AiBudgetExceededError, budgetBlockedMessage, checkAiBudget, runWithCostContext } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+import { getMaxClipsConfig, getDefaultClipDuration, getDurationRange } from "@/lib/video-config";
+import { getDefaultNichePrompt } from "@/lib/niche-prompt";
+// 📈 AI Analytics & Feedback Loop (BARU!) — import terpisah.
+import { resolveNichePromptForJob } from "@/lib/analytics-learning";
+import {
+  uploadClipsToYouTube,
+  isTokenExpired,
+  refreshAccessToken,
+} from "@/lib/youtube-uploader";
+import { uploadClipsToDrive } from "@/lib/drive-uploader";
+import { postAutoCommentsForClips } from "@/lib/auto-comment"; // 💬 Auto-First Comment (BARU!)
+import { reportError } from "@/lib/admin-notify"; // 🛠️ Notifikasi error ke admin (BARU!)
+import { filterDuplicateClips, recordClipFingerprints } from "@/lib/duplicate-filter";
+import type { TranscriptSegmentWithWords } from "@/lib/subtitle-config"; // 💬 Subtitle (BARU!)
+// 🛡️ Source Credit & Copyright Guard (BARU!) — import terpisah. Lihat src/lib/source-guard.ts
+import {
+  runSourceGuard,
+  trimClipsToQuota,
+  recordGuardClips,
+  applySourceCreditToClips,
+  buildBlockedMessage,
+  formatViolations,
+  SourceGuardBlockedError,
+  type GuardOutcome,
+} from "@/lib/source-guard";
+import fs from "fs";
+
+// `meta.step` memetakan update ke step real-time progress Telegram (lihat
+// src/lib/progress-config.ts). Opsional — kalau tidak diisi, `status` dipakai
+// sebagai id step. `meta.percent` dipakai untuk progress bar per-step.
+export type JobStatusMeta = { step?: string; percent?: number };
+export type StatusUpdateFn = (
+  status: string,
+  message: string,
+  meta?: JobStatusMeta
+) => Promise<void>;
+
+type EffectiveSettings = {
+  maxClips: number | null;
+  clipDuration: number | null;
+  minDuration: number | null;
+  maxDuration: number | null;
+  defaultPrivacy: string | null;
+  language: string | null;
+  youtubeConnected?: boolean | null;
+  nichePrompt?: string | null;
+};
+
+async function getEffectiveSettings(telegramUserId: string): Promise<EffectiveSettings> {
+  const settingsRows = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.telegramUserId, telegramUserId));
+
+  const envMaxClips = getMaxClipsConfig();
+  const envClipDuration = getDefaultClipDuration();
+
+  return (
+    settingsRows[0] || {
+      maxClips: envMaxClips,
+      clipDuration: envClipDuration,
+      minDuration: 20,
+      maxDuration: 40,
+      defaultPrivacy: "private",
+      language: "id",
+      youtubeConnected: false,
+      // 🎯 Custom Niche Prompt (BARU!) — fallback ke default global kalau user belum punya setting
+      nichePrompt: getDefaultNichePrompt(),
+    }
+  );
+}
+
+/**
+ * === STEP 1-4: DOWNLOAD → TRANSKRIPSI → ANALISIS AI → POTONG/EDIT KLIP ===
+ *
+ * Dipisah dari upload (lihat `publishJobClips` di bawah) supaya alur bot
+ * Telegram bisa berhenti sejenak SEBELUM upload ke YouTube dan menanyakan
+ * ke user: upload sekarang, dijadwalkan sesuai rekomendasi AI, atau jam
+ * custom. Lihat src/lib/scheduler.ts & src/lib/scheduler-worker.ts untuk
+ * fitur "🗓️ Scheduler / Queue Posting" tersebut — 100% tambahan baru,
+ * tidak mengubah perilaku lama kalau fitur dimatikan (SCHEDULER_ENABLED=false).
+ *
+ * Setelah sukses, job disimpan dengan status `clips_ready` dan kolom
+ * `clips` berisi hasil pemotongan (lengkap dengan zoom/watermark/intro-outro/
+ * thumbnail) — siap dipublish kapan saja lewat `publishJobClips(jobId)`.
+ */
+export async function processClipsOnly(
+  jobId: string,
+  onStatusUpdate?: StatusUpdateFn
+): Promise<{ successfulClipsCount: number; platform: string }> {
+  // 💰 Cost Tracker (BARU!) — (1) cek batas biaya AI harian SEBELUM job mulai (mode pause → job ditolak),
+  // (2) bungkus job dengan konteks {jobId, userId} supaya setiap panggilan AI (Whisper, analisis)
+  // otomatis tercatat biayanya per job & per user. Job yang sudah mulai dibiarkan selesai.
+  // Konfigurasi: src/lib/cost-config.ts · Matikan: COST_TRACKER_ENABLED=false.
+  const owner = await db.select({ userId: clipJobs.telegramUserId }).from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  const userId = owner[0]?.userId ?? null;
+  const budget = await checkAiBudget({ userId });
+  if (!budget.allowed) {
+    const msg = budgetBlockedMessage(budget);
+    await db
+      .update(clipJobs)
+      .set({ status: "error", errorMessage: msg, updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+    if (onStatusUpdate) await onStatusUpdate("error", `⏸️ ${msg}`, { step: "error" });
+    throw new AiBudgetExceededError(budget);
+  }
+  return runWithCostContext({ jobId, userId, budgetChecked: true }, () => processClipsOnlyInner(jobId, onStatusUpdate));
+}
+
+async function processClipsOnlyInner(
+  jobId: string,
+  onStatusUpdate?: StatusUpdateFn
+): Promise<{ successfulClipsCount: number; platform: string }> {
+  const update = onStatusUpdate || (async () => {});
+
+  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  if (!jobs.length) throw new Error(`Job ${jobId} tidak ditemukan`);
+  const job = jobs[0];
+
+  const settings = await getEffectiveSettings(job.telegramUserId);
+  const envMaxClips = getMaxClipsConfig();
+  const envClipDuration = getDefaultClipDuration();
+
+  // Memprioritaskan setting per-akun dari database pengguna
+  const effectiveMaxClips = settings.maxClips || envMaxClips;
+  // Durasi klip: pilihan tetap (15/20/30/40/60 detik) — lihat src/lib/video-config.ts
+  const effectiveClipDuration = settings.clipDuration || envClipDuration;
+  const { min: effectiveMinDuration, max: effectiveMaxDuration } = getDurationRange(effectiveClipDuration);
+
+  try {
+    // === STEP 0: 🛡️ SOURCE GUARD (BARU!) ===
+    // Cek whitelist channel, tanda Content ID & batas klip/hari SEBELUM download.
+    // mode warn → hanya peringatan; mode block → job dihentikan (hemat bandwidth/CPU).
+    // Mati total: COPYRIGHT_GUARD_MODE=off. Lihat src/lib/source-guard-config.ts.
+    let guard: GuardOutcome | null = null;
+    try {
+      guard = await runSourceGuard({
+        jobId,
+        sourceUrl: job.sourceUrl,
+        telegramUserId: job.telegramUserId,
+        sourceMonitorId: job.sourceMonitorId,
+      });
+    } catch (err) {
+      console.error("[source-guard] Guard gagal dijalankan (dilewati):", err);
+    }
+    if (guard?.blocked) {
+      throw new SourceGuardBlockedError(buildBlockedMessage(guard));
+    }
+    if (guard && guard.violations.length > 0) {
+      for (const line of formatViolations(guard)) {
+        await update("downloading", `⚠️ Source Guard (warn): ${line}`, { step: "downloading", percent: 0 });
+      }
+    }
+
+    // === STEP 1: DOWNLOAD ===
+    await db
+      .update(clipJobs)
+      .set({ status: "downloading", updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+    await update("downloading", "⬇️ Mengunduh video...", { step: "downloading", percent: 0 });
+
+    let downloadResult: { filePath: string; title: string; duration: number };
+    try {
+      downloadResult = await downloadVideo(job.sourceUrl, jobId, async (progress) => {
+        if (progress % 20 === 0) {
+          await update("downloading", `⬇️ Mengunduh video... ${progress.toFixed(0)}%`, {
+            step: "downloading",
+            percent: progress,
+          });
+        }
+      });
+    } catch (err) {
+      throw new Error(`Gagal mengunduh: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    await db
+      .update(clipJobs)
+      .set({
+        videoTitle: downloadResult.title,
+        videoDuration: Math.round(downloadResult.duration),
+        downloadPath: downloadResult.filePath,
+        updatedAt: new Date(),
+      })
+      .where(eq(clipJobs.jobId, jobId));
+
+    // === STEP 2: TRANSCRIBE ===
+    await db
+      .update(clipJobs)
+      .set({ status: "analyzing", updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+    await update("analyzing", "🎙️ Mentranskripsi audio...", { step: "transcribing" });
+
+    let transcript: TranscriptSegmentWithWords[] = [];
+    try {
+      transcript = await transcribeAudio(downloadResult.filePath, settings.language || "id");
+    } catch (err) {
+      console.warn("Transcription failed, proceeding without:", err);
+    }
+
+    // === STEP 3: ANALYZE ===
+    await update(
+      "analyzing",
+      `🧠 Menganalisis momen viral dengan AI... (target: ${effectiveMaxClips} klip, durasi ~${effectiveClipDuration}s)`,
+      { step: "analyzing" }
+    );
+
+    let analysisClips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[];
+    try {
+      analysisClips = await analyzeVideoForClips(
+        {
+          title: downloadResult.title,
+          duration: downloadResult.duration,
+          transcript,
+          platform: job.platform,
+          language: settings.language || "id",
+        },
+        effectiveMaxClips,
+        effectiveMinDuration,
+        effectiveMaxDuration,
+        effectiveClipDuration,
+        // 🎯 Custom Niche Prompt (BARU!) — arahan khusus per-akun untuk AI Analysis
+        // 📈 Smart Learning Loop (BARU!) — kalau user memakai default, prompt hasil
+        // belajar AI dari klip sukses dipakai menggantikan DEFAULT_NICHE_PROMPT.
+        await resolveNichePromptForJob(job.telegramUserId, settings.nichePrompt)
+      );
+    } catch (err) {
+      throw new Error(`Analisis AI gagal: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    if (!analysisClips.length) {
+      throw new Error("Tidak ada momen yang cocok ditemukan untuk dijadikan Shorts");
+    }
+
+    await update("analyzing", `🎯 ${analysisClips.length} momen viral ditemukan!`, {
+      step: "analyzing",
+      percent: 100,
+    });
+
+    // === STEP 3a: 🛡️ BATAS KLIP PER VIDEO SUMBER PER HARI (mode block) ===
+    if (guard) {
+      const quota = trimClipsToQuota(guard, analysisClips);
+      if (quota.trimmed > 0) {
+        analysisClips = quota.clips;
+        await update(
+          "analyzing",
+          `🛡️ Source Guard: dibatasi ${guard.quota.limit} klip/hari per video sumber — ${quota.trimmed} klip dipangkas.`,
+          { step: "analyzing", percent: 100 }
+        );
+      }
+    }
+
+    // === STEP 3b: 🧹 DUPLICATE / REPETITIVE CLIP FILTER ===
+    // Membuang kandidat klip yang kontennya terlalu mirip dengan klip yang
+    // sudah pernah dibuat sebelumnya (mis. source video ini diproses ulang).
+    // Lihat src/lib/duplicate-filter.ts & duplicate-filter-config.ts — fitur
+    // ini sepenuhnya opsional/additive dan bisa dimatikan via
+    // DUPLICATE_FILTER_ENABLED=false tanpa memengaruhi langkah lain.
+    const dedupeResult = await filterDuplicateClips({
+      sourceUrl: job.sourceUrl,
+      telegramUserId: job.telegramUserId,
+      jobId,
+      candidates: analysisClips,
+    });
+
+    if (dedupeResult.skipped.length > 0) {
+      await update(
+        "analyzing",
+        `🧹 ${dedupeResult.skipped.length} klip duplikat/repetitif disaring (konten mirip klip sebelumnya dari source ini).`,
+        { step: "analyzing", percent: 100 }
+      );
+    }
+
+    if (!dedupeResult.accepted.length) {
+      throw new Error(
+        "Semua momen yang ditemukan AI terdeteksi sebagai duplikat/repetitif dari klip yang sudah pernah dibuat. Coba video lain atau atur DUPLICATE_FILTER_TEXT_THRESHOLD."
+      );
+    }
+
+    analysisClips = dedupeResult.accepted;
+
+    // === STEP 4: CLIP + ZOOM + WATERMARK + INTRO/OUTRO + THUMBNAIL ===
+    await db
+      .update(clipJobs)
+      .set({ status: "clipping", updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+
+    const processedClips = await processClips(
+      downloadResult.filePath,
+      analysisClips,
+      jobId,
+      true,
+      async (clipIndex, total) => {
+        await update(
+          "clipping",
+          `✂️ Memproses klip ${clipIndex + 1}/${total}... (Zoom + Watermark + Intro/Outro)`,
+          { step: "clipping", percent: Math.round(((clipIndex + 1) / total) * 100) }
+        );
+      },
+      // 💬 Subtitle (BARU!) — transkrip + timestamp per kata untuk caption burn-in
+      transcript
+    );
+
+    const thumbnailCount = processedClips.filter((c) => c.thumbnailPath).length;
+    if (thumbnailCount > 0) {
+      await update("clipping", `🖼 ${thumbnailCount} thumbnail berhasil di-generate!`, {
+        step: "clipping",
+        percent: 100,
+      });
+    }
+
+    const successfulClips = processedClips.filter((c) => c.filePath);
+    if (!successfulClips.length) throw new Error("Semua klip gagal diproses");
+
+    // 🛡️ Catat jumlah klip untuk penghitung batas harian Source Guard.
+    await recordGuardClips(jobId, successfulClips.length);
+
+    // 🧹 Simpan sidik jari klip yang berhasil dibuat, supaya jadi pembanding
+    // ketika source video ini (atau yang mirip) diproses lagi di kemudian hari.
+    await recordClipFingerprints({
+      sourceUrl: job.sourceUrl,
+      telegramUserId: job.telegramUserId,
+      jobId,
+      clips: successfulClips,
+    });
+
+    // Status baru "clips_ready" — murni tambahan (tidak menggantikan status
+    // lama manapun). Dashboard web menampilkannya dengan label fallback
+    // netral kalau belum dikenal, dan juga sudah ditambahkan secara eksplisit
+    // di src/app/page.tsx (statusConfig) tanpa mengubah entri status lain.
+    await db
+      .update(clipJobs)
+      .set({ clips: processedClips, status: "clips_ready", updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+
+    // Video sumber (hasil download) sudah tidak diperlukan lagi setelah klip
+    // selesai dipotong — dihapus di sini (bukan menunggu upload) supaya tidak
+    // menumpuk disk kalau upload baru dijadwalkan beberapa jam/hari lagi.
+    try {
+      if (fs.existsSync(downloadResult.filePath)) fs.unlinkSync(downloadResult.filePath);
+    } catch {
+      /* ignore */
+    }
+
+    return { successfulClipsCount: successfulClips.length, platform: job.platform };
+  } catch (err) {
+    // Escape karakter khusus agar tidak merusak format Markdown Telegram
+    const rawError = err instanceof Error ? err.message : String(err);
+    const errorMsg = rawError.replace(/([_*`\[\]])/g, "\\$1");
+    console.error(`Job ${jobId} failed (clip stage):`, err);
+    void reportError("Job gagal (clip stage)", err, { jobId });
+    await db
+      .update(clipJobs)
+      .set({ status: "error", errorMessage: errorMsg, updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+    await update("error", `❌ ${errorMsg}`, { step: "error" });
+    throw err;
+  }
+}
+
+/**
+ * === STEP 5: UPLOAD KE YOUTUBE (+ 5b: GOOGLE DRIVE) ===
+ *
+ * Mempublish klip yang sudah disiapkan oleh `processClipsOnly`. Dipanggil:
+ *   - langsung setelah `processClipsOnly` kalau user memilih "📤 Post Sekarang"
+ *     (atau kalau fitur scheduler dimatikan / YouTube belum terhubung), ATAU
+ *   - belakangan oleh src/lib/scheduler-worker.ts tepat pada jam yang
+ *     dijadwalkan (rekomendasi AI / custom).
+ *
+ * Catatan: file klip disimpan sementara di disk lokal container. Kalau
+ * penjadwalan melewati restart container (Railway redeploy dsb.), file bisa
+ * hilang — worker akan menandai scheduled upload tsb sebagai error dengan
+ * pesan yang jelas (klip tetap sudah dikirim ke Telegram saat dibuat).
+ */
+export async function publishJobClips(
+  jobId: string,
+  onStatusUpdate?: StatusUpdateFn
+): Promise<void> {
+  const update = onStatusUpdate || (async () => {});
+
+  const jobs = await db.select().from(clipJobs).where(eq(clipJobs.jobId, jobId));
+  if (!jobs.length) throw new Error(`Job ${jobId} tidak ditemukan`);
+  const job = jobs[0];
+
+  const settings = await getEffectiveSettings(job.telegramUserId);
+  const processedClips = (job.clips as ClipResult[] | null) || [];
+  const successfulClips = processedClips.filter((c) => c.filePath && fs.existsSync(c.filePath));
+
+  if (!successfulClips.length) {
+    const msg =
+      processedClips.length > 0
+        ? "File klip sudah tidak ditemukan di server (kemungkinan terhapus karena restart/redeploy). Klip tetap tersedia di chat Telegram sebelumnya."
+        : "Tidak ada klip yang bisa dipublish.";
+    await db
+      .update(clipJobs)
+      .set({ status: "error", errorMessage: msg, updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+    await update("error", `❌ ${msg}`, { step: "error" });
+    throw new Error(msg);
+  }
+
+  try {
+    await db
+      .update(clipJobs)
+      .set({ status: "uploading", updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+
+    let finalClips: ClipResult[] = processedClips;
+
+    // === STEP 4b: 🛡️ SOURCE CREDIT (BARU!) ===
+    // Tambah "Source: <judul> — <channel> <link>" ke deskripsi tiap klip sebelum
+    // upload. Mati: SOURCE_CREDIT_ENABLED=false. Tidak pernah melempar error.
+    const creditResult = await applySourceCreditToClips(jobId, successfulClips);
+    if (creditResult.applied && creditResult.credit) {
+      await update("uploading", "🛡️ Kredit sumber ditambahkan ke deskripsi klip", {
+        step: "uploading_youtube",
+        percent: 0,
+      });
+    }
+
+    // === STEP 5: UPLOAD TO YOUTUBE (jika terhubung) ===
+    const tokenRows = await db
+      .select()
+      .from(youtubeTokens)
+      .where(eq(youtubeTokens.telegramUserId, job.telegramUserId));
+
+    if (tokenRows.length > 0) {
+      const tokenRow = tokenRows[0];
+      let { accessToken, refreshToken } = tokenRow;
+
+      if (isTokenExpired(tokenRow.expiresAt)) {
+        try {
+          const newTokens = await refreshAccessToken(tokenRow.refreshToken);
+          accessToken = newTokens.accessToken;
+          await db
+            .update(youtubeTokens)
+            .set({
+              accessToken: newTokens.accessToken,
+              expiresAt: newTokens.expiresAt,
+              updatedAt: new Date(),
+            })
+            .where(eq(youtubeTokens.telegramUserId, job.telegramUserId));
+        } catch (err) {
+          console.error("Token refresh failed:", err);
+        }
+      }
+
+      await update("uploading", "📤 Mengupload ke YouTube Studio sebagai Draft...", {
+        step: "uploading_youtube",
+        percent: 0,
+      });
+
+      const uploadResults = await uploadClipsToYouTube(
+        successfulClips,
+        accessToken,
+        refreshToken,
+        (settings.defaultPrivacy as "private" | "unlisted" | "public") || "private",
+        async (clipIndex, result, error) => {
+          const percent = Math.round(((clipIndex + 1) / successfulClips.length) * 100);
+          if (result) {
+            await update("uploading", `✅ Klip ${clipIndex + 1} berhasil diupload!\n🔗 ${result.videoUrl}`, {
+              step: "uploading_youtube",
+              percent,
+            });
+          } else {
+            await update("uploading", `⚠️ Klip ${clipIndex + 1} gagal: ${error}`, {
+              step: "uploading_youtube",
+              percent,
+            });
+          }
+        }
+      );
+
+      // uploadResults sejajar dengan successfulClips (bukan processedClips)
+      finalClips = finalClips.map((clip) => {
+        const idx = successfulClips.indexOf(clip);
+        const uploadResult = idx >= 0 ? uploadResults[idx] : null;
+        if (uploadResult) {
+          return { ...clip, youtubeVideoId: uploadResult.videoId, youtubeUrl: uploadResult.videoUrl };
+        }
+        return clip;
+      });
+
+      // === STEP 5a: 💬 AUTO-FIRST COMMENT (BARU!) ===
+      // Posting komentar pancingan hasil AI ke video yang baru terupload
+      // (commentThreads.insert). Mati kalau YOUTUBE_AUTO_COMMENT_ENABLED bukan true.
+      // Tidak pernah melempar error — upload tetap sukses walau komentar gagal.
+      // Lihat src/lib/auto-comment.ts & src/lib/auto-comment-config.ts.
+      finalClips = await postAutoCommentsForClips({
+        clips: finalClips,
+        accessToken,
+        refreshToken,
+        scope: tokenRow.scope,
+        privacy: settings.defaultPrivacy || "private",
+        userId: job.telegramUserId,
+        onProgress: async (message, percent) => {
+          await update("uploading", message, { step: "uploading_youtube", percent });
+        },
+      });
+    }
+
+    // === STEP 5b: AUTO-UPLOAD KE GOOGLE DRIVE (jika terhubung & aktif) ===
+    // Kegagalan Drive TIDAK menggagalkan job — klip tetap dikirim ke Telegram.
+    try {
+      const driveSummary = await uploadClipsToDrive({
+        userId: job.telegramUserId,
+        jobId,
+        videoTitle: job.videoTitle || "AutoClip",
+        clips: successfulClips,
+        onProgress: async (clipIndex, total, result, error) => {
+          const percent = Math.round(((clipIndex + 1) / total) * 100);
+          if (result) {
+            await update("uploading", `☁️ Klip ${clipIndex + 1}/${total} masuk Google Drive`, {
+              step: "uploading_drive",
+              percent,
+            });
+          } else {
+            await update("uploading", `⚠️ Drive klip ${clipIndex + 1} gagal: ${error}`, {
+              step: "uploading_drive",
+              percent,
+            });
+          }
+        },
+      });
+
+      if (driveSummary.attempted) {
+        finalClips = finalClips.map((clip) => {
+          const idx = successfulClips.indexOf(clip);
+          const r = idx >= 0 ? driveSummary.results[idx] : null;
+          return r ? { ...clip, driveFileId: r.fileId, driveUrl: r.url } : clip;
+        });
+        const okCount = driveSummary.results.filter(Boolean).length;
+        if (okCount > 0) {
+          await update(
+            "uploading",
+            `☁️ ${okCount}/${successfulClips.length} klip tersimpan di Google Drive` +
+              (driveSummary.folderName ? ` (📁 ${driveSummary.folderName})` : ""),
+            { step: "uploading_drive", percent: 100 }
+          );
+        }
+        if (driveSummary.warning)
+          await update("uploading", `⚠️ ${driveSummary.warning}`, { step: "uploading_drive" });
+        if (driveSummary.error && okCount === 0) {
+          await update("uploading", `⚠️ Upload Google Drive gagal: ${driveSummary.error}`, {
+            step: "uploading_drive",
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[drive] step gagal (diabaikan):", err);
+    }
+
+    await db
+      .update(clipJobs)
+      .set({ clips: finalClips, status: "done", updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+  } catch (err) {
+    const rawError = err instanceof Error ? err.message : String(err);
+    const errorMsg = rawError.replace(/([_*`\[\]])/g, "\\$1");
+    console.error(`Job ${jobId} failed (publish stage):`, err);
+    void reportError("Job gagal (publish stage)", err, { jobId });
+    await db
+      .update(clipJobs)
+      .set({ status: "error", errorMessage: errorMsg, updatedAt: new Date() })
+      .where(eq(clipJobs.jobId, jobId));
+    await update("error", `❌ ${errorMsg}`, { step: "error" });
+    throw err;
+  }
+}
+
+/**
+ * Alur lama (download → ... → upload) dalam satu panggilan — dipertahankan
+ * untuk kompatibilitas (dipakai kalau SCHEDULER_ENABLED=false atau YouTube
+ * belum terhubung sama sekali, lihat src/lib/telegram-bot.ts).
+ */
+export async function processJob(jobId: string, onStatusUpdate?: StatusUpdateFn): Promise<void> {
+  await processClipsOnly(jobId, onStatusUpdate);
+  await publishJobClips(jobId, onStatusUpdate);
+}

@@ -1,0 +1,474 @@
+import OpenAI from "openai";
+import { ClipResult } from "@/db/schema";
+import { getMaxClipsConfig } from "@/lib/video-config";
+import { buildNicheInstruction } from "@/lib/niche-prompt";
+import { getHookConfig, sanitizeHookText, buildFallbackHook } from "@/lib/hook-config"; // 🪝 AI Hook Overlay (BARU!)
+import { checkAiBudget, recordAiUsage } from "@/lib/cost-tracker"; // 💰 Cost Tracker (BARU!)
+// 💬 Auto-First Comment (BARU!) — komentar pancingan dibuat AI dalam prompt yang sama.
+import {
+  isAutoCommentEnabled,
+  getAutoCommentStyle,
+  getAutoCommentMaxChars,
+  getAutoCommentExtraPrompt,
+  buildAutoCommentPromptInstruction,
+  sanitizeCommentText,
+} from "@/lib/auto-comment-config";
+
+/** Model OpenAI untuk analisis momen viral (juga dipakai Cost Tracker untuk menghitung harga). */
+const OPENAI_ANALYSIS_MODEL = "gpt-4o-mini";
+/** Model Gemini untuk analisis (nilai tetap seperti sebelumnya; harga dihitung dari nama ini). */
+const GEMINI_ANALYSIS_MODEL = "gemini-3.5-flash-lite";
+
+function getOpenAIClient(): OpenAI | null {
+  if (process.env.OPENAI_API_KEY) {
+    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return null;
+}
+
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface VideoAnalysisInput {
+  title: string;
+  duration: number;
+  transcript: TranscriptSegment[];
+  platform?: string;
+  language?: string;
+}
+
+export async function analyzeVideoForClips(
+  input: VideoAnalysisInput,
+  maxClips: number = getMaxClipsConfig(),
+  minDuration: number = 20,
+  maxDuration: number = 40,
+  targetDuration: number = Math.round((minDuration + maxDuration) / 2),
+  // 🎯 Custom Niche Prompt (BARU!) — arahan khusus user, misal "fokus ke momen
+  // lucu" / "fokus ke insight bisnis". Kosong/undefined = pakai DEFAULT_NICHE_PROMPT
+  // (env var) atau tanpa arahan khusus. Lihat src/lib/niche-prompt.ts.
+  nichePrompt?: string | null
+): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
+  const openai = getOpenAIClient();
+  const transcriptText = input.transcript
+    .map((seg) => `[${formatTime(seg.start)}-${formatTime(seg.end)}] ${seg.text}`)
+    .join("\n");
+
+  const nicheInstruction = buildNicheInstruction(nichePrompt);
+
+  // 🪝 AI Hook Overlay (BARU!) — instruksi hook ditambahkan ke prompt yang sama
+  // (tanpa panggilan AI tambahan). Kosong kalau HOOK_ENABLED=false, sehingga
+  // prompt persis seperti sebelumnya.
+  const hookCfg = getHookConfig();
+  const hookInstruction = hookCfg.enabled ? buildHookPromptInstruction(hookCfg.duration, hookCfg.maxChars) : "";
+  const hookJsonField = hookCfg.enabled ? `,\n    "hook": "<teks hook pembuka, max ${hookCfg.maxChars} karakter>"` : "";
+
+  // 💬 Auto-First Comment (BARU!) — instruksi ditambahkan ke prompt yang sama (tanpa
+  // panggilan AI tambahan). Kosong kalau YOUTUBE_AUTO_COMMENT_ENABLED bukan true,
+  // sehingga prompt persis seperti sebelumnya.
+  const commentOn = isAutoCommentEnabled();
+  const commentMax = getAutoCommentMaxChars();
+  const commentInstruction = commentOn
+    ? buildAutoCommentPromptInstruction(getAutoCommentStyle(), commentMax, getAutoCommentExtraPrompt())
+    : "";
+  const commentJsonField = commentOn ? `,\n    "firstComment": "<komentar pancingan, max ${commentMax} karakter>"` : "";
+
+  const prompt = `Kamu adalah ahli konten viral YouTube Shorts. Analisis transkrip video berikut dan temukan ${maxClips} momen terbaik yang berpotensi viral.
+
+INFORMASI VIDEO:
+- Judul: ${input.title}
+- Durasi Total: ${formatTime(input.duration)}
+- Platform Sumber: ${input.platform || "YouTube"}
+- Bahasa: ${input.language || "id"}
+${nicheInstruction}
+TRANSKRIP (format [MULAI-SELESAI] teks):
+${transcriptText.slice(0, 8000)}
+
+KRITERIA SELEKSI MOMEN VIRAL:
+1. Hook kuat di awal (3 detik pertama harus menarik)
+2. Konten emosional, mengejutkan, lucu, atau informatif
+3. Kalimat yang lengkap dan bermakna
+4. Cocok untuk format vertikal 9:16
+5. Durasi target adalah ${targetDuration} detik (WAJIB antara ${minDuration}-${maxDuration} detik)
+6. Hindari momen intro/outro atau iklan
+7. Prioritaskan: puncak emosi, reveal penting, poin mengejutkan
+
+INSTRUKSI:
+- Setiap klip harus sedekat mungkin dengan ${targetDuration} detik, dan tidak boleh di luar rentang ${minDuration}-${maxDuration} detik
+- Pilih momen yang bisa berdiri sendiri tanpa konteks sebelumnya
+- Buat judul YouTube Shorts yang menarik (max 70 karakter)
+- Buat deskripsi singkat (max 150 karakter)
+- Berikan tags relevan (5-10 tags)
+${hookInstruction}${commentInstruction}
+Output JSON array (tanpa markdown):
+[
+  {
+    "index": 0,
+    "startTime": <detik>,
+    "endTime": <detik>,
+    "duration": <detik>,
+    "title": "<judul menarik> #Shorts",
+    "description": "<deskripsi singkat>",
+    "tags": ["tag1", "tag2"],
+    "viralScore": <1-10>,
+    "reason": "<alasan mengapa viral>"${hookJsonField}${commentJsonField}
+  }
+]`;
+
+  // 💰 Cost Tracker — batas biaya harian tercapai → lewati AI, pakai analisis heuristik (non-AI).
+  // Job yang sudah berjalan tidak terpengaruh (lolos pengecekan saat dimulai).
+  const budget = await checkAiBudget();
+  if (!budget.allowed) {
+    console.warn("[ai-analyzer] Batas biaya AI harian tercapai — memakai analisis fallback tanpa AI.");
+    return fallbackAnalysis(input, maxClips, minDuration, maxDuration, targetDuration);
+  }
+
+  if (openai) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: OPENAI_ANALYSIS_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: nicheInstruction
+              ? "Kamu adalah ahli konten digital yang mengikuti arahan niche khusus dari user dengan ketat. Berikan output JSON yang valid."
+              : "Kamu adalah ahli konten digital. Berikan output JSON yang valid.",
+          },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 3000,
+        response_format: { type: "json_object" },
+      });
+      const content = response.choices[0]?.message?.content || "{}";
+      // 💰 Cost Tracker — catat token & biaya panggilan analisis
+      await recordAiUsage({
+        provider: "openai",
+        model: OPENAI_ANALYSIS_MODEL,
+        feature: "analysis",
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        inputChars: prompt.length,
+        outputChars: content.length,
+      });
+      try {
+        const parsed = JSON.parse(content);
+        const clips = Array.isArray(parsed) ? parsed : parsed.clips || parsed.moments || [];
+        return validateAndFixClips(clips, input.duration, minDuration, maxDuration, maxClips);
+      } catch {
+        return fallbackAnalysis(input, maxClips, minDuration, maxDuration, targetDuration);
+      }
+    } catch (err) {
+      console.error("OpenAI analysis failed:", err);
+    }
+  }
+
+  // Gemini fallback
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      return await analyzeWithGemini(prompt, input, maxClips, minDuration, maxDuration);
+    } catch (err) {
+      console.error("Gemini analysis failed:", err);
+    }
+  }
+
+  return fallbackAnalysis(input, maxClips, minDuration, maxDuration, targetDuration);
+}
+
+async function analyzeWithGemini(
+  prompt: string,
+  input: VideoAnalysisInput,
+  maxClips: number,
+  minDuration: number,
+  maxDuration: number
+): Promise<Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[]> {
+  const { GoogleGenerativeAI } = await import("@google/generative-ai");
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  const model = genAI.getGenerativeModel({ model: GEMINI_ANALYSIS_MODEL });
+  const result = await model.generateContent(prompt + "\n\nBALAS HANYA DENGAN JSON ARRAY.");
+  const text = result.response.text();
+  // 💰 Cost Tracker — catat token & biaya (thoughtsTokenCount ditagih sebagai output)
+  const usage = result.response.usageMetadata as
+    | { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+    | undefined;
+  await recordAiUsage({
+    provider: "gemini",
+    model: GEMINI_ANALYSIS_MODEL,
+    feature: "analysis",
+    inputTokens: usage?.promptTokenCount,
+    outputTokens: usage ? (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0) : undefined,
+    inputChars: prompt.length,
+    outputChars: text.length,
+  });
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (jsonMatch) {
+    const clips = JSON.parse(jsonMatch[0]);
+    return validateAndFixClips(clips, input.duration, minDuration, maxDuration, maxClips);
+  }
+  return fallbackAnalysis(input, maxClips, minDuration, maxDuration);
+}
+
+function fallbackAnalysis(
+  input: VideoAnalysisInput,
+  maxClips: number,
+  minDuration: number,
+  maxDuration: number,
+  preferredDuration?: number
+): Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[] {
+  const { duration, transcript, title } = input;
+  const targetDuration = Math.min(
+    Math.max(preferredDuration ?? Math.round((minDuration + maxDuration) / 2), minDuration),
+    maxDuration
+  );
+  const clips: Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[] = [];
+
+  if (transcript.length === 0) {
+    const segments = Math.min(maxClips, Math.floor(duration / targetDuration));
+    const skipIntro = Math.min(30, duration * 0.1);
+    const skipOutro = Math.min(30, duration * 0.1);
+    const usableDuration = duration - skipIntro - skipOutro;
+    const spacing = usableDuration / (segments + 1);
+    for (let i = 0; i < segments; i++) {
+      const start = skipIntro + spacing * (i + 1) - targetDuration / 2;
+      clips.push({
+        index: i,
+        startTime: Math.round(Math.max(0, start)),
+        endTime: Math.round(Math.min(duration, start + targetDuration)),
+        duration: targetDuration,
+        title: generateTitle("", title, i),
+        description: "",
+        tags: generateTags("", title),
+        viralScore: 6,
+        reason: "Dipilih berdasarkan distribusi merata (tidak ada transkrip)",
+        hook: resolveHook(undefined, title, i), // 🪝 AI Hook Overlay (BARU!)
+      });
+    }
+    return clips;
+  }
+
+  const scores = scoreTranscriptSegments(transcript);
+  const selected = selectTopSegments(
+    scores,
+    transcript,
+    maxClips,
+    targetDuration,
+    minDuration,
+    maxDuration,
+    duration
+  );
+
+  selected.forEach((seg, i) => {
+    const segText = transcript
+      .filter((t) => t.start >= seg.start && t.end <= seg.end)
+      .map((t) => t.text)
+      .join(" ");
+    clips.push({
+      index: i,
+      startTime: Math.round(seg.start),
+      endTime: Math.round(seg.end),
+      duration: Math.round(seg.end - seg.start),
+      title: generateTitle(segText, title, i),
+      description: generateDescription(segText),
+      tags: generateTags(segText, title),
+      viralScore: seg.score,
+      reason: "Dipilih berdasarkan analisis konten transkrip",
+      hook: resolveHook(undefined, title, i), // 🪝 AI Hook Overlay (BARU!)
+    });
+  });
+
+  return clips;
+}
+
+function scoreTranscriptSegments(
+  transcript: TranscriptSegment[]
+): { start: number; end: number; score: number }[] {
+  const viralKeywords = [
+    "rahasia", "ternyata", "mengejutkan", "viral", "tips", "cara", "trik",
+    "luar biasa", "incredible", "amazing", "wow", "surprising", "secret",
+    "never", "always", "best", "worst", "most", "truth", "fact", "myth",
+    "hack", "top", "number", "percent", "jangan", "harus", "wajib",
+    "penting", "terbesar", "terbaik", "pertama", "satu-satunya",
+  ];
+  return transcript.map((seg) => {
+    let score = 5;
+    const text = seg.text.toLowerCase();
+    viralKeywords.forEach((kw) => {
+      if (text.includes(kw)) score += 1;
+    });
+    if (text.includes("?")) score += 1;
+    if (text.includes("!")) score += 0.5;
+    if (/\d+%|\d+ juta|\d+ ribu|\d+ billion/.test(text)) score += 1;
+    return { start: seg.start, end: seg.end, score: Math.min(score, 10) };
+  });
+}
+
+function selectTopSegments(
+  scores: { start: number; end: number; score: number }[],
+  transcript: TranscriptSegment[],
+  maxClips: number,
+  targetDuration: number,
+  minDuration: number,
+  maxDuration: number,
+  videoDuration: number
+): { start: number; end: number; score: number }[] {
+  const selected: { start: number; end: number; score: number }[] = [];
+  const sorted = [...scores].sort((a, b) => b.score - a.score);
+
+  for (const seg of sorted) {
+    if (selected.length >= maxClips) break;
+    const center = (seg.start + seg.end) / 2;
+    let start = Math.max(0, center - targetDuration / 2);
+    let end = start + targetDuration;
+    if (end > videoDuration) {
+      end = videoDuration;
+      start = Math.max(0, end - targetDuration);
+    }
+    const actualDuration = end - start;
+    if (actualDuration < minDuration || actualDuration > maxDuration + 5) continue;
+    const hasOverlap = selected.some(
+      (s) => !(end <= s.start || start >= s.end)
+    );
+    if (hasOverlap) continue;
+    const transcriptStart = transcript.find((t) => t.start >= start - 2);
+    const transcriptEnd = [...transcript].reverse().find((t) => t.end <= end + 2);
+    const finalStart = transcriptStart ? Math.max(0, transcriptStart.start) : start;
+    const finalEnd = transcriptEnd
+      ? Math.min(videoDuration, transcriptEnd.end)
+      : end;
+    const finalDuration = finalEnd - finalStart;
+    if (finalDuration < minDuration || finalDuration > maxDuration + 5) {
+      selected.push({ start, end, score: seg.score });
+    } else {
+      selected.push({ start: finalStart, end: finalEnd, score: seg.score });
+    }
+  }
+
+  return selected.sort((a, b) => a.start - b.start);
+}
+
+function validateAndFixClips(
+  clips: Partial<ClipResult>[],
+  videoDuration: number,
+  minDuration: number,
+  maxDuration: number,
+  maxClips?: number
+): Omit<ClipResult, "filePath" | "thumbnailPath" | "youtubeVideoId" | "youtubeUrl">[] {
+  const limit = maxClips ?? getMaxClipsConfig();
+  return clips
+    .filter((c) => c.startTime !== undefined && c.endTime !== undefined)
+    .map((clip, i) => {
+      const start = Math.max(0, Number(clip.startTime) || 0);
+      let end = Math.min(videoDuration, Number(clip.endTime) || start + 30);
+      const duration = end - start;
+      if (duration < minDuration) end = Math.min(videoDuration, start + minDuration);
+      if (duration > maxDuration) end = start + maxDuration;
+      return {
+        index: i,
+        startTime: Math.round(start),
+        endTime: Math.round(end),
+        duration: Math.round(end - start),
+        title: clip.title || `Clip ${i + 1} #Shorts`,
+        description: clip.description || "",
+        tags: Array.isArray(clip.tags) ? clip.tags : ["shorts"],
+        viralScore: Number(clip.viralScore) || 7,
+        reason: clip.reason || "AI-selected moment",
+        // 🪝 AI Hook Overlay (BARU!)
+        hook: resolveHook(clip.hook, clip.title, i),
+        // 💬 Auto-First Comment (BARU!)
+        firstComment: resolveFirstComment(clip.firstComment),
+      };
+    })
+    .slice(0, limit);
+}
+
+// ─── 🪝 AI Hook Overlay (BARU!) ───────────────────────────────────────────
+function buildHookPromptInstruction(duration: number, maxChars: number): string {
+  return `
+HOOK PEMBUKA (teks overlay yang muncul ${duration} detik pertama klip):
+- Untuk SETIAP klip, buat satu teks "hook" yang membuat penonton berhenti scroll dan penasaran
+- Maksimal ${maxChars} karakter, 1 kalimat singkat, bahasa santai sesuai bahasa video (Indonesia: pakai "kamu/gak", bukan bahasa baku)
+- Harus relevan dengan isi klip tersebut — jangan menjanjikan sesuatu yang tidak ada di klip
+- Gunakan teknik: rasa penasaran, angka/statistik mengejutkan, klaim berani, atau rahasia
+- Tanpa emoji, tanpa hashtag, tanpa tanda kutip
+- Contoh gaya: "Kamu gak akan percaya apa yang terjadi selanjutnya...", "99% orang salah soal ini!", "Ini rahasia yang CEO gak mau kamu tahu"
+`;
+}
+
+// ─── 💬 Auto-First Comment (BARU!) ────────────────────────────────────────
+/** Komentar pancingan dari AI (dibersihkan). Kosong → komentar cadangan dipakai saat posting (auto-comment.ts). */
+function resolveFirstComment(raw: unknown): string | undefined {
+  if (!isAutoCommentEnabled()) return undefined;
+  return sanitizeCommentText(raw) || undefined;
+}
+
+/** Hook dari AI (dibersihkan) → kalau kosong & HOOK_FALLBACK=true, buat dari judul klip. */
+function resolveHook(raw: unknown, title: string | undefined, index: number): string | undefined {
+  const cfg = getHookConfig();
+  if (!cfg.enabled) return undefined;
+  const cleaned = sanitizeHookText(raw, cfg.maxChars);
+  if (cleaned) return cleaned;
+  if (cfg.fallbackFromTitle) return buildFallbackHook(title || "", index) || undefined;
+  return undefined;
+}
+
+function generateTitle(text: string, videoTitle: string, index: number): string {
+  const words = text.split(" ").slice(0, 8).join(" ");
+  const opts = [
+    `${words}... #Shorts`,
+    `Fakta Mengejutkan: ${words.slice(0, 30)} #Shorts`,
+    `${videoTitle.slice(0, 30)} - Bagian ${index + 1} #Shorts`,
+  ];
+  return opts[index % opts.length].slice(0, 70);
+}
+
+function generateDescription(text: string): string {
+  return text.slice(0, 120) + (text.length > 120 ? "..." : "");
+}
+
+function generateTags(text: string, videoTitle: string): string[] {
+  const baseTags = ["shorts", "viral", "trending", "fyp"];
+  const titleWords = videoTitle
+    .split(" ")
+    .filter((w) => w.length > 3)
+    .map((w) => w.toLowerCase())
+    .slice(0, 3);
+  return [...baseTags, ...titleWords].slice(0, 8);
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export async function generateShortsTitle(
+  clipContent: string,
+  videoContext: string,
+  language: string = "id"
+): Promise<string> {
+  const openai = getOpenAIClient();
+  const prompt = `Buat judul YouTube Shorts yang viral (maks 70 karakter) untuk klip:
+Konten: ${clipContent}
+Konteks: ${videoContext}
+Bahasa: ${language === "id" ? "Indonesia" : "English"}
+Kriteria: gunakan angka jika relevan, kata hook (Ternyata, Rahasia, SHOCKING), pertanyaan, tambah #Shorts.
+Hanya judul, tanpa penjelasan.`;
+
+  if (openai) {
+    try {
+      const res = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.8,
+        max_tokens: 100,
+      });
+      return res.choices[0]?.message?.content?.trim() || `${clipContent.slice(0, 50)} #Shorts`;
+    } catch {
+      /* fallthrough */
+    }
+  }
+
+  return `${videoContext.slice(0, 45)} - Momen Viral #Shorts`;
+}

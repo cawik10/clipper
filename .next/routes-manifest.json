@@ -1,0 +1,129 @@
+{
+  "version": 3,
+  "pages404": true,
+  "appType": "app",
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "onMatchHeaders": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/api/analytics/run",
+      "regex": "^/api/analytics/run(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/analytics/run(?:/)?$"
+    },
+    {
+      "page": "/api/claims/run",
+      "regex": "^/api/claims/run(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/claims/run(?:/)?$"
+    },
+    {
+      "page": "/api/cost/summary",
+      "regex": "^/api/cost/summary(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cost/summary(?:/)?$"
+    },
+    {
+      "page": "/api/drive/callback",
+      "regex": "^/api/drive/callback(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/drive/callback(?:/)?$"
+    },
+    {
+      "page": "/api/health",
+      "regex": "^/api/health(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/health(?:/)?$"
+    },
+    {
+      "page": "/api/monitor/run",
+      "regex": "^/api/monitor/run(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/monitor/run(?:/)?$"
+    },
+    {
+      "page": "/api/scheduler/run",
+      "regex": "^/api/scheduler/run(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/scheduler/run(?:/)?$"
+    },
+    {
+      "page": "/api/settings",
+      "regex": "^/api/settings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/settings(?:/)?$"
+    },
+    {
+      "page": "/api/telegram/webhook",
+      "regex": "^/api/telegram/webhook(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/telegram/webhook(?:/)?$"
+    },
+    {
+      "page": "/api/webhook/setup",
+      "regex": "^/api/webhook/setup(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/webhook/setup(?:/)?$"
+    },
+    {
+      "page": "/api/youtube/callback",
+      "regex": "^/api/youtube/callback(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/youtube/callback(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}
