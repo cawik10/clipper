@@ -162,7 +162,7 @@ export async function buildReframeFilter(
     const yExpr = buildPiecewiseExpr(keyframes, "y");
 
     const filterValue = [
-      `crop=${cropW}:${cropH}:${xExpr}:${yExpr}`,
+      `crop=${cropW}:${cropH}:'${xExpr}':'${yExpr}'`,
       `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}`,
       `setsar=1`,
     ].join(",");

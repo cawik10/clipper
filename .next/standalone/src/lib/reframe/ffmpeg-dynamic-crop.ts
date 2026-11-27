@@ -79,7 +79,7 @@ export function buildDynamicCropFilter(
   const yExpr = buildPiecewiseExpr(yPoints);
 
   const filter =
-    `crop=${cropWidth}:${cropHeight}:x=${xExpr}:y=${yExpr},` +
+    `crop=${cropWidth}:${cropHeight}:x='${xExpr}':y='${yExpr}',` +
     `scale=${targetWidth}:${targetHeight},setsar=1`;
 
   return { filter, cropWidth, cropHeight };
