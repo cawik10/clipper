@@ -4,24 +4,6 @@
  * Menghasilkan filter FFmpeg yang meng-crop video 9:16 secara DINAMIS
  * mengikuti posisi wajah/pembicara aktif, menggantikan "center crop"
  * statis yang dipakai mode `ASPECT_RATIO_MODE=crop` biasa.
- *
- * File ini TIDAK mengubah video-processor.ts / video-config.ts yang
- * sudah ada — ia hanya dipanggil dari satu titik tambahan di
- * video-processor.ts ketika `AUTO_REFRAME_ENABLED=true` DAN mode aktif
- * adalah `crop`. Kalau fitur nonaktif atau terjadi error apa pun,
- * fungsi ini otomatis fallback ke filter crop statis yang sudah ada
- * (lihat `buildFFmpegFilterArgs` di video-config.ts) — proses clipping
- * tidak akan pernah gagal gara-gara fitur ini.
- *
- * Alur singkat:
- *   1. Jalankan speaker-tracker.ts pada rentang waktu klip (startTime..endTime)
- *      untuk mendapatkan posisi wajah per sample waktu.
- *   2. Kalau tidak ada wajah terdeteksi → fallback.
- *   3. Hitung ukuran kotak crop 9:16 yang muat di frame sumber.
- *   4. Smoothing posisi wajah antar-sample (exponential moving average)
- *      supaya pergerakan crop halus, tidak "patah-patah".
- *   5. Bangun ekspresi FFmpeg `crop=w:h:x(t):y(t)` piecewise-linear dari
- *      titik-titik (waktu, x, y) hasil smoothing.
  */
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -92,7 +74,7 @@ function buildPiecewiseExpr(keyframes: Keyframe[], key: "x" | "y"): string {
     const b = keyframes[i + 1];
     const dt = Math.max(0.001, b.t - a.t);
     const interp = `(${a[key].toFixed(2)}+(${(b[key] - a[key]).toFixed(2)})*(t-${a.t.toFixed(3)})/${dt.toFixed(3)})`;
-    expr = `if(lt(t\\,${b.t.toFixed(3)})\\,${interp}\\,${expr})`;
+    expr = `if(lt(t,${b.t.toFixed(3)}),${interp},${expr})`;
   }
   return expr;
 }
@@ -142,13 +124,9 @@ export async function buildReframeFilter(
     const smoothed = smoothCenters(track.faces, cfg.smoothing);
 
     const keyframes: Keyframe[] = smoothed.map((f) => {
-      // Beri sedikit ruang ekstra di sekitar wajah (padding) lalu clamp
-      // supaya kotak crop tidak keluar dari batas frame sumber.
       const faceCenterX = f.cx * srcW;
       const faceCenterY = f.cy * srcH;
       const x = clamp(faceCenterX - cropW / 2, 0, Math.max(0, srcW - cropW));
-      // Sedikit bias ke atas (padding) supaya wajah tidak terlalu di
-      // tengah vertikal — umum dipakai di editor vertical video.
       const biasY = f.h * srcH * padding;
       const y = clamp(faceCenterY - cropH / 2 - biasY * 0.3, 0, Math.max(0, srcH - cropH));
       return { t: f.t, x, y };
@@ -161,8 +139,10 @@ export async function buildReframeFilter(
     const xExpr = buildPiecewiseExpr(keyframes, "x");
     const yExpr = buildPiecewiseExpr(keyframes, "y");
 
+    // Bungkus xExpr dan yExpr dengan tanda kutip tunggal ('...') agar FFmpeg
+    // tidak memecah ekspresi if(lt(t,...)) menjadi filter terpisah pada tanda koma.
     const filterValue = [
-      `crop=${cropW}:${cropH}:${xExpr}:${yExpr}`,
+      `crop=${cropW}:${cropH}:'${xExpr}':'${yExpr}'`,
       `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}`,
       `setsar=1`,
     ].join(",");
